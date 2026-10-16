@@ -12,6 +12,7 @@ import { PoiStore } from "./agent/store.mjs";
 import { createResolver, reverseGeocode } from "./agent/places.mjs";
 import { createLiveManager, distanceM } from "./agent/live.mjs";
 import { createMetrics } from "./agent/metrics.mjs";
+import { createBriefing } from "./agent/briefing.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 8000;
@@ -68,7 +69,8 @@ function broadcast(message) {
   for (const res of clients) res.write(data);
 }
 
-const live = createLiveManager({ apiKey: OPENAI_API_KEY, store, resolvePoi, metrics, broadcast, uiConnected: () => clients.size > 0 });
+const briefing = OPENAI_API_KEY ? createBriefing({ apiKey: OPENAI_API_KEY, metrics }) : null;
+const live = createLiveManager({ apiKey: OPENAI_API_KEY, store, resolvePoi, metrics, broadcast, uiConnected: () => clients.size > 0, briefing });
 
 // Chaque changement de l'état est poussé au navigateur (regroupé sur quelques ms) ; le navigateur
 // confirme l'affichage, ce qui mesure le délai d'actualisation de l'interface
@@ -201,6 +203,13 @@ const routes = {
       if (poi) live.appNote(`L'utilisateur vient d'arriver à « ${poi.place?.name || poi.name} ».`);
     }
     json(res, 200, { ok: true, version: store.version });
+  },
+
+  // Bouton « Effacer » de la liste : tous les lieux disparaissent (préférences gardées)
+  "POST /api/pois/clear": async (req, res) => {
+    const count = store.clearPois();
+    if (count) live.appNote("L'utilisateur a effacé tous les lieux depuis l'écran : la liste est vide. Ses préférences sont conservées. Ne parle plus des anciens lieux comme s'ils étaient sélectionnés.");
+    json(res, 200, { ok: true, removed: count, version: store.version });
   },
 
   // Cadenas posé ou retiré à la main dans la page : pin = { position: "index", index } ou null

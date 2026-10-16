@@ -208,7 +208,66 @@
     #poi-list-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
 
 
-    #poi-rows { flex: 1; overflow-y: auto; margin: 0; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); list-style: none; }
+    #poi-rows { flex: 1; overflow-y: auto; margin: 0; padding: 14px 16px 16px; list-style: none; }
+
+    /* Bouton discret « Effacer » (corbeille) en haut à droite de la liste */
+    #poi-list-head { position: relative; }
+    #erase-btn {
+      position: absolute; right: 16px; top: max(10px, env(safe-area-inset-top));
+      display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+      border: 1px solid #444; border-radius: 999px; background: none; color: #999;
+      font: 0.8rem system-ui, sans-serif; cursor: pointer;
+    }
+    #erase-btn:disabled { opacity: 0.35; cursor: default; }
+
+    /* Confirmation de l'effacement */
+    #confirm-erase {
+      position: fixed; inset: 0; z-index: 980;
+      display: flex; align-items: flex-end; justify-content: center;
+      background: rgba(0, 0, 0, 0.6);
+    }
+    #confirm-erase[hidden] { display: none; }
+    #confirm-erase .sheet {
+      width: 100%; max-width: 480px; margin: 0 16px max(16px, env(safe-area-inset-bottom));
+      padding: 20px; border-radius: 16px; background: #1b1b1b; text-align: center;
+    }
+    #confirm-erase p { margin: 0 0 6px; font-size: 1.1rem; }
+    #confirm-erase small { display: block; margin-bottom: 18px; color: #a0a0a0; }
+    #confirm-erase .actions { display: flex; gap: 10px; }
+    #confirm-erase button {
+      flex: 1; padding: 12px; border: 0; border-radius: 999px; font: 600 0.95rem system-ui, sans-serif; cursor: pointer;
+    }
+    #confirm-erase .cancel { background: #333; color: #fff; }
+    #confirm-erase .confirm { background: #c0392b; color: #fff; }
+
+    /* Bas de la liste : glisser vers le haut ouvre l'écran « Mes préférences » */
+    #prefs-handle {
+      flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px;
+      padding: 8px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid #333;
+      color: #a0a0a0; font-size: 0.85rem; touch-action: none; user-select: none; cursor: pointer;
+    }
+
+    /* Écran « Mes préférences » : troisième panneau, par-dessus la liste */
+    #prefs-panel {
+      position: fixed; inset: 0; z-index: 930;
+      display: flex; flex-direction: column; background: #000;
+      transform: translateY(100%); transition: transform 0.3s ease; visibility: hidden;
+    }
+    #prefs-panel.open { transform: none; visibility: visible; }
+    #prefs-head {
+      flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px;
+      padding: max(10px, env(safe-area-inset-top)) 16px 14px; touch-action: none; user-select: none; cursor: pointer;
+    }
+    #prefs-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
+    #prefs-body { flex: 1; overflow-y: auto; padding: 4px 16px max(16px, env(safe-area-inset-bottom)); }
+    .pref-row { display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid #333; }
+    .pref-row:first-child { border-top: 1px solid #333; }
+    .pref-label { color: #a0a0a0; }
+    .pref-value { text-align: right; color: #fff; }
+    .pref-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+    .pref-chips span { padding: 3px 10px; border-radius: 999px; background: #e4572e; color: #fff; font-size: 0.85rem; }
+    .pref-empty { padding: 16px 0; color: #a0a0a0; font-style: italic; }
+    .pref-hint { margin-top: 18px; font-size: 0.85rem; color: #777; text-align: center; }
     /* Total de l'itinéraire, sous la dernière étape à visiter */
     .route-total { padding: 16px 0 0; font-size: 1.05rem; color: #fff; }
     .route-total span { color: #e4572e; }
@@ -354,9 +413,36 @@
     <div id="poi-list-head" role="button" aria-label="Revenir à la carte">
       <div class="grip"></div>
       <h2>Les lieux</h2>
+      <button id="erase-btn" aria-label="Effacer tous les lieux">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4zm-3 6h12l-1 12H7z"/></svg>
+        Effacer
+      </button>
     </div>
     <ul id="poi-rows"></ul>
+    <div id="prefs-handle" role="button" aria-label="Voir mes préférences">
+      <div class="grip"></div>
+      Mes préférences
+    </div>
   </section>
+
+  <section id="prefs-panel" aria-label="Mes préférences">
+    <div id="prefs-head" role="button" aria-label="Revenir à la liste des lieux">
+      <div class="grip"></div>
+      <h2>Mes préférences</h2>
+    </div>
+    <div id="prefs-body"></div>
+  </section>
+
+  <div id="confirm-erase" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-erase-title">
+    <div class="sheet">
+      <p id="confirm-erase-title">Effacer tous les lieux ?</p>
+      <small>La liste et la carte repartent de zéro. Tes préférences sont conservées.</small>
+      <div class="actions">
+        <button class="cancel">Annuler</button>
+        <button class="confirm">Effacer</button>
+      </div>
+    </div>
+  </div>
 
   <div id="list-bubble" hidden></div>
 
@@ -851,6 +937,8 @@
       }
 
       unplacedPois = state.pois.filter((p) => p.status !== "resolved");
+      preferences = state.preferences;
+      if (prefsPanelEl.classList.contains("open")) renderPrefs();
       renderSteps();
       if (changed || pinsChanged) {
         routeStale = true;
@@ -1747,6 +1835,7 @@
       if (visited.length) items.push(el("li", "section-title", "Déjà visité"), ...visited.map((poi) => buildPoiRow(poi, "visited")));
       if (excluded.length) items.push(el("li", "section-title", "Exclus"), ...excluded.map((poi) => buildPoiRow(poi, "excluded")));
       poiRowsEl.replaceChildren(...items);
+      eraseBtn.disabled = !pois.length && !unplacedPois.length;
       if (poiListEl.classList.contains("open")) fitDescriptions();
     }
 
@@ -1898,6 +1987,7 @@
     }
 
     function closePoiList() {
+      closePrefs();
       poiListEl.classList.remove("open");
       document.body.classList.remove("list-open");
       if (routeAnimPending && routeVisible) animateRoute();
@@ -1949,10 +2039,70 @@
     nextBtn.addEventListener("click", showDepartureLandmark);
     document.getElementById("route-toggle").addEventListener("change", (e) => setRouteVisible(e.target.checked));
 
+    // ---- Effacer tous les lieux (avec confirmation) ----
+    const eraseBtn = document.getElementById("erase-btn");
+    const confirmEraseEl = document.getElementById("confirm-erase");
+    eraseBtn.addEventListener("click", () => { confirmEraseEl.hidden = false; });
+    confirmEraseEl.querySelector(".cancel").addEventListener("click", () => { confirmEraseEl.hidden = true; });
+    confirmEraseEl.addEventListener("click", (e) => { if (e.target === confirmEraseEl) confirmEraseEl.hidden = true; });
+    confirmEraseEl.querySelector(".confirm").addEventListener("click", () => {
+      confirmEraseEl.hidden = true;
+      api("/api/pois/clear", {}); // la liste vide revient du serveur et met la carte à jour
+    });
+
+    // ---- Écran « Mes préférences » (glisser vers le haut depuis le bas de la liste) ----
+    const prefsPanelEl = document.getElementById("prefs-panel");
+    const prefsBodyEl = document.getElementById("prefs-body");
+    let preferences = null;
+
+    const CATEGORY_PLURALS = {
+      restaurant: "Restaurants", museum: "Musées", monument: "Monuments", garden: "Jardins",
+      viewpoint: "Points de vue", activity: "Activités", parking: "Parkings", other: "Autres lieux",
+    };
+
+    function renderPrefs() {
+      const p = preferences || {};
+      const rows = [];
+      const row = (label, value) => {
+        const r = el("div", "pref-row");
+        r.append(el("span", "pref-label", label));
+        if (typeof value === "string") r.append(el("span", "pref-value", value));
+        else r.append(value);
+        rows.push(r);
+      };
+      if (p.excluded_categories?.length) {
+        const chips = el("div", "pref-chips");
+        p.excluded_categories.forEach((c) => chips.append(el("span", null, CATEGORY_PLURALS[c] || c)));
+        row("Je ne veux plus", chips);
+      }
+      if (p.budget) row("Budget", p.budget);
+      if (p.cuisine) row("Cuisine", p.cuisine);
+      if (p.max_walk_minutes) row("Marche maximale", `${p.max_walk_minutes} min`);
+      if (p.quietness) row("Ambiance", p.quietness);
+      if (p.time_constraints) row("Horaires", p.time_constraints);
+      if (p.transport && p.transport !== "à pied") row("Déplacement", p.transport);
+      (p.notes || []).forEach((note) => row("Note", note));
+      if (!rows.length) rows.push(el("p", "pref-empty", "Aucune préférence pour l'instant."));
+      prefsBodyEl.replaceChildren(...rows, el("p", "pref-hint", "Pour changer une préférence, dis-le au guide (« finalement, les restaurants c'est bon »)."));
+    }
+
+    function openPrefs() {
+      renderPrefs();
+      prefsPanelEl.classList.add("open");
+    }
+
+    function closePrefs() {
+      prefsPanelEl.classList.remove("open");
+    }
+
+    onVerticalSwipe(document.getElementById("prefs-handle"), { up: openPrefs, tap: openPrefs });
+    onVerticalSwipe(document.getElementById("prefs-head"), { down: closePrefs, tap: closePrefs });
+
     // En-tête de la liste (doigt ou souris) : la liste suit le geste ; un simple toucher la ferme
     const listHead = document.getElementById("poi-list-head");
     let headDrag = null;
     listHead.addEventListener("pointerdown", (e) => {
+      if (e.target.closest("#erase-btn")) return; // le bouton « Effacer » a son propre geste
       headDrag = { y: e.clientY, t: e.timeStamp };
       listHead.setPointerCapture(e.pointerId);
     });

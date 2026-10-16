@@ -26,8 +26,8 @@ const NUDGE_EVERY_MS = 9000;               // écart minimal entre deux relances
 const NUDGE_MAX = 3;                       // relances au maximum par recherche
 const TRANSCRIPT_FLUSH_MS = 1200;          // regroupe les fragments de transcription pour le journal
 
-const NUDGE_FIRST = "La recherche continue en arrière-plan. Dis-le en une courte phrase, puis parle de la ville de l'utilisateur pour lui donner des idées : ses quartiers et leurs ambiances, son histoire, ses incontournables, une anecdote. Ne pose aucune question. Dès que le résultat arrive, termine ta phrase et donne-le.";
-const NUDGE_AGAIN = "La recherche est toujours en cours en arrière-plan. Rappelle-le en quelques mots et continue à parler de la ville (autre quartier, autre époque ou autre anecdote), sans poser de question.";
+const NUDGE_FIRST = "La recherche continue en arrière-plan. Dis-le en une courte phrase, puis donne des idées à l'utilisateur : d'abord la météo des prochains jours, puis les événements prévus cette semaine, d'après les informations [APP] reçues ; à défaut, parle de la ville (quartiers, histoire, anecdotes). Ne pose aucune question. Dès que le résultat arrive, termine ta phrase et donne-le.";
+const NUDGE_AGAIN = "La recherche est toujours en cours en arrière-plan. Rappelle-le en quelques mots et continue : un autre événement prévu cette semaine si tu n'en as pas encore parlé, sinon la ville (autre quartier, autre époque ou autre anecdote), sans poser de question.";
 
 export function distanceM(a, b) {
   const rad = (d) => (d * Math.PI) / 180;
@@ -36,7 +36,7 @@ export function distanceM(a, b) {
   return 12742000 * Math.asin(Math.sqrt(h));
 }
 
-export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcast, uiConnected }) {
+export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcast, uiConnected, briefing }) {
   let session = null; // une seule conversation à la fois (prototype mono-utilisateur)
 
   function describePlace(place) {
@@ -100,6 +100,7 @@ export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcas
     metrics.time("session_create_ms", Date.now() - started);
     session = newSession(result.session.id);
     attachSideband(session);
+    sendBriefing(session);
     return { session: { id: result.session.id }, transport: { type: "webrtc", sdp: result.transport.sdp } };
   }
 
@@ -136,6 +137,25 @@ export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcas
     };
   }
 
+  // Météo et événements de la semaine, préparés pendant que la conversation démarre, puis transmis
+  // au guide sans qu'il les lise : il s'en sert pendant l'attente des recherches
+  async function sendBriefing(s) {
+    if (!briefing) return;
+    const started = Date.now();
+    const text = await briefing(store.context).catch(() => null);
+    metrics.time("briefing_ms", Date.now() - started);
+    if (!text) return;
+    await s.opened;
+    if (session !== s || s.closing) return;
+    console.log("[briefing]", text.replace(/\n/g, " | ").slice(0, 300));
+    send(s, {
+      type: "session.thinking.append",
+      event_id: `briefing_${Date.now()}`,
+      delegation_id: null,
+      content: `[APP] Sujets pour les moments d'attente pendant une recherche, dans cet ordre : d'abord la météo, puis les événements à venir.\n${text}`.slice(0, 1500),
+    });
+  }
+
   // ---- Connexion de suivi (sideband) ----
 
   function attachSideband(s) {
@@ -143,6 +163,7 @@ export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcas
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     s.ws = ws;
+    s.opened = new Promise((resolve) => ws.once("open", resolve));
     ws.on("open", () => console.log("[live] sideband connecté", s.id));
     ws.on("message", (data) => {
       let event;

@@ -367,6 +367,17 @@ export class PoiStore extends EventEmitter {
     return poi;
   }
 
+  // Bouton « Effacer » : tous les lieux sont retirés, les préférences et le contexte sont gardés
+  clearPois() {
+    const removed = [...this.pois.values()];
+    if (!removed.length) return 0;
+    this.pois.clear();
+    this.version++;
+    this.history.push({ version: this.version, removedNames: new Set(removed.map((p) => normalize(p.name))), replaced: true });
+    this.emit("change", { added: [], removed });
+    return removed.length;
+  }
+
   // ---- Étapes figées (cadenas), demandées par le modèle (pin_steps) ou posées à la main ----
 
   // Nombre d'étapes à visiter (lieux placés sur la carte, cochés, pas encore visités)
