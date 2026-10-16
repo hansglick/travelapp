@@ -108,6 +108,7 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
       id,
       ws: null,
       opened: null,
+      createdAt: Date.now(),
       lastActivity: Date.now(),
       lastSpeechAt: 0,              // dernière parole entendue (utilisateur ou guide)
       lastInputEndMs: null,
@@ -165,15 +166,16 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
     });
     ws.on("close", (code) => {
       console.log("[live] sideband fermé", code);
-      if (session === s) finish(s, s.closing ? "closed" : "connection_lost");
+      finish(s, s.closing ? "closed" : "connection_lost");
     });
     ws.on("error", (err) => console.error("[live] sideband", err.message));
 
-    // Garde-fous de coût : inactivité prolongée et durée maximale
+    // Garde-fous de coût : inactivité prolongée et durée maximale. Chaque minuterie ne ferme que SA
+    // session (jamais celle qui l'a remplacée).
     s.timers.push(setInterval(() => {
-      if (Date.now() - s.lastActivity > IDLE_CLOSE_MS) close("idle");
+      if (Date.now() - s.lastActivity > IDLE_CLOSE_MS) close("idle", s);
     }, 15000));
-    s.timers.push(setTimeout(() => close("max_duration"), MAX_SESSION_MS));
+    s.timers.push(setTimeout(() => close("max_duration", s), MAX_SESSION_MS));
     s.timers.push(setInterval(() => nudgeDuringSearch(s), 1000));
   }
 
@@ -184,7 +186,19 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
   function onEvent(s, event) {
     switch (event.type) {
       case "session.started":
+        console.log(`[live] session démarrée (${Math.round((Date.now() - s.createdAt) / 1000)} s après la création)`);
         broadcast({ type: "voice", state: "listening" });
+        break;
+
+      // État de la connexion audio entre le navigateur et OpenAI
+      case "transport.failed":
+      case "transport.answered":
+      case "transport.ringing":
+        console.log(`[live] ${event.type}`, JSON.stringify(event).slice(0, 300));
+        break;
+
+      case "info":
+        console.log("[live] info", event.code, event.message);
         break;
 
       case "session.input_transcript.delta":
@@ -221,7 +235,7 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
 
       case "session.closed":
         metrics.voiceSeconds(event.usage?.seconds || 0);
-        console.log("[live] session fermée :", event.reason);
+        console.log(`[live] session fermée : ${event.reason} (${Math.round((Date.now() - s.createdAt) / 1000)} s après la création)`);
         finish(s, event.reason || "closed");
         break;
     }
@@ -328,24 +342,31 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
 
   // ---- Fermeture ----
 
-  async function close(reason = "close_requested") {
-    const s = session;
+  // s : la session à fermer (par défaut, la session en cours)
+  async function close(reason = "close_requested", s = session) {
     if (!s || s.closing) return;
     s.closing = true;
-    console.log("[live] fermeture demandée :", reason);
+    console.log(`[live] fermeture demandée : ${reason} (${Math.round((Date.now() - s.createdAt) / 1000)} s après la création)`);
     send(s, { type: "session.close", event_id: `close_${Date.now()}` });
     // Sans session.closed dans le délai : on libère tout de même (consommation finale non confirmée)
     s.timers.push(setTimeout(() => finish(s, `${reason} (fin non confirmée)`), CLOSE_TIMEOUT_MS));
   }
 
+  // Nettoyage d'une session terminée, qu'elle soit encore la session en cours ou qu'elle ait été
+  // remplacée entre-temps : ses minuteries sont toujours arrêtées
   function finish(s, reason) {
-    if (session !== s) return;
-    session = null;
+    if (s.finished) return;
+    s.finished = true;
     s.timers.forEach((t) => { clearTimeout(t); clearInterval(t); });
     clearTimeout(s.noteTimer);
     clearTimeout(s.userTimer);
     clearTimeout(s.guideTimer);
     if (s.ws && s.ws.readyState <= WebSocket.OPEN) s.ws.close();
+    if (session !== s) {
+      console.log(`[live] ancienne session nettoyée (${reason})`);
+      return;
+    }
+    session = null;
     console.log("[live] bilan de la session", JSON.stringify(metrics.summary()));
     broadcast({ type: "voice", state: "closed", reason });
   }

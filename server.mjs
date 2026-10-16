@@ -181,7 +181,12 @@ const routes = {
   },
 
   "POST /api/live/close": async (req, res) => {
-    await live.close("close_requested");
+    const info = await readJson(req).catch(() => ({}));
+    if (info.reason) {
+      const clip = (v) => String(v ?? "-").slice(0, 120);
+      console.log(`[live] le navigateur abandonne : ${clip(info.reason)} (connexion ${clip(info.connection)}, ICE ${clip(info.ice)}, canal ${clip(info.channel)})`);
+    }
+    await live.close(info.reason ? "browser_gave_up" : "close_requested");
     json(res, 200, { ok: true });
   },
 

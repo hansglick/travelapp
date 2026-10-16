@@ -2461,6 +2461,7 @@
           if (voice === v) endVoice(v, v.closing ? null : "La conversation a été interrompue.");
         });
         pc.addEventListener("connectionstatechange", () => {
+          console.log("[voix] connexion :", pc.connectionState, "| ICE :", pc.iceConnectionState);
           if (pc.connectionState === "failed") endVoice(v, "Connexion perdue avec le guide.");
         });
 
@@ -2526,6 +2527,14 @@
     function endVoice(v, message) {
       if (voice !== v) return;
       clearTimeout(v.closeTimer);
+      // Abandon côté navigateur : la session est fermée tout de suite (sinon elle reste ouverte et
+      // facturée jusqu'à la règle d'inactivité) et le serveur note la raison dans son journal
+      if (message && !v.closing) {
+        api("/api/live/close", {
+          reason: message,
+          connection: v.pc?.connectionState, ice: v.pc?.iceConnectionState, channel: v.dc?.readyState,
+        });
+      }
       v.mic?.getTracks().forEach((t) => t.stop());
       v.dc?.close();
       v.pc?.close();
