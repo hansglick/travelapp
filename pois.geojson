@@ -1,0 +1,90 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.4711202,
+          35.3719817
+        ]
+      },
+      "properties": {
+        "name": "Forteresse de Réthymnon (Fortezza)",
+        "category": "fortress",
+        "description": "Citadelle vénitienne bâtie de 1573 à 1580 sur la colline de Paleokastro, pour protéger la ville des pirates et des Ottomans. Ses remparts abritent la mosquée du sultan Ibrahim, l'église Sainte-Catherine et des vestiges de casernes. Très belle vue sur la mer au coucher du soleil.",
+        "placeId": "ChIJZ6OE0aN1mxQRjP0hr3KFa3E",
+        "plusCode": "9FCC+QC"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.4761049,
+          35.3705193
+        ]
+      },
+      "properties": {
+        "name": "Zefyros",
+        "category": "seafood",
+        "description": "Restaurant de poisson et fruits de mer sur le quai du port vénitien. Noté 4,7/5 sur Google.",
+        "placeId": "ChIJT0-ImaB1mxQRCwa4Q9I_JpI",
+        "plusCode": "9FCG+6C"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.4746396,
+          35.3699649
+        ]
+      },
+      "properties": {
+        "name": "Fontaine Rimondi",
+        "category": "fountain",
+        "description": "Fontaine vénitienne construite en 1626 par le recteur Alvise Rimondi. L'eau coule toujours de ses trois têtes de lion, encadrées de colonnes corinthiennes. Un point de rendez-vous au cœur de la vieille ville.",
+        "placeId": "ChIJp6oNxaB1mxQR0rgOv7K-AC8",
+        "plusCode": "9F9F+XV"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.474371,
+          35.3692839
+        ]
+      },
+      "properties": {
+        "name": "Mosquée Neratze",
+        "category": "mosque",
+        "description": "Ancienne église augustinienne Santa Maria, transformée en mosquée en 1657 par Gazi Hüseyin Pacha après la conquête ottomane. Son minaret, ajouté à la fin du XIXe siècle, est l'un des plus hauts de Crète. Le bâtiment accueille aujourd'hui des concerts.",
+        "placeId": "ChIJ9eYpGgB1mxQRCckMQDj5eVk",
+        "plusCode": "9F9F+MQ"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.4698629,
+          35.3679634
+        ]
+      },
+      "properties": {
+        "name": "Parking",
+        "category": "parking",
+        "description": "Parking à quelques minutes à pied de la forteresse et de la vieille ville.",
+        "placeId": "ChIJwyrt2sB1mxQR6gtNQ1we5Kg",
+        "plusCode": "9F99+5W"
+      }
+    }
+  ]
+}

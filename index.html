@@ -1,0 +1,2308 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Que fait-on ?</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #000;
+      color: #fff;
+    }
+    /* En-tête : bouton « Choisir » à gauche, titre centré sur la largeur de la page */
+    header {
+      display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px;
+      padding: 14px 16px 10px;
+      padding-top: max(14px, env(safe-area-inset-top));
+    }
+    /* Taille adaptée à la largeur de l'écran, pour que le titre reste centré à côté du bouton */
+    h1 { grid-column: 2; margin: 0; font-size: clamp(1.5rem, 7vw, 2.2rem); text-align: center; white-space: nowrap; }
+    #select-steps-btn { grid-column: 1; grid-row: 1; justify-self: start; }
+
+    /* Haut-parleur orange à droite du titre : lance / arrête la conversation avec le guide vocal */
+    #voice-btn {
+      grid-column: 3; grid-row: 1; justify-self: start; position: relative;
+      display: flex; align-items: center; justify-content: center;
+      width: 44px; height: 44px; padding: 0; border: 2px solid #e4572e; border-radius: 50%;
+      background: transparent; color: #e4572e; cursor: pointer;
+    }
+    #voice-btn svg { width: 26px; height: 26px; }
+    #voice-btn .wave { opacity: 0.35; }
+    #voice-btn.connecting { animation: voice-blink 1s ease-in-out infinite; }
+    #voice-btn.active { background: #e4572e; color: #fff; }
+    #voice-btn.active .wave { animation: voice-wave 1.2s ease-in-out infinite; }
+    #voice-btn.active .wave-2 { animation-delay: 0.3s; }
+    /* Le guide cherche : anneau qui tourne autour du bouton */
+    #voice-btn.working::after {
+      content: ""; position: absolute; inset: -6px; border-radius: 50%;
+      border: 2px solid transparent; border-top-color: #fff; border-right-color: #e4572e;
+      animation: voice-spin 0.9s linear infinite;
+    }
+    @keyframes voice-blink { 50% { opacity: 0.4; } }
+    @keyframes voice-wave { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+    @keyframes voice-spin { to { transform: rotate(360deg); } }
+
+    /* État de la conversation, en haut de la carte */
+    #voice-status {
+      position: fixed; z-index: 700; left: 50%; transform: translateX(-50%);
+      max-width: calc(100% - 48px); padding: 6px 14px; border-radius: 999px;
+      background: rgba(0, 0, 0, 0.8); color: #fff; font-size: 0.85rem; text-align: center;
+      pointer-events: none; opacity: 0; transition: opacity 0.3s;
+    }
+    #voice-status.visible { opacity: 1; }
+    #voice-status.error { background: #8b1e1e; }
+
+    /* Position de l'utilisateur : point bleu de 20 px + lueur qui pulse. L'élément fait 44 px pour
+       offrir une zone confortable où l'attraper au doigt et le faire glisser. */
+    .user-dot {
+      position: absolute; width: 44px; height: 44px; transform: translate(-50%, -50%);
+      cursor: grab; touch-action: none; user-select: none;
+    }
+    .user-dot.dragging { cursor: grabbing; }
+
+    /* Flèche verte « direction à prendre » (bouton Next) : élément de taille nulle posé sur le point
+       bleu, tourné selon le cap ; la flèche part juste au-dessus du point */
+    .direction-arrow { position: absolute; width: 0; height: 0; pointer-events: none; }
+    .direction-arrow svg {
+      position: absolute; left: -14px; bottom: 0;
+      filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
+    }
+    .user-dot::before, .user-dot::after { content: ""; position: absolute; inset: 12px; border-radius: 50%; }
+    .user-dot::before {
+      z-index: 1; background: #1a73e8; border: 3px solid #fff;
+      box-shadow: 0 0 8px 2px rgba(26, 115, 232, 0.7);
+    }
+    .user-dot::after { background: rgba(26, 115, 232, 0.55); animation: user-pulse 2s ease-out infinite; }
+    @keyframes user-pulse {
+      from { transform: scale(1); opacity: 0.9; }
+      to { transform: scale(4); opacity: 0; }
+    }
+    #map {
+      flex: 1;
+      margin: 0 16px;
+      border: 3px solid #2f3540;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    /* Bulle des POI : on remplace l'habillage blanc de Google par un fond noir */
+    .gm-style .gm-style-iw-c {
+      background: #000;
+      padding: 0 !important;
+      max-width: none !important; /* la taille vient de .poi-card */
+      max-height: none !important;
+      border-radius: 14px;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+    }
+    .gm-style .gm-style-iw-d { overflow: hidden !important; padding: 0 !important; max-height: none !important; }
+    .gm-style .gm-style-iw-tc::after { background: #000; }
+
+    /* Largeur et hauteur fixées en JS pour reprendre les proportions de l'écran */
+    .poi-card { display: flex; flex-direction: column; color: #fff; font-family: inherit; overflow-wrap: break-word; }
+    .poi-head { display: flex; align-items: flex-start; gap: 8px; padding: 14px 14px 0 16px; }
+    .poi-head h3 { flex: 1; min-width: 0; margin: 0; font-size: 1rem; font-weight: normal; line-height: 1.3; color: #e4572e; }
+    .poi-close {
+      flex: none; width: 28px; height: 28px; margin: -4px -4px 0 0;
+      border: 0; border-radius: 50%; background: #222; color: #fff;
+      font-size: 18px; line-height: 28px; cursor: pointer;
+    }
+    .poi-head { flex: none; }
+    .poi-desc { flex: 0 1 auto; overflow-y: auto; margin: 8px 16px 14px; font-size: 0.75rem; line-height: 1.45; color: #d6d6d6; text-align: center; }
+    .poi-photo {
+      position: relative; display: block; flex: 1 1 auto; min-height: 80px; width: 100%; padding: 0;
+      border: 8px solid #000; border-radius: 14px;
+      background: #1a1a1a center / cover no-repeat; background-clip: padding-box; cursor: pointer;
+    }
+    .poi-photo-img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 6px; }
+    .poi-photo-count {
+      position: absolute; right: 8px; bottom: 8px; padding: 3px 8px;
+      border-radius: 999px; background: rgba(0, 0, 0, 0.7); color: #fff; font-size: 0.75rem;
+    }
+    .poi-photo-msg { margin: 0 16px 14px; font-size: 0.8rem; color: #888; }
+    /* Sources web du lieu (recherche du guide), cliquables */
+    .poi-sources { flex: none; margin: -6px 16px 12px; font-size: 0.7rem; color: #999; text-align: center; }
+    .poi-sources a { color: #8ab4f8; margin: 0 4px; }
+
+    /* Carrousel plein écran */
+    #carousel {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+      background: rgba(0, 0, 0, 0.96);
+      touch-action: none; user-select: none;
+    }
+    #carousel[hidden] { display: none; }
+    #carousel img {
+      /* Cadre vertical aux proportions de l'écran (taille fixée en JS) :
+         les photos horizontales sont recadrées au centre */
+      object-fit: cover;
+      border: 3px solid #fff; border-radius: 8px;
+      -webkit-user-drag: none; pointer-events: none;
+    }
+    #carousel-close {
+      position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px;
+      width: 40px; height: 40px; border: 0; border-radius: 50%;
+      background: #222; color: #fff; font-size: 24px; cursor: pointer;
+    }
+    #carousel-caption { margin: 0; font-size: 0.75rem; color: #999; }
+    #carousel-dots { display: flex; gap: 8px; }
+    #carousel-dots span { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+    #carousel-dots span.active { background: #fff; }
+
+    /* Barre sous la carte : glisser vers le haut ouvre la liste des lieux ; interrupteur
+       « Afficher l'itinéraire » et bouton « Next » (repère pour partir dans la bonne direction) */
+    #list-handle {
+      flex: none; display: flex; flex-direction: column; align-items: center; gap: 8px;
+      padding: 8px 16px max(12px, env(safe-area-inset-bottom));
+      touch-action: none; user-select: none;
+    }
+    .bottom-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+    #select-steps-btn, #next-btn {
+      flex: none; padding: 8px 14px; border: 0; border-radius: 999px;
+      background: #e4572e; color: #fff; font: 600 0.9rem system-ui, sans-serif; cursor: pointer;
+    }
+    #next-btn:disabled { opacity: 0.5; cursor: wait; }
+    .route-toggle { display: flex; align-items: center; gap: 8px; color: #fff; font-size: 0.85rem; cursor: pointer; }
+    .route-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+    .switch {
+      position: relative; flex: none; width: 44px; height: 26px; border-radius: 13px;
+      background: #444; transition: background 0.2s;
+    }
+    .switch::after {
+      content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+      background: #fff; transition: transform 0.2s;
+    }
+    .route-toggle input:checked + .switch { background: #e4572e; }
+    .route-toggle input:checked + .switch::after { transform: translateX(18px); }
+    .route-toggle input:focus-visible + .switch { outline: 2px solid #fff; outline-offset: 2px; }
+    .grip { width: 44px; height: 5px; border-radius: 3px; background: #555; }
+
+    /* Liste des lieux : panneau plein écran qui monte depuis le bas */
+    #poi-list {
+      position: fixed; inset: 0; z-index: 900;
+      display: flex; flex-direction: column;
+      background: #000;
+      transform: translateY(100%); transition: transform 0.3s ease; visibility: hidden;
+    }
+    #poi-list.open { transform: none; visibility: visible; }
+
+    /* Écran carte : recule et s'assombrit quand la liste est ouverte, puis revient vers nous
+       quand on fait glisser la liste vers le bas (valeurs intermédiaires fixées en JS) */
+    #app {
+      flex: 1; min-height: 0; display: flex; flex-direction: column;
+      transform-origin: 50% 0; transition: transform 0.3s ease, filter 0.3s ease;
+    }
+    body.list-open #app { transform: scale(0.92); filter: brightness(0.35); }
+    body.dragging #app, body.dragging #poi-list { transition: none; }
+    body.dragging #poi-list { border-radius: 18px 18px 0 0; box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.8); }
+    #poi-list-head {
+      flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px;
+      padding: max(10px, env(safe-area-inset-top)) 16px 14px;
+      touch-action: none; user-select: none; cursor: pointer;
+    }
+    #poi-list-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
+
+
+    #poi-rows { flex: 1; overflow-y: auto; margin: 0; padding: 14px 16px max(16px, env(safe-area-inset-bottom)); list-style: none; }
+    /* Total de l'itinéraire, sous la dernière étape à visiter */
+    .route-total { padding: 16px 0 0; font-size: 1.05rem; color: #fff; }
+    .route-total span { color: #e4572e; }
+    /* Titres des sections « À visiter », « Déjà visité », « Exclus » */
+    .section-title {
+      padding: 22px 0 10px; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: #a0a0a0;
+    }
+    .section-title:first-child { padding-top: 0; }
+    .section-empty { padding: 16px 0; font-size: 0.9rem; font-style: italic; color: #a0a0a0; border-top: 1px solid #555; }
+    .poi-row { display: flex; align-items: flex-start; gap: 12px; padding: 16px 0; border-bottom: 1px solid #555; cursor: pointer; background: #000; }
+    .section-title + .poi-row { border-top: 1px solid #555; }
+    .poi-row.row-dragging { background: #161616; }
+    .poi-row-check { flex: none; width: 22px; height: 22px; margin: 4px 0 0; accent-color: #e4572e; cursor: pointer; }
+    .poi-row-main { flex: 1; min-width: 0; }
+    .poi-row-name { display: flex; align-items: flex-start; gap: 10px; margin: 0; font-size: 1.35rem; color: #e4572e; }
+    /* Pastille orange numérotée (numéro de l'étape en blanc, bordure blanche) */
+    .poi-row-step {
+      flex: none; display: flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; margin-top: 0.08em; border: 2px solid #fff; border-radius: 50%;
+      background: #e4572e; color: #fff; font-size: 0.9rem; font-weight: 700;
+    }
+    .poi-row-leg { margin: 4px 0 0 36px; font-size: 0.8rem; color: #a0a0a0; }
+    .poi-row-desc { margin: 6px 0 0 36px; font-size: 0.9rem; font-style: italic; color: #fff; white-space: nowrap; overflow: hidden; }
+    .poi-row-handle {
+      flex: none; display: flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; color: #888; font-size: 1.4rem; cursor: grab; touch-action: none; user-select: none;
+    }
+    /* Cadenas : fermé (orange) = numéro d'étape figé ; ouvert (gris) = étape libre pour l'optimisation */
+    .poi-row-lock {
+      flex: none; display: flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; padding: 0; border: 0; background: none; color: #666; cursor: pointer;
+    }
+    .poi-row-lock.locked { color: #e4572e; }
+    /* Colonne cadenas + logo « images » (ouvre directement le carrousel de photos) */
+    .poi-row-tools { flex: none; display: flex; flex-direction: column; gap: 4px; }
+    .poi-row-photos {
+      display: flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px; padding: 0; border: 0; background: none; cursor: pointer;
+    }
+
+    /* Carte du repère (bouton « Next ») : « pop » façon dessin animé au centre de la carte, puis fondu */
+    #landmark-pop {
+      position: fixed; z-index: 800; transform: translate(-50%, -50%);
+      opacity: 1; transition: opacity 0.8s ease-in-out;
+    }
+    #landmark-pop.pop { animation: card-pop 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+    @keyframes card-pop {
+      0%   { transform: translate(-50%, -50%) scale(0); }
+      55%  { transform: translate(-50%, -50%) scale(1.12); }
+      75%  { transform: translate(-50%, -50%) scale(0.96); }
+      100% { transform: translate(-50%, -50%) scale(1); }
+    }
+    #landmark-pop.fade-out { opacity: 0; }
+    #landmark-pop .poi-card {
+      background: #000; border: 1px solid #333; border-radius: 14px; overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+    }
+
+    /* Bulle d'un POI affichée par-dessus la liste (même contenu que sur la carte) */
+    #list-bubble {
+      position: fixed; inset: 0; z-index: 950;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.65);
+    }
+    #list-bubble[hidden] { display: none; }
+    #list-bubble .poi-card {
+      background: #000; border: 1px solid #333; border-radius: 14px; overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8); animation: bubble-in 0.2s ease-out;
+    }
+    @keyframes bubble-in { from { transform: scale(0.9); opacity: 0; } }
+    /* POI retiré de l'itinéraire : grisé, sans numéro, cadenas ni poignée */
+    .poi-row.excluded .poi-row-main { opacity: 0.35; }
+    .poi-row.excluded .poi-row-step { background: #777; border-color: #999; }
+    .poi-row.excluded .poi-row-handle,
+    .poi-row.excluded .poi-row-lock { visibility: hidden; }
+    /* POI déjà visité : pastille gris foncé avec ✓ blanc, sans case, cadenas ni poignée */
+    .poi-row.visited .poi-row-step { background: #3a3a3a; }
+    .poi-row.visited .poi-row-check,
+    .poi-row.visited .poi-row-handle,
+    .poi-row.visited .poi-row-lock { visibility: hidden; }
+    /* Lieu proposé par le guide mais pas encore placé sur la carte (recherche Google en cours ou échouée) */
+    .poi-row.unplaced { cursor: default; }
+    .poi-row.unplaced .poi-row-name { color: #c9c9c9; }
+    .poi-row.unplaced .poi-row-step { background: #555; }
+    .poi-row.unplaced.pending .poi-row-step { animation: voice-blink 1s ease-in-out infinite; }
+
+    /* Étiquette de chaque portion, placée sur le tracé juste avant l'étape d'arrivée : une bulle
+       « landmark » (nom de l'étape) au-dessus d'une bulle distance · durée, qui forment un seul objet */
+    .leg-label {
+      position: absolute; transform: translate(-50%, -50%);
+      display: flex; flex-direction: column; align-items: center;
+      white-space: nowrap; pointer-events: none; opacity: 1; transition: opacity 1.5s ease-in-out;
+    }
+    .leg-name, .leg-info {
+      border-radius: 999px; background: #1a73e8; color: #fff;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); font-family: system-ui, sans-serif;
+    }
+    /* La bulle du nom est posée sur la bulle d'information, qui passe légèrement dessous */
+    .leg-name { position: relative; z-index: 1; padding: 4px 10px; font-size: 13px; font-weight: 700; }
+    .leg-info { margin-top: -4px; padding: 6px 8px 3px; font-size: 11px; font-weight: 600; }
+    /* Apparition « cartoon » : jaillit, gonfle trop, rebondit à sa taille */
+    .leg-label.pop { animation: leg-pop 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+    @keyframes leg-pop {
+      0%   { transform: translate(-50%, -50%) scale(0); }
+      55%  { transform: translate(-50%, -50%) scale(1.45); }
+      75%  { transform: translate(-50%, -50%) scale(0.88); }
+      90%  { transform: translate(-50%, -50%) scale(1.06); }
+      100% { transform: translate(-50%, -50%) scale(1); }
+    }
+    .leg-label.fade-out { opacity: 0; }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <header>
+      <h1>Que fait-on ?</h1>
+      <button id="select-steps-btn" aria-label="Choisir les étapes">Choisir</button>
+      <button id="voice-btn" aria-label="Parler au guide" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 9v6h4l5 5V4L7 9z" fill="currentColor"/>
+          <path class="wave" d="M15.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path class="wave wave-2" d="M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </header>
+    <div id="voice-status" role="status" aria-live="polite"></div>
+    <div id="map"></div>
+    <div id="list-handle">
+      <div class="grip"></div>
+      <div class="bottom-controls">
+        <label class="route-toggle">
+          <input type="checkbox" id="route-toggle">
+          <span class="switch"></span>
+          Afficher l'itinéraire
+        </label>
+        <button id="next-btn">Next</button>
+      </div>
+    </div>
+  </main>
+
+  <section id="poi-list" aria-label="Liste des lieux">
+    <div id="poi-list-head" role="button" aria-label="Revenir à la carte">
+      <div class="grip"></div>
+      <h2>Les lieux</h2>
+    </div>
+    <ul id="poi-rows"></ul>
+  </section>
+
+  <div id="list-bubble" hidden></div>
+
+  <div id="carousel" hidden>
+    <button id="carousel-close" aria-label="Fermer">×</button>
+    <img id="carousel-img" alt="" crossorigin="anonymous">
+    <p id="carousel-caption"></p>
+    <div id="carousel-dots"></div>
+  </div>
+
+  <script>
+    // Clé Google Maps : fournie par le serveur au chargement (elle n'est pas écrite dans le code)
+    let GOOGLE_MAPS_API_KEY = "";
+
+    // Position de départ fixe : au sud de la Fortezza, Réthymnon
+    const DEFAULT_POSITION = { lat: 35.3700, lng: 24.4715 };
+
+    // Style épuré et contrasté : rues sombres sur bâti clair, parcs, eau et zones touristiques
+    const MAP_STYLE = [
+      { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+      { elementType: "labels.text.fill", stylers: [{ color: "#3a3a3a" }] },
+      { elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }, { weight: 3 }] },
+
+      // Fond naturel clair. Le bâti (landscape.man_made) garde les couleurs Google :
+      // les zones touristiques jaunes en font partie et disparaissent si on lui impose une couleur.
+      { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#f4f1e8" }] },
+
+      // Lieux : tout masqué sauf les parcs
+      { featureType: "poi", stylers: [{ visibility: "off" }] },
+      { featureType: "poi.park", elementType: "geometry", stylers: [{ visibility: "on" }, { color: "#8fcf7e" }] },
+
+      { featureType: "transit", stylers: [{ visibility: "off" }] },
+      { featureType: "administrative", elementType: "geometry", stylers: [{ visibility: "off" }] },
+      { featureType: "administrative.land_parcel", stylers: [{ visibility: "off" }] },
+      { featureType: "administrative.neighborhood", stylers: [{ visibility: "off" }] },
+
+      // Routes et rues : sombres, noms en blanc
+      { featureType: "road", elementType: "geometry.fill", stylers: [{ color: "#2f3540" }] },
+      { featureType: "road", elementType: "geometry.stroke", stylers: [{ visibility: "off" }] },
+      { featureType: "road.highway", elementType: "geometry.fill", stylers: [{ color: "#1b1f26" }] },
+      { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#ffffff" }] },
+      { featureType: "road", elementType: "labels.text.stroke", stylers: [{ color: "#2f3540" }] },
+
+      // Eau : bleu franc, noms des fleuves visibles
+      { featureType: "water", elementType: "geometry", stylers: [{ color: "#5aa9e6" }] },
+      { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#0f4c81" }] },
+    ];
+
+    // Icônes des POI par catégorie (catégories normalisées, les mêmes que celles du guide vocal) :
+    // couleur du rond + pictogramme blanc (grille 24×24)
+    const CATEGORIES = {
+      restaurant: {
+        label: "Restaurant",
+        color: "#e4572e",
+        glyph: '<path d="M6 2h1.5v7h1V2H10v7h1V2h1.5v8a3 3 0 0 1-2.2 2.9V22H8.2v-9.1A3 3 0 0 1 6 10zM18 2v20h-2.2v-8H14V7c0-2.8 1.6-5 4-5z"/>',
+      },
+      museum: {
+        label: "Musée",
+        color: "#e4572e",
+        glyph: '<path d="M12 2l10 5v2H2V7zM4 10.5h2.6v7.5H4zm4.5 0h2.6v7.5H8.5zm4.4 0h2.6v7.5h-2.6zm4.5 0H20v7.5h-2.6zM2 19.5h20V22H2z"/>',
+      },
+      monument: {
+        label: "Monument",
+        color: "#e4572e",
+        glyph: '<path d="M12 1l2.2 3.2L15.4 17H8.6L9.8 4.2zM6 18h12v2H6zM3.5 21h17v2h-17z"/>',
+      },
+      garden: {
+        label: "Jardin",
+        color: "#e4572e",
+        glyph: '<path d="M12 1.5a6 6 0 0 0-5.9 7A5 5 0 0 0 7 18.4h3.9V23h2.2v-4.6H17a5 5 0 0 0 .9-9.9A6 6 0 0 0 12 1.5z"/>',
+      },
+      viewpoint: {
+        label: "Point de vue",
+        color: "#e4572e",
+        glyph: '<path d="M12 5C6.5 5 2.7 8.6 1 12c1.7 3.4 5.5 7 11 7s9.3-3.6 11-7c-1.7-3.4-5.5-7-11-7z"/><circle cx="12" cy="12" r="4.2" fill="#e4572e"/><circle cx="12" cy="12" r="2.2"/>',
+      },
+      activity: {
+        label: "Activité",
+        color: "#e4572e",
+        glyph: '<path d="M12 1.8l3.1 6.4 7 .9-5.1 4.9 1.3 7-6.3-3.4-6.3 3.4 1.3-7L1.9 9.1l7-.9z"/>',
+      },
+      other: {
+        label: "Lieu",
+        color: "#e4572e",
+        glyph: '<path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 4a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/>',
+      },
+    };
+
+    // Icône d'un POI : rond orange + pictogramme blanc, avec en haut à droite une petite pastille
+    // portant le numéro de l'étape (blanc sur orange). Étape cadenassée : la pastille s'allonge
+    // et affiche un petit cadenas devant le numéro.
+    // Lieu déjà visité : pastille gris foncé avec une coche blanche à la place du numéro.
+    function poiIcon(category, step, locked = false, visited = false) {
+      const { color, glyph } = CATEGORIES[category] || CATEGORIES.other;
+      const number = (x) =>
+        `<text x="${x}" y="16.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#fff">${step}</text>`;
+      let badge = "";
+      if (visited) {
+        badge = `
+        <circle cx="42" cy="12" r="10" fill="#3a3a3a" stroke="#fff" stroke-width="2"/>
+        <path d="M37.5 12.2l3 3 6-6.2" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+      } else if (step && locked) {
+        badge = `
+        <rect x="31" y="2" width="30" height="20" rx="10" fill="#e4572e" stroke="#fff" stroke-width="2"/>
+        <path d="M38 11.5V9.5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="#fff" stroke-width="1.6"/>
+        <rect x="36.5" y="11.5" width="8" height="6" rx="1" fill="#fff"/>
+        ${number(52)}`;
+      } else if (step) {
+        badge = `
+        <circle cx="42" cy="12" r="10" fill="#e4572e" stroke="#fff" stroke-width="2"/>
+        ${number(42)}`;
+      }
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="62" height="54" viewBox="0 0 62 54">
+        <circle cx="22" cy="32" r="19" fill="${color}" stroke="#fff" stroke-width="3"/>
+        <g transform="translate(10 20)" fill="#fff">${glyph}</g>${badge}</svg>`;
+      return {
+        url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
+        scaledSize: new google.maps.Size(62, 54),
+        anchor: new google.maps.Point(22, 32),
+      };
+    }
+
+    // Photos des POI : récupérées en direct chez Google Places (10 au maximum par lieu, limite Google).
+    // On garde toutes les photos verticales, et au moins MIN_PHOTOS : s'il manque des verticales,
+    // on complète avec les plus proches du format vertical (recadrées à l'affichage). Google interdit
+    // de les stocker : seules leurs références sont gardées en mémoire le temps de la visite.
+    const MIN_PHOTOS = 4;
+    const photoCache = new Map();
+
+    // Proportions visées : celles de l'écran en portrait (hauteur / largeur).
+    // Sur un écran paysage (ordinateur), on vise un format de téléphone vertical.
+    function portraitRatio() {
+      const ratio = window.innerHeight / window.innerWidth;
+      return ratio > 1 ? ratio : 16 / 9;
+    }
+
+    // Photo demandée à la hauteur de l'écran (pixels réels), sans dépasser la limite Google.
+    // On ne limite que la hauteur : une photo horizontale garde ainsi assez de pixels
+    // pour être recadrée en vertical sans flou.
+    function photoUrl(photoName) {
+      const dpr = window.devicePixelRatio || 1;
+      const h = Math.min(4800, Math.round(window.innerHeight * dpr));
+      return `https://places.googleapis.com/v1/${photoName}/media?maxHeightPx=${h}&key=${GOOGLE_MAPS_API_KEY}`;
+    }
+
+    // Écart entre les proportions d'une photo et celles visées (0 = identiques)
+    function ratioGap(photo) {
+      return Math.abs(Math.log(photo.heightPx / photo.widthPx / portraitRatio()));
+    }
+
+    // Choix des photos parmi celles renvoyées par Google pour un lieu
+    function pickPhotos(photos = []) {
+      const sorted = photos
+        .filter((p) => p.widthPx && p.heightPx)
+        .sort((a, b) => ratioGap(a) - ratioGap(b)); // les plus proches du format de l'écran d'abord
+      // Les verticales sont en tête du tri : on en prend autant qu'il y en a, au moins MIN_PHOTOS
+      const verticalCount = sorted.filter((p) => p.heightPx > p.widthPx).length;
+      return sorted.slice(0, Math.max(verticalCount, MIN_PHOTOS)).map((p) => ({
+        url: photoUrl(p.name),
+        author: p.authorAttributions?.[0]?.displayName,
+      }));
+    }
+
+    async function getPhotos(placeId) {
+      if (!photoCache.has(placeId)) {
+        const request = fetch(`https://places.googleapis.com/v1/places/${placeId}?fields=photos&key=${GOOGLE_MAPS_API_KEY}`)
+          .then((r) => (r.ok ? r.json() : { photos: [] }))
+          .then(({ photos }) => pickPhotos(photos))
+          .catch(() => []);
+        photoCache.set(placeId, request);
+      }
+      return photoCache.get(placeId);
+    }
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text) node.textContent = text;
+      return node;
+    }
+
+    // Taille de la bulle : mêmes proportions que l'écran, en tenant dans la zone qui l'accueille
+    // (la carte, ou l'écran entier quand elle s'affiche par-dessus la liste)
+    function poiCardSize(container = document.getElementById("map")) {
+      const ratio = portraitRatio();
+      let width = Math.min(container.clientWidth * 0.84, 360);
+      let height = width * ratio;
+      const maxHeight = container.clientHeight * 0.9;
+      if (height > maxHeight) {
+        height = maxHeight;
+        width = height / ratio;
+      }
+      return { width: Math.round(width), height: Math.round(height) };
+    }
+
+    // Contenu de la bulle : titre (nom), description, puis photo (ouvre le carrousel).
+    // Les photos sont celles du lieu Google props.placeId, sauf si on les fournit déjà.
+    function buildPoiCard(props, size, onClose = closeBubble, photosReady = null) {
+      const card = el("div", "poi-card");
+      card.style.width = `${size.width}px`;
+      card.style.height = `${size.height}px`;
+      const head = el("div", "poi-head");
+      const close = el("button", "poi-close", "×");
+      close.setAttribute("aria-label", "Fermer");
+      close.addEventListener("click", onClose);
+      head.append(el("h3", null, props.name), close);
+      card.append(head);
+      if (props.description) card.append(el("p", "poi-desc", props.description));
+      if (props.sources?.length) card.append(buildSources(props.sources));
+
+      const msg = el("p", "poi-photo-msg", "Chargement des photos…");
+      card.append(msg);
+      (photosReady || (props.placeId ? getPhotos(props.placeId) : Promise.resolve([]))).then((photos) => {
+        if (!photos.length) {
+          msg.textContent = "Aucune photo disponible.";
+          return;
+        }
+        const photo = el("button", "poi-photo");
+        photo.setAttribute("aria-label", "Voir les photos");
+        photo.append(el("span", "poi-photo-count", `1 / ${photos.length}`));
+        photo.addEventListener("click", () => openCarousel(photos));
+        msg.replaceWith(photo);
+        // La zone photo n'a sa taille définitive qu'une fois insérée dans la bulle
+        requestAnimationFrame(async () => {
+          const canvas = await bubbleThumbnail(photos[0].url, photo.clientWidth, photo.clientHeight);
+          if (canvas) photo.prepend(canvas);
+        });
+      });
+      return card;
+    }
+
+    // Sources web sur lesquelles le guide s'est appuyé : liens visibles et cliquables (nom du site)
+    function buildSources(urls) {
+      const p = el("p", "poi-sources", "Sources :");
+      for (const url of urls) {
+        let host;
+        try {
+          host = new URL(url).hostname.replace(/^www\./, "");
+        } catch {
+          continue;
+        }
+        const a = el("a", null, host);
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        p.append(" ", a);
+      }
+      return p;
+    }
+
+    // Miniature de la bulle : la photo est réduite proprement aux dimensions exactes de la zone
+    // (pixels réels de l'écran), au lieu de laisser le navigateur la réduire d'un coup, ce qui crée
+    // du crénelage. La copie reste en mémoire le temps de la visite (Google interdit de la stocker).
+    const thumbnailCache = new Map();
+
+    function loadImage(url) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous"; // nécessaire pour dessiner la photo dans un canvas
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = url;
+      });
+    }
+
+    function drawStep(source, sx, sy, sw, sh, width, height) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(source, sx, sy, sw, sh, 0, 0, width, height);
+      return canvas;
+    }
+
+    async function bubbleThumbnail(url, cssWidth, cssHeight) {
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.round(cssWidth * dpr);
+      const height = Math.round(cssHeight * dpr);
+      if (!width || !height) return null;
+
+      const key = `${url}|${width}x${height}`;
+      if (!thumbnailCache.has(key)) {
+        try {
+          const img = await loadImage(url);
+          // Recadrage façon « cover » : on garde le centre de la photo aux proportions de la zone
+          const scale = Math.max(width / img.naturalWidth, height / img.naturalHeight);
+          let sw = width / scale, sh = height / scale;
+          let sx = (img.naturalWidth - sw) / 2, sy = (img.naturalHeight - sh) / 2;
+          // Réduction par paliers de moitié : bien plus net qu'une réduction en une fois
+          let source = img;
+          while (sw > width * 2) {
+            source = drawStep(source, sx, sy, sw, sh, Math.round(sw / 2), Math.round(sh / 2));
+            sx = 0; sy = 0; sw = source.width; sh = source.height;
+          }
+          thumbnailCache.set(key, drawStep(source, sx, sy, sw, sh, width, height));
+        } catch {
+          return null;
+        }
+      }
+      // Chaque bulle reçoit sa propre copie du canvas en cache
+      const cached = thumbnailCache.get(key);
+      const canvas = drawStep(cached, 0, 0, width, height, width, height);
+      canvas.className = "poi-photo-img";
+      return canvas;
+    }
+
+    let infoWindow;
+
+    // Vue de la carte avant l'ouverture d'une bulle : Google décale la carte pour faire tenir la bulle,
+    // on y revient à la fermeture. Si une bulle est déjà ouverte (passage d'un POI à un autre), on garde
+    // la vue d'avant la première bulle. Si l'utilisateur a déplacé ou zoomé la carte lui-même entre-temps,
+    // on ne revient pas en arrière.
+    let viewBeforeBubble = null; // { center, zoom }
+    let mapMovedByUser = false;
+
+    function rememberViewBeforeBubble() {
+      if (infoWindow?.isOpen && viewBeforeBubble) return;
+      viewBeforeBubble = { center: map.getCenter(), zoom: map.getZoom() };
+      mapMovedByUser = false;
+    }
+
+    function closeBubble() {
+      if (!infoWindow?.isOpen) return;
+      infoWindow.close();
+      const view = viewBeforeBubble;
+      viewBeforeBubble = null;
+      if (view && !mapMovedByUser && map.getZoom() === view.zoom) map.panTo(view.center);
+    }
+
+    // POI proposés par le guide vocal et localisés par Google : { id, props, position, marker, included,
+    // locked, visitedAt }. La liste fait foi côté serveur ; la page la reçoit en direct (voir syncPois).
+    // routeOrder = ordre des étapes, qui est aussi l'ordre de la liste. Les POI inclus viennent
+    // d'abord, les POI retirés suivent, grisés.
+    // locked (cadenas) : le POI garde son numéro d'étape lors de l'optimisation ; les autres POI
+    // sont répartis au mieux sur les numéros restants.
+    const pois = [];
+    let unplacedPois = [];  // proposés mais pas (encore) sur la carte : localisation en cours ou échouée
+    let routeOrder = [];
+    const legs = new Map();  // POI → portion qui y mène { meters, seconds }
+
+    // Trois états : à visiter (inclus, pas encore visité), déjà visité (visitedAt), exclus (décoché)
+    const isToVisit = (p) => p.included && !p.visitedAt;
+    const includedPois = () => routeOrder.filter(isToVisit); // étapes restantes de l'itinéraire
+    const visitedPois = () => pois.filter((p) => p.visitedAt).sort((a, b) => b.visitedAt - a.visitedAt);
+    const excludedPois = () => routeOrder.filter((p) => !p.included && !p.visitedAt);
+
+    // Arrivée sur un lieu : à moins de ARRIVAL_RADIUS_M du point bleu, il passe en « Déjà visité »
+    // (et perd son cadenas)
+    const ARRIVAL_RADIUS_M = 20;
+
+    function checkArrivals() {
+      const here = userMarker.getPosition();
+      const arrived = includedPois().filter((p) =>
+        google.maps.geometry.spherical.computeDistanceBetween(here, new google.maps.LatLng(p.position)) <= ARRIVAL_RADIUS_M);
+      for (const p of arrived) {
+        p.visitedAt = new Date();
+        p.locked = false;
+        api("/api/pois/update", { id: p.id, visited: true }); // le guide en est informé
+      }
+      if (arrived.length) {
+        closeBubble();
+        renderSteps();
+      }
+      return arrived.length > 0;
+    }
+
+    const formatTime = (date) => date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }).replace(":", " h ");
+
+    // ---- Échanges avec le serveur de l'appli ----
+
+    function api(path, body) {
+      return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+        .catch((err) => console.warn("Serveur injoignable", path, err));
+    }
+
+    // Flux d'événements du serveur : liste des POI (state), état de la conversation (voice) et du
+    // travail du guide (agent). Le navigateur se reconnecte tout seul si le flux est coupé.
+    function listenToServer() {
+      const events = new EventSource("/api/events");
+      events.onopen = sendContext; // serveur redémarré : il reçoit de nouveau la position
+      events.onmessage = ({ data }) => {
+        const message = JSON.parse(data);
+        if (message.type === "state") syncPois(message);
+        else if (message.type === "voice") onVoiceServerState(message);
+        else if (message.type === "agent") onAgentState(message.state);
+      };
+    }
+
+    function poiProps(p) {
+      return {
+        name: p.place?.name || p.name,
+        category: p.category,
+        description: p.reason,
+        placeId: p.place?.placeId,
+        sources: p.sources,
+      };
+    }
+
+    // Applique la liste reçue du serveur : seuls les lieux localisés (resolved) vont sur la carte et
+    // dans l'itinéraire ; les autres restent dans la liste, en attente ou en échec.
+    let lastStateVersion = -1;
+
+    function syncPois(state) {
+      if (state.version <= lastStateVersion) return; // message plus ancien que l'état affiché
+      lastStateVersion = state.version;
+      const placed = new Map(state.pois.filter((p) => p.status === "resolved" && p.place).map((p) => [p.id, p]));
+      let changed = false;
+
+      // Lieux retirés par le guide (ou plus localisés)
+      for (const poi of [...pois]) {
+        if (placed.has(poi.id)) continue;
+        poi.marker.setMap(null);
+        pois.splice(pois.indexOf(poi), 1);
+        routeOrder = routeOrder.filter((p) => p !== poi);
+        legs.delete(poi);
+        changed = true;
+      }
+
+      const added = [];
+      for (const p of placed.values()) {
+        let poi = pois.find((x) => x.id === p.id);
+        if (!poi) {
+          const position = p.place.location;
+          const props = poiProps(p);
+          const marker = new MarkerClass({ map, position, title: props.name, icon: poiIcon(props.category) });
+          poi = { id: p.id, props, position, marker, included: true, locked: false, visitedAt: null };
+          marker.addListener("click", () => {
+            rememberViewBeforeBubble();
+            infoWindow.setContent(buildPoiCard(poi.props, poiCardSize()));
+            infoWindow.open({ map, anchor: marker });
+          });
+          pois.push(poi);
+          // Nouvelle étape : à la suite des étapes restantes
+          routeOrder = [...includedPois(), poi, ...routeOrder.filter((x) => !isToVisit(x))];
+          added.push(poi);
+          changed = true;
+        }
+        // Décoché / recoché depuis l'écran, ou visité : le serveur fait foi
+        if (poi.included !== p.included) {
+          poi.included = p.included;
+          poi.marker.setMap(p.included ? map : null);
+          routeOrder = [...routeOrder.filter(isToVisit), ...routeOrder.filter((x) => !isToVisit(x))];
+          changed = true;
+        }
+        if (p.visited && !poi.visitedAt) {
+          poi.visitedAt = new Date();
+          poi.locked = false;
+          changed = true;
+        }
+      }
+
+      unplacedPois = state.pois.filter((p) => p.status !== "resolved");
+      renderSteps();
+      if (changed) {
+        routeStale = true;
+        if (routeVisible) {
+          clearTimeout(routeTimer);
+          routeTimer = setTimeout(computeRoute, 300);
+        }
+        if (added.length && zoomBeforeAnim === null) centerOnBarycenter(); // montrer les nouveaux lieux
+      }
+      // Affichage fait : le serveur mesure le délai d'actualisation de l'interface
+      requestAnimationFrame(() => api("/api/ui-ack", { version: state.version }));
+    }
+
+    // Position transmise au serveur (contexte du guide), regroupée sur 1 s
+    let contextTimer = null;
+    function sendContext() {
+      clearTimeout(contextTimer);
+      contextTimer = setTimeout(() => {
+        api("/api/context", {
+          position: userMarker.getPosition().toJSON(),
+          source: "app", // point bleu de l'appli (déplaçable pour les tests)
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        });
+      }, 1000);
+    }
+
+    // Numéros d'étape sur la carte (pastille ✓ grise pour les lieux déjà visités) et dans la liste
+    function renderSteps() {
+      includedPois().forEach((poi, i) => poi.marker.setIcon(poiIcon(poi.props.category, i + 1, poi.locked)));
+      visitedPois().forEach((poi) => poi.marker.setIcon(poiIcon(poi.props.category, null, false, true)));
+      renderPoiList();
+      reportMapNumbers();
+    }
+
+    // Numéros affichés transmis au serveur, pour que le guide comprenne « supprime le point n° 6 ».
+    // Envoyés seulement quand ils changent.
+    let lastNumbers = "";
+    function reportMapNumbers() {
+      const numbers = Object.fromEntries(includedPois().map((poi, i) => [poi.id, i + 1]));
+      const key = JSON.stringify(numbers);
+      if (key === lastNumbers) return;
+      lastNumbers = key;
+      api("/api/pois/numbers", { numbers });
+    }
+
+    // Retirer / remettre un POI dans l'itinéraire
+    function setIncluded(poi, included) {
+      poi.included = included;
+      api("/api/pois/update", { id: poi.id, included }); // le guide en est informé
+      poi.marker.setMap(included ? map : null);
+      closeBubble();
+      const others = routeOrder.filter((p) => p !== poi);
+      const inc = others.filter(isToVisit);
+      const rest = others.filter((p) => !isToVisit(p));
+      // Remis juste avant l'arrivée actuelle, pour ne pas changer la destination ; retiré : en fin de liste
+      if (included) routeOrder = inc.length ? [...inc.slice(0, -1), poi, inc[inc.length - 1], ...rest] : [poi, ...rest];
+      else routeOrder = [...inc, ...rest, poi];
+      renderSteps();
+      computeRoute();
+    }
+
+    // ---- Itinéraire à pied (Google Routes API) ----
+
+    // L'itinéraire est calculé quand on l'affiche (interrupteur « Afficher l'itinéraire »), quand on
+    // ouvre la liste ou quand on y modifie les étapes. Interrupteur éteint, un déplacement du point bleu
+    // ne déclenche pas d'appel à Google : l'itinéraire est seulement marqué « à recalculer ».
+    let routeVisible = false;
+    let routeStale = true;          // l'itinéraire connu ne correspond plus à la situation actuelle
+    let routePaths = [];            // tracé de chaque portion (LatLng[]), dans l'ordre des étapes
+    let routeTotal = null;          // { meters, seconds }
+    let lastRouteOrigin = null;
+    let routeTimer = null;
+    let routeRequestId = 0;
+    const ROUTE_MIN_MOVE_M = 100;   // en dessous, un déplacement du point bleu ne recalcule pas
+    const ROUTE_DELAY_MS = 1500;    // attente après un déplacement, pour regrouper les mouvements rapides
+
+    const secondsOf = (duration) => parseInt(duration, 10) || 0; // "283s" → 283
+    const formatMeters = (m) => `${m.toLocaleString("fr-FR")} m`;
+    const formatMinutes = (s) => `${Math.max(1, Math.round(s / 60))} min`;
+
+    // Appelé quand le point bleu bouge : recalcul seulement si le déplacement est significatif
+    function onUserMoved() {
+      const origin = userMarker.getPosition();
+      if (lastRouteOrigin && google.maps.geometry.spherical.computeDistanceBetween(origin, lastRouteOrigin) < ROUTE_MIN_MOVE_M) return;
+      routeStale = true;
+      if (!routeVisible) return;
+      clearTimeout(routeTimer);
+      routeTimer = setTimeout(computeRoute, ROUTE_DELAY_MS);
+    }
+
+    function clearRouteData() {
+      routePaths = [];
+      legs.clear();
+      routeTotal = null;
+    }
+
+    const toWaypoint = (p) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
+
+    async function routesApi(path, fieldMask, body) {
+      const response = await fetch(`https://routes.googleapis.com/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY, "X-Goog-FieldMask": fieldMask },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(`Routes API ${response.status}`);
+      return response.json();
+    }
+
+    // Temps de marche (s) entre le point bleu et chaque POI, et entre chaque paire de POI :
+    // times[i][j] avec i = 0 pour le point bleu, i = k + 1 pour stops[k] ; j = index dans stops
+    async function walkingTimes(origin, stops) {
+      const elements = await routesApi(
+        "distanceMatrix/v2:computeRouteMatrix",
+        "originIndex,destinationIndex,duration,condition",
+        {
+          origins: [origin, ...stops.map((p) => p.position)].map((p) => ({ waypoint: toWaypoint(p) })),
+          destinations: stops.map((p) => ({ waypoint: toWaypoint(p.position) })),
+          travelMode: "WALK",
+        }
+      );
+      const times = Array.from({ length: stops.length + 1 }, () => Array(stops.length).fill(Infinity));
+      for (const e of elements) {
+        if (e.condition === "ROUTE_EXISTS") times[e.originIndex][e.destinationIndex] = secondsOf(e.duration);
+      }
+      return times;
+    }
+
+    // Meilleur ordre de visite : les POI cadenassés gardent leur numéro, les autres sont placés
+    // sur les numéros libres de façon à minimiser le temps de marche total (recherche exhaustive
+    // avec élagage ; au-delà de 9 POI libres, on prend à chaque fois le POI libre le plus proche).
+    function bestOrder(stops, times) {
+      const n = stops.length;
+      const slotOf = stops.map((p, i) => (p.locked ? i : -1)); // numéro imposé, ou -1
+      const lockedAt = Array(n).fill(-1);
+      slotOf.forEach((slot, i) => { if (slot >= 0) lockedAt[slot] = i; });
+      const free = stops.map((_, i) => i).filter((i) => slotOf[i] < 0);
+      const from = (prev) => prev + 1; // ligne de la matrice : -1 (point bleu) → 0, POI k → k + 1
+
+      if (free.length > 9) {
+        const order = [];
+        const remaining = new Set(free);
+        let prev = -1;
+        for (let s = 0; s < n; s++) {
+          let next = lockedAt[s];
+          if (next < 0) {
+            next = [...remaining].reduce((a, b) => (times[from(prev)][a] <= times[from(prev)][b] ? a : b));
+            remaining.delete(next);
+          }
+          order.push(next);
+          prev = next;
+        }
+        return order.map((i) => stops[i]);
+      }
+
+      let best = null, bestCost = Infinity;
+      const order = [];
+      const used = new Set();
+      (function place(slot, prev, cost) {
+        if (cost >= bestCost) return;
+        if (slot === n) { bestCost = cost; best = [...order]; return; }
+        const candidates = lockedAt[slot] >= 0 ? [lockedAt[slot]] : free.filter((i) => !used.has(i));
+        for (const i of candidates) {
+          order.push(i); used.add(i);
+          place(slot + 1, i, cost + times[from(prev)][i]);
+          order.pop(); used.delete(i);
+        }
+      })(0, -1, 0);
+      return (best || stops.map((_, i) => i)).map((i) => stops[i]);
+    }
+
+    async function computeRoute() {
+      clearTimeout(routeTimer);
+      const requestId = ++routeRequestId;
+      const stops = includedPois();
+      const origin = userMarker.getPosition();
+      lastRouteOrigin = origin;
+      routeStale = false;
+      hideRoute();
+      if (!stops.length) {
+        clearRouteData();
+        renderSteps();
+        return;
+      }
+
+      let ordered = stops;
+      let route;
+      try {
+        // 1. Ordre optimisé, en respectant les étapes cadenassées
+        const freeCount = stops.filter((p) => !p.locked).length;
+        if (freeCount > 1) {
+          ordered = bestOrder(stops, await walkingTimes(origin.toJSON(), stops));
+          if (requestId !== routeRequestId) return;
+        }
+        // 2. Tracé à pied dans cet ordre
+        const destination = ordered[ordered.length - 1];
+        route = (await routesApi(
+          "directions/v2:computeRoutes",
+          "routes.distanceMeters,routes.duration,routes.legs.distanceMeters,routes.legs.duration,routes.legs.polyline.encodedPolyline",
+          {
+            origin: toWaypoint(origin.toJSON()),
+            destination: toWaypoint(destination.position),
+            intermediates: ordered.slice(0, -1).map((p) => toWaypoint(p.position)),
+            travelMode: "WALK",
+            languageCode: "fr",
+          }
+        )).routes?.[0];
+      } catch (err) {
+        console.warn("Itinéraire indisponible", err);
+      }
+      if (requestId !== routeRequestId) return; // une demande plus récente est partie entre-temps
+
+      clearRouteData();
+      if (!route) {
+        routeStale = true;
+        renderSteps();
+        return;
+      }
+      routeOrder = [...ordered, ...routeOrder.filter((p) => !isToVisit(p))];
+      route.legs.forEach((leg, i) => {
+        routePaths.push(google.maps.geometry.encoding.decodePath(leg.polyline.encodedPolyline));
+        legs.set(ordered[i], { meters: leg.distanceMeters || 0, seconds: secondsOf(leg.duration) });
+      });
+      routeTotal = { meters: route.distanceMeters || 0, seconds: secondsOf(route.duration) };
+      renderSteps();
+      if (!routeVisible) return;
+      // L'animation ne se joue qu'à l'allumage de l'interrupteur ; toute autre mise à jour est instantanée
+      if (!animateNextRoute) {
+        drawRouteStatic();
+        return;
+      }
+      animateNextRoute = false;
+      // Liste ouverte : l'animation attend qu'on revienne à la carte pour être vue
+      if (poiListEl.classList.contains("open")) routeAnimPending = true;
+      else animateRoute();
+    }
+
+    let routeAnimPending = false;
+    let animateNextRoute = false;   // vrai juste après l'allumage de l'interrupteur
+
+    // ---- Affichage animé de l'itinéraire ----
+    // Le tracé bleu part du point bleu et avance le long des rues, étape par étape ; à chaque arrivée,
+    // la bulle distance · durée de la portion apparaît avec un « pop ». La caméra suit la tête du tracé,
+    // un peu plus zoomée, puis recadre l'ensemble à la fin.
+    const ROUTE_COLOR = "#1a73e8";
+    const ROUTE_OPACITY = 0.75;         // 25 % de transparence
+    const ROUTE_SLOWDOWN = 1 / (0.75 * 0.5); // vitesse réduite de 25 %, puis encore de 50 % : durées allongées d'autant
+    const ROUTE_TRACE_SLOWDOWN = ROUTE_SLOWDOWN / 0.5; // avancée du tracé encore ralentie de 50 % (pas les pauses)
+    const ROUTE_ANIM_MS = 4000 * ROUTE_TRACE_SLOWDOWN;   // durée totale du tracé (hors pauses)
+    const ROUTE_LEG_MIN_MS = 350 * ROUTE_TRACE_SLOWDOWN; // durée minimale d'une portion très courte
+    const ROUTE_POP_PAUSE_MS = 400 * ROUTE_SLOWDOWN; // pause à chaque étape, le temps du « pop »
+    const ROUTE_FOLLOW_ZOOM = 1;        // zoom supplémentaire pendant le suivi de la caméra
+    const CAMERA_PAN_EVERY_MS = 120;    // fréquence de recentrage de la caméra
+
+    let routeLine = null;
+    let legLabels = null;
+    let routeAnimId = 0;                // change à chaque animation : arrête la précédente
+    let zoomBeforeAnim = null;
+
+    // Fin du suivi : on recadre sur l'ensemble des étapes
+    function endCameraFollow() {
+      zoomBeforeAnim = null;
+      centerOnBarycenter();
+    }
+
+    function hideRoute(fade = false) {
+      routeAnimId++;
+      const line = routeLine, labels = legLabels;
+      routeLine = null;
+      legLabels = null;
+      if (!line && !labels) return;
+      if (!fade) {
+        line?.setMap(null);
+        labels?.setMap(null);
+        return;
+      }
+      // Disparition en fondu
+      labels?.items.forEach((i) => i.div.classList.add("fade-out"));
+      const start = performance.now();
+      (function step(now) {
+        const t = Math.min(1, (now - start) / 300);
+        line?.setOptions({ strokeOpacity: ROUTE_OPACITY * (1 - t) });
+        if (t < 1) requestAnimationFrame(step);
+        else { line?.setMap(null); labels?.setMap(null); }
+      })(start);
+    }
+
+    // maxLegs : nombre de portions à animer (toutes par défaut ; 1 pour « Next », jusqu'à la prochaine
+    // étape). onDone : appelé à la fin de l'animation si elle n'a pas été interrompue.
+    function animateRoute(maxLegs = Infinity, onDone = null) {
+      hideRoute();
+      if (!routePaths.length) return;
+      const animId = routeAnimId;
+      const { spherical } = google.maps.geometry;
+      const paths = routePaths.slice(0, maxLegs);
+
+      routeLine = new google.maps.Polyline({
+        map, path: [], strokeColor: ROUTE_COLOR, strokeOpacity: ROUTE_OPACITY, strokeWeight: 12, clickable: false,
+      });
+      const stops = includedPois();
+      legLabels = createLegLabels(paths.map((path, i) => {
+        const leg = legs.get(stops[i]);
+        return { path, name: stops[i].props.name, info: `${formatMeters(leg.meters)} · ${formatMinutes(leg.seconds)}` };
+      }));
+
+      // Durée de chaque portion proportionnelle à sa longueur (même vitesse que l'animation complète)
+      const allLengths = routePaths.map((path) => spherical.computeLength(path));
+      const totalLength = allLengths.reduce((a, b) => a + b, 0) || 1;
+      const lengths = allLengths.slice(0, paths.length);
+      const durations = lengths.map((len) => Math.max(ROUTE_LEG_MIN_MS, (ROUTE_ANIM_MS * len) / totalLength));
+
+      // Caméra : un cran plus près pendant le tracé (zoom de référence gardé si une animation
+      // en remplace une autre, pour ne pas zoomer de plus en plus)
+      if (zoomBeforeAnim === null) zoomBeforeAnim = map.getZoom();
+      map.setZoom(zoomBeforeAnim + ROUTE_FOLLOW_ZOOM);
+      let lastPan = 0;
+
+      const done = [];
+      let legIndex = 0;
+      let legStart = performance.now();
+
+      function frame(now) {
+        if (animId !== routeAnimId) return; // animation interrompue
+        const path = paths[legIndex];
+        const t = Math.min(1, (now - legStart) / durations[legIndex]);
+        const head = partialPath(path, lengths[legIndex] * easeInOut(t), spherical);
+        routeLine.setPath([...done, ...head]);
+
+        if (now - lastPan > CAMERA_PAN_EVERY_MS) {
+          map.panTo(head[head.length - 1]);
+          lastPan = now;
+        }
+
+        if (t < 1) {
+          requestAnimationFrame(frame);
+          return;
+        }
+        // Arrivée à l'étape : la bulle de la portion « pop », courte pause puis portion suivante
+        done.push(...path);
+        legLabels.reveal(legIndex);
+        legIndex++;
+        if (legIndex >= paths.length) {
+          setTimeout(() => {
+            if (animId !== routeAnimId) return;
+            endCameraFollow();
+            onDone?.();
+          }, ROUTE_POP_PAUSE_MS);
+          return;
+        }
+        setTimeout(() => {
+          if (animId !== routeAnimId) return;
+          legStart = performance.now();
+          requestAnimationFrame(frame);
+        }, ROUTE_POP_PAUSE_MS);
+      }
+      requestAnimationFrame(frame);
+    }
+
+    const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+    // Début d'un tracé jusqu'à une distance donnée (en mètres) depuis son départ
+    function partialPath(path, meters, spherical) {
+      const result = [path[0]];
+      let walked = 0;
+      for (let i = 1; i < path.length; i++) {
+        const segment = spherical.computeDistanceBetween(path[i - 1], path[i]);
+        if (walked + segment >= meters) {
+          result.push(spherical.interpolate(path[i - 1], path[i], segment ? (meters - walked) / segment : 0));
+          return result;
+        }
+        walked += segment;
+        result.push(path[i]);
+      }
+      return result;
+    }
+
+    // Interrupteur « Afficher l'itinéraire »
+    function setRouteVisible(visible) {
+      routeVisible = visible;
+      if (!visible) {
+        clearTimeout(routeTimer);
+        hideRoute(true);
+        endCameraFollow();
+        return;
+      }
+      if (routeStale || !routePaths.length) {
+        animateNextRoute = true;
+        computeRoute();
+      } else {
+        animateRoute();
+      }
+    }
+
+    // Mise à jour instantanée du tracé (sans animation ni bulles)
+    function drawRouteStatic() {
+      if (routeAnimPending) return; // une animation attend déjà le retour sur la carte
+      hideRoute();
+      if (zoomBeforeAnim !== null) endCameraFollow(); // animation interrompue : la caméra recadre l'ensemble
+      if (!routePaths.length) return;
+      routeLine = new google.maps.Polyline({
+        map, path: routePaths.flat(), strokeColor: ROUTE_COLOR, strokeOpacity: ROUTE_OPACITY, strokeWeight: 12, clickable: false,
+      });
+    }
+
+    // Étiquettes des portions (distance · durée), placées toutes ensemble à chaque zoom ou déplacement :
+    // chacune se met sur son tracé le plus près possible de l'étape suivante, sans chevaucher
+    // les icônes des POI, le point bleu ni les étiquettes déjà placées. Si le tracé est trop encombré,
+    // elle se décale sur le côté du tracé ; en dernier recours, elle est masquée.
+    const ICON_RADIUS_PX = 40;  // icône du POI, pastille numérotée (avec cadenas) comprise, + marge
+    const DOT_RADIUS_PX = 16;   // point bleu + marge
+    const LABEL_GAP_PX = 4;     // écart minimal entre deux étiquettes
+    const SAMPLE_STEP_PX = 4;   // pas de recherche le long du tracé
+    const LABEL_VISIBLE_MS = 3000; // durée d'affichage d'une étiquette avant qu'elle s'estompe
+    const LABEL_FADE_MS = 1500;    // durée du fondu (même valeur que la transition CSS)
+
+    let LegLabelsLayer;
+
+    function createLegLabels(items) {
+      if (!LegLabelsLayer) {
+        LegLabelsLayer = class extends google.maps.OverlayView {
+          constructor(items) {
+            super();
+            // revealed : l'étiquette n'apparaît qu'une fois sa portion tracée par l'animation
+            this.items = items.map(({ path, name, info }) => {
+              const div = el("div", "leg-label");
+              div.append(el("div", "leg-name", name), el("div", "leg-info", info));
+              return { path, div, revealed: false };
+            });
+          }
+          // Fait apparaître l'étiquette d'une portion avec un « pop » façon dessin animé
+          // puis l'estompe au bout de quelques secondes pour ne pas surcharger la carte
+          reveal(index) {
+            const item = this.items[index];
+            if (!item) return;
+            item.revealed = true;
+            this.draw();
+            item.div.classList.add("pop");
+            setTimeout(() => {
+              item.div.classList.add("fade-out");
+              setTimeout(() => {
+                item.revealed = false; // libère sa place pour les étiquettes suivantes
+                this.draw();
+              }, LABEL_FADE_MS);
+            }, LABEL_VISIBLE_MS);
+          }
+          onAdd() { this.getPanes().floatPane.append(...this.items.map((i) => i.div)); }
+          onRemove() { this.items.forEach((i) => i.div.remove()); }
+          draw() {
+            const projection = this.getProjection();
+            if (!projection) return;
+            const px = (latLng) => projection.fromLatLngToDivPixel(latLng);
+            const obstacles = [
+              ...pois.filter((p) => p.marker.getMap()).map((p) => ({ ...px(new google.maps.LatLng(p.position)), r: ICON_RADIUS_PX })),
+              { ...px(userMarker.getPosition()), r: DOT_RADIUS_PX },
+            ];
+            const placed = [];
+            const fits = (x, y, hw, hh) =>
+              obstacles.every((o) => Math.hypot(Math.max(Math.abs(x - o.x) - hw, 0), Math.max(Math.abs(y - o.y) - hh, 0)) >= o.r) &&
+              placed.every((r) => Math.abs(x - r.x) >= hw + r.hw + LABEL_GAP_PX || Math.abs(y - r.y) >= hh + r.hh + LABEL_GAP_PX);
+
+            for (const item of this.items) {
+              if (!item.revealed) {
+                item.div.style.display = "none";
+                continue;
+              }
+              item.div.style.display = "";
+              const hw = item.div.offsetWidth / 2, hh = item.div.offsetHeight / 2;
+              const spot = this.findSpot(item.path.map(px), hw, hh, fits);
+              item.div.style.display = spot ? "" : "none";
+              if (!spot) continue;
+              item.div.style.left = `${spot.x}px`;
+              item.div.style.top = `${spot.y}px`;
+              placed.push({ x: spot.x, y: spot.y, hw, hh });
+            }
+          }
+          // Parcourt le tracé à rebours depuis l'étape d'arrivée : d'abord sur le tracé, puis de part
+          // et d'autre du tracé
+          findSpot(points, hw, hh, fits) {
+            const samples = [];
+            for (let i = points.length - 2; i >= 0; i--) {
+              const a = points[i + 1], b = points[i];
+              const len = Math.hypot(b.x - a.x, b.y - a.y);
+              const n = Math.max(1, Math.ceil(len / SAMPLE_STEP_PX));
+              const nx = len ? -(b.y - a.y) / len : 0, ny = len ? (b.x - a.x) / len : 0; // normale au segment
+              for (let k = 0; k < n; k++) {
+                const t = k / n;
+                samples.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, nx, ny });
+              }
+            }
+            const offset = hh + 10;
+            for (const shift of [0, offset, -offset, 2 * offset, -2 * offset, 3 * offset, -3 * offset]) {
+              for (const s of samples) {
+                const x = s.x + s.nx * shift, y = s.y + s.ny * shift;
+                if (fits(x, y, hw, hh)) return { x, y };
+              }
+            }
+            return null;
+          }
+        };
+      }
+      const layer = new LegLabelsLayer(items);
+      layer.setMap(map);
+      return layer;
+    }
+
+    // ---- Bouton « Next » : repère pour partir dans la bonne direction ----
+    // 1. Direction de départ : Google accroche le début du trajet à la rue la plus proche, parfois à
+    //    une quinzaine de mètres de la position. Si ce début est loin, la direction est celle qui y mène ;
+    //    sinon, celle d'un point situé ~15 m plus loin sur le tracé.
+    // 2. Lieux à proximité (Google Places), avec au moins un avis (donc visibles depuis la rue).
+    // 3. Repère « devant » : écart de moins de 45° avec la direction et situé avant le premier virage.
+    //    À défaut, repère « derrière » (écart de plus de 135°), à garder dans son dos : il doit alors
+    //    être à au moins 8 m et à l'écart de tout le trajet jusqu'à l'étape (sinon on marcherait vers lui).
+    //    Entre plusieurs candidats : celui qui a le plus d'avis.
+    // 4. Affichage : pastille verte « R » sur la carte + bulle avec la consigne et la photo du repère.
+    const LANDMARK_RADII_M = [20, 40];   // rayon de recherche, élargi si rien n'est trouvé
+    const LANDMARK_MIN_DIST_M = 3;       // trop près : n'indique aucune direction
+    const LANDMARK_BEHIND_MIN_DIST_M = 8;
+    const LANDMARK_OFF_ROUTE_M = 15;     // distance minimale entre un repère « derrière » et le trajet
+    const LANDMARK_AHEAD_DEG = 45;
+    const LANDMARK_BEHIND_DEG = 135;
+    const HEADING_SAMPLE_M = 15;         // point du tracé qui donne la direction de départ
+    const SNAP_GAP_M = 8;                // au-delà, le début du tracé est « loin » de la position
+
+    let landmarkMarker = null;
+    let directionArrow = null;
+
+    function clearLandmark() {
+      landmarkMarker?.setMap(null);
+      landmarkMarker = null;
+      directionArrow?.setMap(null);
+      directionArrow = null;
+      // Séquence « Next » en cours annulée ; son tronçon disparaît (sauf itinéraire affiché par l'interrupteur)
+      nextSequenceId++;
+      document.getElementById("landmark-pop")?.remove();
+      if (nextRouteShown && !routeVisible) hideRoute();
+      nextRouteShown = false;
+    }
+
+    // Flèche verte partant du point bleu dans la direction de départ. Taille fixe à l'écran (lisible
+    // à tous les zooms), au-dessus des icônes, sans bloquer les touchers. La carte étant toujours
+    // orientée nord en haut, le cap se traduit directement en rotation.
+    const DIRECTION_ARROW_SVG = `<svg viewBox="0 0 28 84" width="28" height="84" aria-hidden="true">
+      <path d="M14 70V18" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+      <path d="M14 70V18" stroke="#2e9e4f" stroke-width="6" stroke-linecap="round"/>
+      <path d="M14 2L26 22H2z" fill="#2e9e4f" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>`;
+
+    function showDirectionArrow(origin, step) {
+      const div = el("div", "direction-arrow");
+      div.innerHTML = DIRECTION_ARROW_SVG;
+      div.style.transform = `rotate(${step.heading}deg)`;
+      directionArrow = createHtmlOverlay(origin, div, "overlayMouseTarget");
+    }
+
+    function landmarkIcon() {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+        <circle cx="20" cy="20" r="17" fill="#2e9e4f" stroke="#fff" stroke-width="3"/>
+        <text x="20" y="26.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="19" font-weight="700" fill="#fff">R</text></svg>`;
+      return {
+        url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
+        scaledSize: new google.maps.Size(40, 40),
+        anchor: new google.maps.Point(20, 20),
+      };
+    }
+
+    // Écart d'angle entre deux caps, de 0 à 180°
+    const headingGap = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+
+    async function departureStep(origin, stop) {
+      const route = (await routesApi(
+        "directions/v2:computeRoutes",
+        "routes.legs.polyline.encodedPolyline,routes.legs.steps.distanceMeters,routes.legs.steps.polyline.encodedPolyline,routes.legs.steps.navigationInstruction.instructions",
+        { origin: toWaypoint(origin), destination: toWaypoint(stop.position), travelMode: "WALK", languageCode: "fr" }
+      )).routes?.[0];
+      const leg = route?.legs?.[0];
+      const step = leg?.steps?.[0];
+      if (!step) return null;
+      const { encoding, spherical } = google.maps.geometry;
+      const here = new google.maps.LatLng(origin);
+      const path = encoding.decodePath(step.polyline.encodedPolyline);
+      // Trajet réellement marché jusqu'à l'étape : position → début du tracé → tracé complet
+      const walked = [here, ...encoding.decodePath(leg.polyline.encodedPolyline)];
+      const gapToStart = spherical.computeDistanceBetween(here, path[0]);
+      const sample = gapToStart > SNAP_GAP_M
+        ? path[0] // d'abord rejoindre la rue
+        : partialPath(path, Math.min(HEADING_SAMPLE_M, spherical.computeLength(path)), spherical).at(-1);
+      return {
+        path,
+        walked,
+        heading: spherical.computeHeading(here, sample),
+        length: gapToStart + (step.distanceMeters || spherical.computeLength(path)), // distance avant le premier virage
+        instruction: step.navigationInstruction?.instructions || "",
+      };
+    }
+
+    // Distance (m) entre un point et un trajet, mesurée tous les 2 m le long du trajet
+    function distanceToPath(point, path) {
+      const { spherical } = google.maps.geometry;
+      const total = spherical.computeLength(path);
+      let best = Infinity;
+      for (let along = 0; along <= total; along += 2) {
+        best = Math.min(best, spherical.computeDistanceBetween(point, partialPath(path, along, spherical).at(-1)));
+      }
+      return best;
+    }
+
+    // Vue Street View à moins de STREETVIEW_RADIUS_M de l'utilisateur, tournée dans la direction à
+    // prendre : la caméra vise, depuis l'emplacement de la vue, un point du trajet situé
+    // STREETVIEW_LOOK_AHEAD_M plus loin. null si aucune vue n'est disponible.
+    const STREETVIEW_RADIUS_M = 20;
+    const STREETVIEW_LOOK_AHEAD_M = 20;
+
+    async function streetViewLandmark(origin, step) {
+      const params = new URLSearchParams({
+        location: `${origin.lat},${origin.lng}`, radius: STREETVIEW_RADIUS_M, source: "outdoor", key: GOOGLE_MAPS_API_KEY,
+      });
+      const meta = await (await fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?${params}`)).json();
+      if (meta.status !== "OK") return null;
+
+      const { spherical } = google.maps.geometry;
+      const pano = new google.maps.LatLng(meta.location.lat, meta.location.lng);
+      // Point du trajet le plus proche de la vue, puis point situé un peu plus loin sur le trajet
+      const total = spherical.computeLength(step.path);
+      let nearestAlong = 0, nearestDist = Infinity;
+      for (let along = 0; along <= total; along += 2) {
+        const d = spherical.computeDistanceBetween(pano, partialPath(step.path, along, spherical).at(-1));
+        if (d < nearestDist) { nearestDist = d; nearestAlong = along; }
+      }
+      const aim = partialPath(step.path, Math.min(total, nearestAlong + STREETVIEW_LOOK_AHEAD_M), spherical).at(-1);
+      const heading = spherical.computeDistanceBetween(pano, aim) > 3 ? spherical.computeHeading(pano, aim) : step.heading;
+
+      const image = new URLSearchParams({
+        size: "480x640", pano: meta.pano_id, heading: heading.toFixed(1), fov: 80, pitch: 0, key: GOOGLE_MAPS_API_KEY,
+      });
+      return {
+        url: `https://maps.googleapis.com/maps/api/streetview?${image}`,
+        distance: spherical.computeDistanceBetween(new google.maps.LatLng(origin), pano),
+        date: meta.date, // « 2024-09 »
+      };
+    }
+
+    const formatPanoDate = (date) => {
+      const [y, m] = (date || "").split("-");
+      return y ? new Date(+y, (+m || 1) - 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" }) : "";
+    };
+
+    async function nearbyPlaces(origin, radius) {
+      const response = await fetch("https://places.googleapis.com/v1/places:searchNearby", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+          "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.userRatingCount,places.photos",
+        },
+        body: JSON.stringify({
+          maxResultCount: 20,
+          rankPreference: "DISTANCE",
+          languageCode: "fr",
+          locationRestriction: { circle: { center: { latitude: origin.lat, longitude: origin.lng }, radius } },
+        }),
+      });
+      if (!response.ok) throw new Error(`Places API ${response.status}`);
+      return (await response.json()).places || [];
+    }
+
+    // Repère devant (ou à défaut derrière) parmi les lieux proches ; null si aucun
+    function chooseLandmark(places, origin, step) {
+      const { spherical } = google.maps.geometry;
+      const here = new google.maps.LatLng(origin);
+      const candidates = places
+        .filter((p) => p.userRatingCount > 0 && p.location)
+        .map((p) => {
+          const at = new google.maps.LatLng(p.location.latitude, p.location.longitude);
+          const distance = spherical.computeDistanceBetween(here, at);
+          const gap = headingGap(spherical.computeHeading(here, at), step.heading);
+          return { place: p, at, distance, gap };
+        })
+        .filter((c) => c.distance >= LANDMARK_MIN_DIST_M);
+      const best = (list) => list.sort((a, b) => b.place.userRatingCount - a.place.userRatingCount || a.gap - b.gap)[0];
+      const ahead = candidates.filter((c) =>
+        c.gap <= LANDMARK_AHEAD_DEG && c.distance * Math.cos((c.gap * Math.PI) / 180) < step.length);
+      if (ahead.length) return { ...best(ahead), side: "ahead" };
+      const behind = candidates.filter((c) =>
+        c.gap >= LANDMARK_BEHIND_DEG &&
+        c.distance >= LANDMARK_BEHIND_MIN_DIST_M &&
+        distanceToPath(c.at, step.walked) >= LANDMARK_OFF_ROUTE_M); // pas sur le chemin à suivre
+      if (behind.length) return { ...best(behind), side: "behind" };
+      return null;
+    }
+
+    // « Next » : repère + flèche, puis la photo du repère « pop » au centre de la carte, reste
+    // NEXT_POP_MS et s'estompe ; ensuite seulement, le trajet s'anime jusqu'à la prochaine étape.
+    const NEXT_POP_MS = 4000;
+    const NEXT_POP_FADE_MS = 800;   // même valeur que la transition CSS de #landmark-pop
+    let nextSequenceId = 0;         // change à chaque « Next » ou déplacement : annule la séquence en cours
+    let nextRouteShown = false;     // le tronçon animé par « Next » est affiché
+
+    async function showDepartureLandmark() {
+      const stop = includedPois()[0];
+      closeBubble();
+      clearLandmark();
+      const sequenceId = nextSequenceId;
+      if (!stop) {
+        popLandmarkCard({ name: pois.length ? "Toutes les étapes ont été visitées." : "Aucun lieu pour l'instant." }, []);
+        return;
+      }
+      const origin = userMarker.getPosition().toJSON();
+      nextBtn.disabled = true;
+      let presentation;
+      try {
+        // Itinéraire recalculé depuis la position exacte : l'animation part bien du point bleu
+        const movedSinceRoute = !lastRouteOrigin ||
+          google.maps.geometry.spherical.computeDistanceBetween(lastRouteOrigin, new google.maps.LatLng(origin)) > 5;
+        if (routeStale || movedSinceRoute) await computeRoute();
+        const target = includedPois()[0] || stop;
+        const step = await departureStep(origin, target);
+        if (!step) throw new Error("Pas de trajet");
+        presentation = await departurePresentation(origin, step, target);
+        if (sequenceId !== nextSequenceId) return; // l'utilisateur a bougé entre-temps
+        showDirectionArrow(origin, step);
+      } catch (err) {
+        console.warn("Repère indisponible", err);
+        presentation = { text: { name: "Impossible de trouver un repère pour le moment." }, photos: [] };
+      } finally {
+        nextBtn.disabled = false;
+      }
+
+      await popLandmarkCard(presentation.text, presentation.photos);
+      if (sequenceId !== nextSequenceId || !routePaths.length) return;
+      nextRouteShown = true;
+      animateRoute(1, () => {
+        // Itinéraire affiché par l'interrupteur : on le remet en entier ; sinon le tronçon reste
+        if (routeVisible) drawRouteStatic();
+      });
+    }
+
+    // Repère à montrer : vue Street View de préférence, sinon un lieu proche (pastille « R »),
+    // sinon la consigne de Google. Renvoie { text, photos } (photos prêtes à afficher).
+    async function departurePresentation(origin, step, target) {
+      const view = await streetViewLandmark(origin, step).catch(() => null);
+      if (view) {
+        const when = formatPanoDate(view.date);
+        return {
+          text: {
+            name: "Aller dans cette direction",
+            description: `Vue Google Street View${when ? ` (${when})` : ""}, à ${Math.round(view.distance)} m de vous.`,
+          },
+          photos: [{ url: view.url, author: "Google Street View" }],
+        };
+      }
+
+      let landmark = null;
+      for (const radius of LANDMARK_RADII_M) {
+        landmark = chooseLandmark(await nearbyPlaces(origin, radius), origin, step);
+        if (landmark) break;
+      }
+      if (!landmark) return { text: { name: step.instruction || `Partir vers ${target.props.name}` }, photos: [] };
+
+      const name = landmark.place.displayName?.text || "ce lieu";
+      const text = landmark.side === "ahead"
+        ? { name: `Aller dans la direction de ${name}`, description: `Il est devant vous, à ${Math.round(landmark.distance)} m.` }
+        : { name: `S'éloigner de ${name}`, description: `Gardez-le dans votre dos (à ${Math.round(landmark.distance)} m).` };
+      landmarkMarker = new google.maps.Marker({
+        map, position: landmark.at, icon: landmarkIcon(), title: `Repère : ${name}`, zIndex: 1000,
+      });
+      // Toucher la pastille « R » rouvre la bulle du repère
+      landmarkMarker.addListener("click", () => showLandmarkBubble(landmarkMarker, text, landmark.place.photos));
+      return { text, photos: pickPhotos(landmark.place.photos) };
+    }
+
+    // Carte du repère qui « pop » au centre de la carte, puis s'estompe. Le × la ferme plus tôt.
+    // La promesse se résout une fois la carte disparue.
+    function popLandmarkCard(text, photos) {
+      document.getElementById("landmark-pop")?.remove();
+      return new Promise((resolve) => {
+        const pop = el("div", "pop");
+        pop.id = "landmark-pop";
+        let timer;
+        const dismiss = () => {
+          clearTimeout(timer);
+          pop.classList.add("fade-out");
+          setTimeout(() => { pop.remove(); resolve(); }, NEXT_POP_FADE_MS);
+        };
+        const size = poiCardSize();
+        pop.append(buildPoiCard(text, photos.length ? size : { width: size.width, height: 150 }, dismiss, Promise.resolve(photos)));
+        const rect = document.getElementById("map").getBoundingClientRect();
+        pop.style.left = `${rect.left + rect.width / 2}px`;
+        pop.style.top = `${rect.top + rect.height / 2}px`;
+        document.body.append(pop);
+        timer = setTimeout(dismiss, NEXT_POP_MS);
+      });
+    }
+
+    // Bulle du repère : consigne en titre, précision en dessous, puis la photo du repère.
+    // Sans repère sur la carte (anchor null), la bulle s'affiche sur la position de l'utilisateur ;
+    // sans photo, elle est réduite à la consigne. photosReady : photos déjà prêtes (vue Street View).
+    function showLandmarkBubble(anchor, text, photos = [], photosReady = false) {
+      rememberViewBeforeBubble();
+      const size = poiCardSize();
+      const list = photosReady ? photos : pickPhotos(photos);
+      const card = buildPoiCard(text, list.length ? size : { width: size.width, height: 150 }, closeBubble, Promise.resolve(list));
+      infoWindow.setContent(card);
+      if (anchor) infoWindow.open({ map, anchor });
+      else {
+        infoWindow.setPosition(userMarker.getPosition());
+        infoWindow.open({ map });
+      }
+    }
+
+    // ---- Liste des lieux ----
+    // Une ligne par POI : case à cocher (inclus ou non), pastille numérotée, nom, portion à pied,
+    // début de la description, poignée ≡ pour réordonner. Toucher une ligne ouvre ses photos.
+    const poiListEl = document.getElementById("poi-list");
+    const poiRowsEl = document.getElementById("poi-rows");
+
+    // Cadenas fermé (étape figée) / ouvert (étape libre pour l'optimisation)
+    const LOCK_CLOSED_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11"/><rect x="5" y="11" width="14" height="10" rx="2" fill="currentColor"/></svg>';
+    const LOCK_OPEN_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.2" d="M7.5 11V7.5a4.5 4.5 0 0 1 8.7-1.6"/><rect x="5" y="11" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+
+    // Logo « images » en couleur : cadre blanc, soleil orange, montagnes bleues
+    const PHOTOS_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="2.5" fill="#1b2430" stroke="#fff" stroke-width="1.6"/><circle cx="8.5" cy="9.5" r="2" fill="#e4572e"/><path d="M3.5 18.5l5.5-6 3.5 3.5 3-3 5 5.5z" fill="#1a73e8"/></svg>';
+
+    // Bulle d'un POI par-dessus la liste : toucher une ligne l'ouvre ; × ou toucher à côté la ferme
+    const listBubbleEl = document.getElementById("list-bubble");
+
+    function openListBubble(props) {
+      const size = poiCardSize(document.body);
+      listBubbleEl.replaceChildren(buildPoiCard(props, size, closeListBubble));
+      listBubbleEl.hidden = false;
+    }
+
+    function closeListBubble() {
+      listBubbleEl.hidden = true;
+      listBubbleEl.replaceChildren();
+    }
+
+    listBubbleEl.addEventListener("click", (e) => {
+      if (e.target === listBubbleEl) closeListBubble();
+    });
+
+    // Trois sections : « À visiter » (étapes numérotées + total), « Déjà visité » (du plus récent au plus
+    // ancien, avec l'heure d'arrivée), « Exclus » (décochés). Les sections vides sont masquées, sauf
+    // « À visiter ».
+    function renderPoiList() {
+      const toVisit = includedPois();
+      const visited = visitedPois();
+      const excluded = excludedPois();
+      const items = [el("li", "section-title", "À visiter"), ...toVisit.map((poi, i) => buildPoiRow(poi, "todo", i + 1))];
+      if (!toVisit.length) {
+        const empty = pois.length || unplacedPois.length
+          ? "Toutes les étapes ont été visitées."
+          : "Aucun lieu pour l'instant : touchez le haut-parleur et dites au guide ce qui vous ferait envie.";
+        items.push(el("li", "section-empty", empty));
+      }
+      if (routeTotal && toVisit.length) {
+        const total = el("li", "route-total");
+        total.append(el("span", null, "Total à pied : "), `${formatMeters(routeTotal.meters)} · ${formatMinutes(routeTotal.seconds)}`);
+        items.push(total);
+      }
+      if (unplacedPois.length) items.push(el("li", "section-title", "Pas encore sur la carte"), ...unplacedPois.map(buildUnplacedRow));
+      if (visited.length) items.push(el("li", "section-title", "Déjà visité"), ...visited.map((poi) => buildPoiRow(poi, "visited")));
+      if (excluded.length) items.push(el("li", "section-title", "Exclus"), ...excluded.map((poi) => buildPoiRow(poi, "excluded")));
+      poiRowsEl.replaceChildren(...items);
+      if (poiListEl.classList.contains("open")) fitDescriptions();
+    }
+
+    // Une ligne : case à cocher, pastille (numéro, ✓ ou –), nom, portion à pied ou heure de visite,
+    // début de la description, cadenas + logo « images », poignée ≡
+    function buildPoiRow(poi, kind, step) {
+      const { props } = poi;
+      const row = el("li", `poi-row ${kind}`);
+      row.poi = poi;
+
+      const check = el("input", "poi-row-check");
+      check.type = "checkbox";
+      check.checked = poi.included;
+      check.setAttribute("aria-label", `Inclure ${props.name} dans l'itinéraire`);
+      check.addEventListener("click", (e) => e.stopPropagation());
+      check.addEventListener("change", () => setIncluded(poi, check.checked));
+
+      const main = el("div", "poi-row-main");
+      const name = el("p", "poi-row-name");
+      const badge = kind === "todo" ? String(step) : kind === "visited" ? "✓" : "–";
+      name.append(el("span", "poi-row-step", badge), el("span", null, props.name));
+      main.append(name);
+      const leg = kind === "todo" && legs.get(poi);
+      if (leg) main.append(el("p", "poi-row-leg", `${formatMeters(leg.meters)} · ${formatMinutes(leg.seconds)} à pied`));
+      if (kind === "visited") main.append(el("p", "poi-row-leg", `Visité à ${formatTime(poi.visitedAt)}`));
+      const desc = el("p", "poi-row-desc");
+      desc.dataset.full = props.description || "";
+      main.append(desc);
+
+      const lock = el("button", poi.locked ? "poi-row-lock locked" : "poi-row-lock");
+      lock.innerHTML = poi.locked ? LOCK_CLOSED_SVG : LOCK_OPEN_SVG;
+      lock.setAttribute("aria-label", poi.locked ? "Étape figée : déverrouiller" : "Figer le numéro de cette étape");
+      lock.setAttribute("aria-pressed", String(poi.locked));
+      lock.addEventListener("click", (e) => {
+        e.stopPropagation();
+        poi.locked = !poi.locked;
+        renderSteps(); // cadenas à jour dans la liste et sur la carte
+        computeRoute();
+      });
+
+      const photosBtn = el("button", "poi-row-photos");
+      photosBtn.innerHTML = PHOTOS_SVG;
+      photosBtn.setAttribute("aria-label", `Voir les photos de ${props.name}`);
+      photosBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const photos = await getPhotos(props.placeId);
+        if (photos.length) openCarousel(photos);
+      });
+
+      const tools = el("div", "poi-row-tools");
+      tools.append(lock, photosBtn);
+
+      const handle = el("span", "poi-row-handle", "≡");
+      handle.setAttribute("aria-label", "Déplacer");
+      enableRowDrag(row, handle);
+
+      row.append(check, main, tools, handle);
+      row.addEventListener("click", () => openListBubble(props));
+      return row;
+    }
+
+    // Lieu proposé par le guide mais pas encore placé : recherche Google en cours, plusieurs lieux
+    // possibles ou introuvable. Aucune coordonnée n'est inventée : il n'apparaît pas sur la carte.
+    const UNPLACED_STATUS = {
+      pending: "Localisation en cours…",
+      ambiguous: "Plusieurs lieux possibles : le guide va préciser",
+      not_found: "Introuvable sur la carte",
+    };
+
+    function buildUnplacedRow(p) {
+      const row = el("li", `poi-row unplaced ${p.status}`);
+      const main = el("div", "poi-row-main");
+      const name = el("p", "poi-row-name");
+      name.append(el("span", "poi-row-step", "…"), el("span", null, p.name));
+      main.append(name, el("p", "poi-row-leg", UNPLACED_STATUS[p.status] || UNPLACED_STATUS.not_found));
+      row.append(main);
+      return row;
+    }
+
+    // Réordonner à la main : on attrape la poignée ≡ et la ligne suit le doigt parmi les POI inclus.
+    // Au relâchement, l'étape déplacée est cadenassée à sa nouvelle place et l'itinéraire est
+    // réoptimisé autour d'elle.
+    function enableRowDrag(row, handle) {
+      handle.addEventListener("click", (e) => e.stopPropagation());
+      // Le geste est suivi sur toute la page : déplacer la ligne dans la liste ferait perdre
+      // au navigateur le suivi du doigt s'il était attaché à la poignée
+      const move = (e) => {
+        const others = [...poiRowsEl.querySelectorAll(".poi-row.todo")].filter((r) => r !== row);
+        if (!others.length) return;
+        const before = others.find((r) => {
+          const rect = r.getBoundingClientRect();
+          return e.clientY < rect.top + rect.height / 2;
+        });
+        const target = before || others[others.length - 1];
+        if (before && row.nextElementSibling !== before) poiRowsEl.insertBefore(row, before);
+        else if (!before && target.nextElementSibling !== row) target.after(row);
+      };
+      const drop = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", drop);
+        window.removeEventListener("pointercancel", drop);
+        row.classList.remove("row-dragging");
+        const newIncluded = [...poiRowsEl.querySelectorAll(".poi-row.todo")].map((r) => r.poi);
+        routeOrder = [...newIncluded, ...routeOrder.filter((p) => !isToVisit(p))];
+        if (newIncluded.some((p, i) => p !== row.dragStartOrder[i])) {
+          row.poi.locked = true;
+          renderSteps();
+          computeRoute();
+        }
+      };
+      handle.addEventListener("pointerdown", (e) => {
+        if (!isToVisit(row.poi)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        row.classList.add("row-dragging");
+        row.dragStartOrder = includedPois();
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", drop);
+        window.addEventListener("pointercancel", drop);
+      });
+    }
+
+    // Garde seulement les premiers mots entiers de la description qui tiennent sur une ligne
+    function fitDescriptions() {
+      for (const desc of poiRowsEl.querySelectorAll(".poi-row-desc")) {
+        const words = desc.dataset.full.split(/\s+/).filter(Boolean);
+        desc.textContent = words.join(" ");
+        let count = words.length;
+        while (count > 1 && desc.scrollWidth > desc.clientWidth) {
+          count--;
+          desc.textContent = words.slice(0, count).join(" ").replace(/[,;:.]$/, "") + "…";
+        }
+      }
+    }
+
+    const appEl = document.getElementById("app");
+
+    function openPoiList() {
+      closeBubble();
+      poiListEl.classList.add("open");
+      document.body.classList.add("list-open");
+      fitDescriptions();
+      if (routeStale) computeRoute(); // ordre optimisé, distances et durées à jour dans la liste
+    }
+
+    function closePoiList() {
+      poiListEl.classList.remove("open");
+      document.body.classList.remove("list-open");
+      if (routeAnimPending && routeVisible) animateRoute();
+      routeAnimPending = false;
+    }
+
+    // Glisser la liste vers le bas : elle suit le doigt et la carte avance vers nous en s'éclairant.
+    // Au relâchement, la liste se ferme si on l'a tirée assez loin (ou d'un geste rapide), sinon elle remonte.
+    function dragList(dy) {
+      const offset = Math.max(0, dy);
+      const progress = Math.min(1, offset / window.innerHeight);
+      document.body.classList.add("dragging");
+      poiListEl.style.transform = `translateY(${offset}px)`;
+      appEl.style.transform = `scale(${0.92 + 0.08 * progress})`;
+      appEl.style.filter = `brightness(${0.35 + 0.65 * progress})`;
+    }
+
+    function releaseList(dy, durationMs) {
+      document.body.classList.remove("dragging");
+      poiListEl.style.transform = "";
+      appEl.style.transform = "";
+      appEl.style.filter = "";
+      const fastFlick = dy > 40 && dy / Math.max(durationMs, 1) > 0.6;
+      if (dy > window.innerHeight * 0.25 || fastFlick) closePoiList();
+    }
+
+    // Glissement vertical sur un élément : vers le haut ou vers le bas, sinon simple toucher
+    function onVerticalSwipe(target, { up, down, tap }, ignoreSelector = null) {
+      let startY = null;
+      target.addEventListener("pointerdown", (e) => {
+        if (ignoreSelector && e.target.closest(ignoreSelector)) return; // ces éléments gèrent leur propre geste
+        startY = e.clientY;
+        target.setPointerCapture(e.pointerId); // le relâchement est capté même hors de l'élément
+      });
+      target.addEventListener("pointerup", (e) => {
+        if (startY === null) return;
+        const dy = e.clientY - startY;
+        startY = null;
+        if (dy < -40) up?.();
+        else if (dy > 40) down?.();
+        else tap?.();
+      });
+    }
+
+    // Barre sous la carte : glisser vers le haut (hors bouton et interrupteur) ouvre la liste
+    onVerticalSwipe(document.getElementById("list-handle"), { up: openPoiList }, ".bottom-controls button, .route-toggle");
+    document.getElementById("select-steps-btn").addEventListener("click", openPoiList);
+    const nextBtn = document.getElementById("next-btn");
+    nextBtn.addEventListener("click", showDepartureLandmark);
+    document.getElementById("route-toggle").addEventListener("change", (e) => setRouteVisible(e.target.checked));
+
+    // En-tête de la liste (doigt ou souris) : la liste suit le geste ; un simple toucher la ferme
+    const listHead = document.getElementById("poi-list-head");
+    let headDrag = null;
+    listHead.addEventListener("pointerdown", (e) => {
+      headDrag = { y: e.clientY, t: e.timeStamp };
+      listHead.setPointerCapture(e.pointerId);
+    });
+    listHead.addEventListener("pointermove", (e) => {
+      if (headDrag) dragList(e.clientY - headDrag.y);
+    });
+    listHead.addEventListener("pointerup", (e) => {
+      if (!headDrag) return;
+      const dy = e.clientY - headDrag.y;
+      const duration = e.timeStamp - headDrag.t;
+      headDrag = null;
+      if (Math.abs(dy) < 8) {
+        releaseList(0, duration);
+        closePoiList();
+      } else {
+        releaseList(dy, duration);
+      }
+    });
+
+    // Dans les lignes : quand la liste est tout en haut, tirer vers le bas fait glisser la liste
+    // au lieu de la faire défiler
+    let rowsDrag = null;
+    poiRowsEl.addEventListener("touchstart", (e) => {
+      // La poignée ≡ et la case à cocher ont leur propre geste
+      const ownGesture = e.target.closest(".poi-row-handle, .poi-row-check, .poi-row-tools");
+      rowsDrag = !ownGesture && poiRowsEl.scrollTop <= 0 ? { y: e.touches[0].clientY, t: e.timeStamp, active: false } : null;
+    }, { passive: true });
+    poiRowsEl.addEventListener("touchmove", (e) => {
+      if (!rowsDrag) return;
+      const dy = e.touches[0].clientY - rowsDrag.y;
+      if (!rowsDrag.active && dy < 0) { rowsDrag = null; return; } // geste vers le haut : défilement normal
+      rowsDrag.active = true;
+      e.preventDefault();
+      dragList(dy);
+    }, { passive: false });
+    poiRowsEl.addEventListener("touchend", (e) => {
+      if (rowsDrag?.active) releaseList(e.changedTouches[0].clientY - rowsDrag.y, e.timeStamp - rowsDrag.t);
+      rowsDrag = null;
+    });
+
+    window.addEventListener("resize", () => {
+      if (poiListEl.classList.contains("open")) fitDescriptions();
+    });
+
+    // Carrousel plein écran : swipe gauche = photo suivante, swipe droite = précédente, en boucle
+    const carousel = document.getElementById("carousel");
+    const carouselImg = document.getElementById("carousel-img");
+    const carouselCaption = document.getElementById("carousel-caption");
+    const carouselDots = document.getElementById("carousel-dots");
+    let carouselPhotos = [];
+    let carouselIndex = 0;
+
+    function showPhoto(index, direction = 0) {
+      const n = carouselPhotos.length;
+      carouselIndex = (index + n) % n;
+      const photo = carouselPhotos[carouselIndex];
+      carouselImg.src = photo.url;
+      carouselCaption.textContent = photo.author ? `Photo : ${photo.author}` : "";
+      [...carouselDots.children].forEach((dot, i) => dot.classList.toggle("active", i === carouselIndex));
+      if (direction) {
+        carouselImg.animate(
+          [{ opacity: 0, transform: `translateX(${direction * 60}px)` }, { opacity: 1, transform: "none" }],
+          { duration: 220, easing: "ease-out" }
+        );
+      }
+    }
+
+    function openCarousel(photos) {
+      carouselPhotos = photos;
+      // Préchargement pour un défilement fluide (même mode CORS que la miniature, pour réutiliser le cache)
+      photos.forEach((p) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = p.url;
+      });
+      carouselDots.replaceChildren(...photos.map(() => el("span")));
+      showPhoto(0);
+      // Cadre vertical : le plus grand possible avec 16 px de marge et 75 % de la hauteur au maximum
+      const ratio = portraitRatio();
+      const width = Math.min(window.innerWidth - 32 - 6, (window.innerHeight * 0.75) / ratio);
+      carouselImg.style.width = `${Math.round(width)}px`;
+      carouselImg.style.height = `${Math.round(width * ratio)}px`;
+      carousel.hidden = false;
+    }
+
+    function closeCarousel() {
+      carousel.hidden = true;
+    }
+
+    let swipeStartX = null;
+    carousel.addEventListener("pointerdown", (e) => { swipeStartX = e.clientX; });
+    carousel.addEventListener("pointerup", (e) => {
+      if (swipeStartX === null) return;
+      const dx = e.clientX - swipeStartX;
+      swipeStartX = null;
+      if (dx < -40) showPhoto(carouselIndex + 1, 1);
+      else if (dx > 40) showPhoto(carouselIndex - 1, -1);
+    });
+    document.getElementById("carousel-close").addEventListener("click", closeCarousel);
+    document.addEventListener("keydown", (e) => {
+      if (carousel.hidden) return;
+      if (e.key === "Escape") closeCarousel();
+      if (e.key === "ArrowRight") showPhoto(carouselIndex + 1, 1);
+      if (e.key === "ArrowLeft") showPhoto(carouselIndex - 1, -1);
+    });
+
+    // ---- Conversation vocale avec le guide (GPT-Live via WebRTC) ----
+    // Le micro et la voix passent par la connexion WebRTC. La clé OpenAI reste sur le serveur :
+    // la page lui envoie son offre de connexion et reçoit la réponse d'OpenAI. Le canal de données
+    // sert seulement à suivre la session et à la fermer ; le serveur exécute les actions du guide.
+    const voiceBtn = document.getElementById("voice-btn");
+    const voiceStatusEl = document.getElementById("voice-status");
+    const CLOSE_WAIT_MS = 15000;
+
+    let voice = null;   // { pc, dc, mic, audio, closing, closeTimer }
+    let statusTimer = null;
+
+    function showVoiceStatus(text, { error = false, sticky = false } = {}) {
+      clearTimeout(statusTimer);
+      const header = document.querySelector("header").getBoundingClientRect();
+      voiceStatusEl.style.top = `${header.bottom + 10}px`;
+      voiceStatusEl.textContent = text;
+      voiceStatusEl.classList.toggle("error", error);
+      voiceStatusEl.classList.add("visible");
+      if (!sticky) statusTimer = setTimeout(() => voiceStatusEl.classList.remove("visible"), error ? 6000 : 2500);
+    }
+
+    function setVoiceButton(state) {
+      voiceBtn.classList.toggle("connecting", state === "connecting");
+      voiceBtn.classList.toggle("active", state === "active");
+      if (state !== "active") voiceBtn.classList.remove("working");
+      voiceBtn.setAttribute("aria-pressed", String(state === "active"));
+      voiceBtn.setAttribute("aria-label", state === "active" ? "Terminer la conversation" : "Parler au guide");
+    }
+
+    async function startVoice() {
+      if (!window.RTCPeerConnection || !navigator.mediaDevices?.getUserMedia) {
+        showVoiceStatus("Ce navigateur ne permet pas la conversation vocale.", { error: true });
+        return;
+      }
+      const v = (voice = { pc: null, dc: null, mic: null, audio: new Audio(), closing: false, closeTimer: null });
+      v.audio.autoplay = true;
+      setVoiceButton("connecting");
+      showVoiceStatus("Connexion au guide…", { sticky: true });
+      try {
+        v.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      } catch {
+        stopVoiceLocally();
+        showVoiceStatus("Micro refusé : autorisez le micro pour parler au guide.", { error: true });
+        return;
+      }
+      try {
+        const pc = (v.pc = new RTCPeerConnection());
+        pc.addEventListener("track", (e) => {
+          v.audio.srcObject = new MediaStream([e.track]);
+          v.audio.play().catch(() => showVoiceStatus("Touchez l'écran pour entendre le guide.", { error: true }));
+        });
+        for (const track of v.mic.getAudioTracks()) pc.addTrack(track, v.mic);
+        // Le canal d'événements doit exister avant de créer l'offre
+        v.dc = pc.createDataChannel("oai-events");
+        v.dc.addEventListener("message", ({ data }) => onVoiceEvent(v, JSON.parse(data)));
+        v.dc.addEventListener("close", () => {
+          if (voice === v) endVoice(v, v.closing ? null : "La conversation a été interrompue.");
+        });
+        pc.addEventListener("connectionstatechange", () => {
+          if (pc.connectionState === "failed") endVoice(v, "Connexion perdue avec le guide.");
+        });
+
+        await pc.setLocalDescription(await pc.createOffer());
+        await iceGatheringDone(pc);
+        const response = await fetch("/api/live/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sdp: pc.localDescription.sdp }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || `Erreur ${response.status}`);
+        if (voice !== v || v.closing) {
+          // Arrêté pendant la connexion : la session à peine créée est refermée
+          api("/api/live/close", {});
+          endVoice(v, null);
+          return;
+        }
+        await pc.setRemoteDescription({ type: "answer", sdp: result.transport.sdp });
+      } catch (err) {
+        console.warn("Conversation impossible", err);
+        endVoice(v, navigator.onLine ? `Le guide est indisponible (${err.message}).` : "Pas de connexion réseau.");
+      }
+    }
+
+    function iceGatheringDone(pc) {
+      if (pc.iceGatheringState === "complete") return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("réseau trop lent")), 10000);
+        pc.addEventListener("icegatheringstatechange", () => {
+          if (pc.iceGatheringState !== "complete") return;
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
+    }
+
+    function onVoiceEvent(v, event) {
+      if (voice !== v) return;
+      if (event.type === "session.started") {
+        setVoiceButton("active");
+        showVoiceStatus("Le guide vous écoute");
+      } else if (event.type === "session.closed") {
+        endVoice(v, null);
+      } else if (event.type === "error") {
+        console.warn("Guide :", event.error?.code, event.error?.message);
+      }
+    }
+
+    // Arrêt demandé par l'utilisateur : on laisse la session se terminer proprement (consommation finale)
+    function stopVoice() {
+      const v = voice;
+      if (!v || v.closing) return;
+      v.closing = true;
+      setVoiceButton("idle");
+      showVoiceStatus("Fin de la conversation");
+      if (v.dc?.readyState === "open") v.dc.send(JSON.stringify({ type: "session.close" }));
+      else api("/api/live/close", {});
+      v.closeTimer = setTimeout(() => endVoice(v, null), CLOSE_WAIT_MS);
+    }
+
+    // Libère micro, connexion et son
+    function endVoice(v, message) {
+      if (voice !== v) return;
+      clearTimeout(v.closeTimer);
+      v.mic?.getTracks().forEach((t) => t.stop());
+      v.dc?.close();
+      v.pc?.close();
+      v.audio.srcObject = null;
+      voice = null;
+      setVoiceButton("idle");
+      if (message) showVoiceStatus(message, { error: true });
+    }
+
+    function stopVoiceLocally() {
+      if (voice) endVoice(voice, null);
+    }
+
+    // Fin décidée côté serveur (inactivité, durée maximale, coupure)
+    const CLOSE_REASONS = {
+      idle: "Conversation fermée après quelques minutes de silence.",
+      max_duration: "Conversation fermée : durée maximale atteinte.",
+      connection_lost: "Connexion perdue avec le guide.",
+      content: "Conversation interrompue par le filtre de sécurité.",
+    };
+
+    function onVoiceServerState(message) {
+      if (message.state === "error") showVoiceStatus(message.message || "Erreur du guide.", { error: true });
+      if (message.state === "closed" && voice && !voice.closing) {
+        const reason = Object.keys(CLOSE_REASONS).find((r) => (message.reason || "").startsWith(r));
+        endVoice(voice, CLOSE_REASONS[reason] || null);
+      }
+    }
+
+    // Le guide cherche des lieux ou met la liste à jour : anneau animé autour du haut-parleur
+    function onAgentState(state) {
+      if (!voice) return;
+      voiceBtn.classList.toggle("working", state !== "idle");
+      if (state === "searching") showVoiceStatus("Le guide cherche des lieux…");
+    }
+
+    voiceBtn.addEventListener("click", () => (voice ? stopVoice() : startVoice()));
+
+    let map, userMarker, MarkerClass;
+
+    // Marge (px) entre les points et le bord de la carte
+    const MAP_PADDING = 60;
+
+    // Centre la carte sur le barycentre des POI inclus et de la position de l'utilisateur,
+    // avec le zoom le plus proche qui garde tous les points visibles avec une marge.
+    function centerOnBarycenter() {
+      if (!includedPois().length) {
+        // Aucun lieu : la carte est centrée sur l'utilisateur
+        map.panTo(userMarker.getPosition());
+        if (map.getZoom() < 15) map.setZoom(16);
+        return;
+      }
+      const points = [...includedPois().map((p) => p.position), userMarker.getPosition().toJSON()];
+      const lat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
+      const lng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
+
+      // Emprise symétrique autour du barycentre : fitBounds le garde au centre
+      const bounds = new google.maps.LatLngBounds();
+      for (const p of points) {
+        bounds.extend(p);
+        bounds.extend({ lat: 2 * lat - p.lat, lng: 2 * lng - p.lng });
+      }
+      map.fitBounds(bounds, MAP_PADDING);
+    }
+
+    function setUserPosition(position) {
+      userMarker.setPosition(position);
+      sendContext(); // le guide cherche autour de cette position
+      clearLandmark(); // le repère ne vaut que pour la position où on l'a demandé
+      const arrived = checkArrivals();
+      centerOnBarycenter();
+      if (!arrived) {
+        onUserMoved();
+        return;
+      }
+      // Arrivée sur un lieu : l'itinéraire change (sans animation s'il est affiché)
+      routeStale = true;
+      if (routeVisible) computeRoute();
+    }
+
+    // Élément HTML posé sur la carte à une position donnée (point bleu animé, étiquettes des portions).
+    // Les marqueurs classiques de Google ne peuvent pas être animés ni stylés en CSS.
+    let HtmlOverlay;
+
+    // pane : "overlayLayer" (sous les icônes, ne reçoit pas les touchers) ou "overlayMouseTarget"
+    // (au-dessus des icônes, reçoit les touchers)
+    function createHtmlOverlay(position, element, pane = "overlayLayer") {
+      if (!HtmlOverlay) {
+        HtmlOverlay = class extends google.maps.OverlayView {
+          constructor(position, element, pane) {
+            super();
+            this.position = new google.maps.LatLng(position);
+            this.div = element;
+            this.pane = pane;
+          }
+          onAdd() { this.getPanes()[this.pane].append(this.div); }
+          onRemove() { this.div.remove(); }
+          draw() {
+            const point = this.getProjection().fromLatLngToDivPixel(this.position);
+            this.div.style.left = `${point.x}px`;
+            this.div.style.top = `${point.y}px`;
+          }
+          getPosition() { return this.position; }
+          setPosition(position) {
+            this.position = new google.maps.LatLng(position);
+            if (this.getProjection()) this.draw();
+          }
+        };
+      }
+      const overlay = new HtmlOverlay(position, element, pane);
+      overlay.setMap(map);
+      return overlay;
+    }
+
+    // Point bleu « vous êtes ici » avec une lueur qui pulse. Pour tester, on peut le faire glisser
+    // au doigt où l'on veut, y compris sur l'icône d'un POI ; au relâchement, c'est la nouvelle
+    // position de l'utilisateur (arrivées, itinéraire et cadrage mis à jour).
+    function createUserDot(position) {
+      const div = el("div", "user-dot");
+      div.title = "Vous (faire glisser pour vous déplacer)";
+      const dot = createHtmlOverlay(position, div, "overlayMouseTarget");
+      google.maps.OverlayView.preventMapHitsAndGesturesFrom(div); // le glisser ne déplace pas la carte
+
+      let dragging = false;
+      const latLngAt = (e) => {
+        const rect = map.getDiv().getBoundingClientRect();
+        return dot.getProjection().fromContainerPixelToLatLng(new google.maps.Point(e.clientX - rect.left, e.clientY - rect.top));
+      };
+      div.addEventListener("pointerdown", (e) => {
+        dragging = true;
+        div.classList.add("dragging");
+        div.setPointerCapture(e.pointerId);
+        closeBubble();
+      });
+      div.addEventListener("pointermove", (e) => {
+        if (dragging) dot.setPosition(latLngAt(e));
+      });
+      const drop = (e) => {
+        if (!dragging) return;
+        dragging = false;
+        div.classList.remove("dragging");
+        setUserPosition(latLngAt(e).toJSON());
+      };
+      div.addEventListener("pointerup", drop);
+      div.addEventListener("pointercancel", drop);
+      return dot;
+    }
+
+    async function initMap() {
+      const { Map } = await google.maps.importLibrary("maps");
+      const { Marker } = await google.maps.importLibrary("marker");
+      await google.maps.importLibrary("geometry"); // décodage du tracé, distances
+
+      map = new Map(document.getElementById("map"), {
+        center: DEFAULT_POSITION,
+        zoom: 16,
+        isFractionalZoomEnabled: true,
+        styles: MAP_STYLE,
+        disableDefaultUI: true,
+        zoomControl: true,
+        clickableIcons: false,
+        gestureHandling: "greedy",
+      });
+
+      userMarker = createUserDot(DEFAULT_POSITION);
+
+      // Glisser la carte pendant qu'une bulle est ouverte : on ne reviendra pas à la vue d'avant
+      map.addListener("dragstart", () => { if (infoWindow?.isOpen) mapMovedByUser = true; });
+
+      // Toucher la carte ferme la bulle ouverte, sinon déplace l'utilisateur
+      map.addListener("click", (e) => {
+        if (infoWindow?.isOpen) {
+          closeBubble();
+          return;
+        }
+        setUserPosition(e.latLng.toJSON());
+      });
+
+      MarkerClass = Marker;
+      infoWindow = new google.maps.InfoWindow({ headerDisabled: true });
+      setUserPosition(DEFAULT_POSITION);
+      renderSteps();
+      listenToServer(); // lieux proposés par le guide, état de la conversation
+    }
+
+    const mapError = () => { document.getElementById("map").textContent = "Impossible de charger Google Maps."; };
+
+    fetch("/api/config")
+      .then((r) => r.json())
+      .then(({ googleMapsKey }) => {
+        if (!googleMapsKey) throw new Error("Clé Google absente du serveur");
+        GOOGLE_MAPS_API_KEY = googleMapsKey;
+        const script = document.createElement("script");
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&loading=async&callback=initMap&v=weekly`;
+        script.async = true;
+        script.onerror = mapError;
+        document.head.appendChild(script);
+      })
+      .catch(mapError);
+  </script>
+</body>
+</html>

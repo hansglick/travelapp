@@ -1,0 +1,13 @@
+{
+  "name": "prototype",
+  "version": "1.0.0",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "type": "module",
+  "dependencies": {
+    "ws": "8.21.3"
+  },
+  "private": true
+}
