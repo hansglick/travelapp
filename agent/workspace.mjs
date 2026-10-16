@@ -11,7 +11,7 @@ import { createTaskBoard } from "./tasks.mjs";
 
 const SAVE_DELAY_MS = 1000;
 
-export function createWorkspaces({ apiKey, resolvePoi, briefing, storage }) {
+export function createWorkspaces({ apiKey, resolvePoi, briefing, storage, trips }) {
   const spaces = new Map(); // id du compte → espace
 
   function open(user) {
@@ -51,6 +51,8 @@ export function createWorkspaces({ apiKey, resolvePoi, briefing, storage }) {
     const saved = storage.load(user.id);
     const stale = store.load(saved?.store);
     board.load(saved?.board);
+    // Itinéraire ouvert ou enregistré : son avancement y est enregistré à chaque changement
+    let linked = saved?.linked || null; // { id, name, tripName }
     if (stale.length) console.log(`[compte ${user.pseudo}] ${stale.length} lieu(x) à relocaliser`);
     stale.forEach((id) => tools.relocate(id));
 
@@ -73,13 +75,59 @@ export function createWorkspaces({ apiKey, resolvePoi, briefing, storage }) {
       saveTimer = setTimeout(save, SAVE_DELAY_MS);
     }
 
+    const content = () => ({ store: store.toJSON(), board: board.toJSON() });
+
     function save() {
       clearTimeout(saveTimer);
       try {
-        storage.save(user.id, { store: store.toJSON(), board: board.toJSON() });
+        const data = content();
+        storage.save(user.id, { ...data, linked });
+        if (linked) trips.updateItinerary(user.id, linked.id, data);
       } catch (err) {
         console.error(`[compte ${user.pseudo}] enregistrement impossible :`, err.message);
       }
+    }
+
+    // ---- Itinéraires ----
+
+    // Enregistre la carte actuelle comme nouvel itinéraire, qui devient l'itinéraire ouvert
+    function saveAsItinerary(tripId, name) {
+      const result = trips.createItinerary(user.id, tripId, name, content());
+      if (result.error) return result;
+      linked = { id: result.itinerary.id, name: result.itinerary.name, tripName: result.itinerary.tripName };
+      save();
+      broadcast({ type: "itinerary", current: linked });
+      return result;
+    }
+
+    // Ouvre un itinéraire : la carte et les tâches actuelles sont remplacées par les siennes
+    function openItinerary(id) {
+      const it = trips.getItinerary(user.id, id);
+      if (!it) return { error: "Itinéraire introuvable.", status: 404 };
+      board.clearAll();
+      const { context, version, preferences } = store;
+      store.reset();
+      store.context = context;
+      const staleIds = store.load(it.data.store);
+      store.preferences = preferences; // les préférences sont celles du compte, pas de l'itinéraire
+      store.version = Math.max(store.version, version) + 1; // l'écran doit accepter ce nouvel état
+      board.load(it.data.board);
+      live.clearConversation();
+      linked = { id: it.id, name: it.name, tripName: it.tripName };
+      staleIds.forEach((pid) => tools.relocate(pid));
+      store.emit("change", {});
+      broadcast({ type: "tasks", tasks: board.snapshot() });
+      broadcast({ type: "itinerary", current: linked });
+      live.appNote(`L'utilisateur a ouvert son itinéraire « ${it.name} » (séjour « ${it.tripName} ») : la carte et les tâches ont été remplacées par les siennes. Oublie les lieux et demandes précédents.`);
+      save();
+      return { itinerary: linked };
+    }
+
+    // « Effacer » : la carte n'est plus liée à l'itinéraire, qui reste enregistré tel quel
+    function unlink() {
+      linked = null;
+      broadcast({ type: "itinerary", current: null });
+      save();
     }
 
     // Plus aucun écran connecté : la conversation est fermée au bout de 30 s (coût)
@@ -94,8 +142,12 @@ export function createWorkspaces({ apiKey, resolvePoi, briefing, storage }) {
       lastGeocoded: null,
       broadcast,
       voiceState: () => voiceState,
+      linked: () => linked,
       watchClients,
       save,
+      saveAsItinerary,
+      openItinerary,
+      unlink,
     };
   }
 

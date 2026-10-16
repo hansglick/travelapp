@@ -15,24 +15,37 @@
       background: #000;
       color: #fff;
     }
-    /* En-tête : bouton « Choisir » à gauche, titre centré sur la largeur de la page */
+    /* En-tête : disquette à gauche, titre centré sur la largeur de la page, haut-parleur et menu ☰ à droite */
     header {
-      display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px;
+      display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px;
       padding: 14px 16px 10px;
       padding-top: max(14px, env(safe-area-inset-top));
     }
     /* Taille adaptée à la largeur de l'écran, pour que le titre reste centré à côté du bouton */
-    h1 { grid-column: 2; margin: 0; font-size: clamp(1.5rem, 7vw, 2.2rem); text-align: center; white-space: nowrap; }
-    #select-steps-btn { grid-column: 1; grid-row: 1; justify-self: start; }
+    h1 { grid-column: 2; margin: 0; font-size: clamp(1.3rem, 6.2vw, 2.2rem); text-align: center; white-space: nowrap; }
+    .header-right { grid-column: 3; grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
+    /* Disquette « Enregistrer » à gauche (noire sur fond orange), menu ☰ tout à droite */
+    #save-btn {
+      grid-column: 1; grid-row: 1; justify-self: start;
+      display: flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; padding: 0; border: 0; border-radius: 12px;
+      background: #e4572e; color: #000; cursor: pointer;
+    }
+    #save-btn:disabled { opacity: 0.35; cursor: default; }
+    #menu-btn {
+      flex: none; display: flex; align-items: center; justify-content: center;
+      width: 36px; height: 40px; padding: 0; border: 0; border-radius: 12px;
+      background: none; color: #fff; cursor: pointer;
+    }
 
     /* Haut-parleur orange à droite du titre : lance / arrête la conversation avec le guide vocal */
     #voice-btn {
-      grid-column: 3; grid-row: 1; justify-self: start; position: relative;
+      flex: none; position: relative;
       display: flex; align-items: center; justify-content: center;
-      width: 44px; height: 44px; padding: 0; border: 2px solid #e4572e; border-radius: 50%;
+      width: 40px; height: 40px; padding: 0; border: 2px solid #e4572e; border-radius: 50%;
       background: transparent; color: #e4572e; cursor: pointer;
     }
-    #voice-btn svg { width: 26px; height: 26px; }
+    #voice-btn svg { width: 24px; height: 24px; }
     #voice-btn .wave { opacity: 0.35; }
     #voice-btn.connecting { animation: voice-blink 1s ease-in-out infinite; }
     #voice-btn.active { background: #e4572e; color: #fff; }
@@ -169,7 +182,7 @@
       touch-action: none; user-select: none;
     }
     .bottom-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
-    #select-steps-btn, #next-btn {
+    #next-btn {
       flex: none; padding: 8px 14px; border: 0; border-radius: 999px;
       background: #e4572e; color: #fff; font: 600 0.9rem system-ui, sans-serif; cursor: pointer;
     }
@@ -306,9 +319,50 @@
     #auth-submit:disabled { opacity: 0.5; }
     #auth-error { min-height: 1.2em; margin: 0; color: #ff8a80; font-size: 0.9rem; text-align: center; }
     .auth-hint { max-width: 320px; margin: 0; font-size: 0.8rem; color: #777; text-align: center; }
-    /* Compte connecté, en bas des préférences */
-    .account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; color: #a0a0a0; font-size: 0.9rem; }
-    .account-row button { padding: 8px 14px; border: 1px solid #444; border-radius: 999px; background: none; color: #ddd; cursor: pointer; }
+    /* Fenêtres en bas d'écran : enregistrer, menu, ouvrir un itinéraire, confirmation */
+    .sheet-overlay {
+      position: fixed; inset: 0; z-index: 1500;
+      display: flex; align-items: flex-end; justify-content: center; background: rgba(0, 0, 0, 0.6);
+    }
+    .sheet-overlay[hidden] { display: none; }
+    .sheet-panel {
+      display: flex; flex-direction: column; gap: 10px;
+      width: 100%; max-width: 480px; max-height: 85dvh; overflow-y: auto;
+      margin: 0 16px max(16px, env(safe-area-inset-bottom)); padding: 18px 16px;
+      border-radius: 16px; background: #1b1b1b; color: #fff;
+    }
+    .sheet-panel h3 { margin: 0 0 4px; font-size: 1.15rem; font-weight: 600; text-align: center; }
+    .sheet-label { margin: 6px 0 0; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #a0a0a0; }
+    .sheet-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+    .sheet-item {
+      display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px;
+      border: 1px solid #333; border-radius: 12px; background: #111; color: #fff;
+      font: 1rem system-ui, sans-serif; text-align: left; cursor: pointer;
+    }
+    .sheet-item.selected { border-color: #e4572e; background: #2a1710; }
+    .sheet-item .meta { margin-left: auto; font-size: 0.8rem; color: #a0a0a0; }
+    .sheet-item.add { justify-content: center; border-style: dashed; color: #e4572e; font-weight: 600; }
+    .sheet-empty { margin: 0; font-size: 0.9rem; font-style: italic; color: #a0a0a0; }
+    .sheet-row { display: flex; gap: 8px; }
+    .sheet-row[hidden] { display: none; }
+    .sheet-panel input {
+      flex: 1; min-width: 0; padding: 12px 14px; border: 1px solid #444; border-radius: 12px;
+      background: #111; color: #fff; font-size: 1rem;
+    }
+    .sheet-panel input:focus { outline: 2px solid #e4572e; border-color: transparent; }
+    .sheet-error { min-height: 1.2em; margin: 0; color: #ff8a80; font-size: 0.9rem; }
+    .sheet-actions { display: flex; gap: 10px; margin-top: 4px; }
+    .sheet-actions button, .sheet-row button {
+      flex: 1; padding: 12px; border: 0; border-radius: 999px; font: 600 0.95rem system-ui, sans-serif; cursor: pointer;
+    }
+    .sheet-row button { flex: none; padding: 12px 16px; }
+    .btn-secondary { background: #333; color: #fff; }
+    .btn-primary { background: #e4572e; color: #fff; }
+    .btn-primary:disabled { opacity: 0.4; cursor: default; }
+    .trip-title { margin: 8px 0 2px; font-size: 0.95rem; font-weight: 600; color: #e4572e; }
+    /* Itinéraire ouvert, sous le titre de la liste des lieux */
+    #itinerary-label { margin: -6px 0 0; font-size: 0.85rem; color: #a0a0a0; text-align: center; }
+    #itinerary-label[hidden] { display: none; }
 
     /* Bas de l'écran des préférences : glisser vers le haut ouvre l'écran « Tâches » (mode test) */
     #prefs-panel #prefs-body { padding-bottom: 16px; }
@@ -376,6 +430,7 @@
       background: #e4572e; color: #fff; font-size: 0.9rem; font-weight: 700;
     }
     .poi-row-leg { margin: 4px 0 0 36px; font-size: 0.8rem; color: #a0a0a0; }
+    .poi-row-abs { margin: 2px 0 0 36px; font-size: 0.75rem; color: #777; }
     .poi-row-desc { margin: 6px 0 0 36px; font-size: 0.9rem; font-style: italic; color: #fff; white-space: nowrap; overflow: hidden; }
     .poi-row-handle {
       flex: none; display: flex; align-items: center; justify-content: center;
@@ -470,7 +525,12 @@
   <main id="app">
     <header>
       <h1>Que fait-on ?</h1>
-      <button id="select-steps-btn" aria-label="Choisir les étapes">Choisir</button>
+      <button id="save-btn" aria-label="Enregistrer l'itinéraire" title="Enregistrer l'itinéraire" disabled>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path fill="currentColor" d="M4 3h13l4 4v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a1 1 0 0 1 1-2zm3 2v5h9V5zm5 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM13 6h2v3h-2z"/>
+        </svg>
+      </button>
+      <div class="header-right">
       <button id="voice-btn" aria-label="Parler au guide" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M3 9v6h4l5 5V4L7 9z" fill="currentColor"/>
@@ -478,6 +538,12 @@
           <path class="wave wave-2" d="M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
       </button>
+      <button id="menu-btn" aria-label="Menu" aria-haspopup="true">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      </div>
     </header>
     <div id="voice-status" role="status" aria-live="polite"></div>
     <div id="map"></div>
@@ -498,6 +564,7 @@
     <div id="poi-list-head" role="button" aria-label="Revenir à la carte">
       <div class="grip"></div>
       <h2>Les lieux</h2>
+      <p id="itinerary-label" hidden></p>
       <button id="erase-btn" aria-label="Effacer tous les lieux et toutes les tâches">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4zm-3 6h12l-1 12H7z"/></svg>
         Effacer
@@ -537,6 +604,57 @@
       <div class="actions">
         <button class="cancel">Annuler</button>
         <button class="confirm">Effacer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Enregistrer l'itinéraire : choix obligatoire d'un séjour, puis nom de l'itinéraire -->
+  <div id="save-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="save-title">
+    <div class="sheet-panel">
+      <h3 id="save-title">Enregistrer l'itinéraire</h3>
+      <p class="sheet-label">Séjour</p>
+      <ul id="trip-choices" class="sheet-list"></ul>
+      <div id="new-trip-form" class="sheet-row" hidden>
+        <input id="new-trip-name" maxlength="60" placeholder="Nom du séjour" autocomplete="off">
+        <button type="button" id="new-trip-create" class="btn-primary">Créer</button>
+      </div>
+      <p class="sheet-label">Nom de l'itinéraire</p>
+      <input id="itinerary-name" maxlength="60" placeholder="Nom de l'itinéraire" autocomplete="off">
+      <p id="save-error" class="sheet-error" role="alert"></p>
+      <div class="sheet-actions">
+        <button type="button" class="btn-secondary" data-close>Annuler</button>
+        <button type="button" id="save-confirm" class="btn-primary" disabled>Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Menu ☰ -->
+  <div id="menu-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Menu">
+    <div class="sheet-panel">
+      <button type="button" id="menu-open" class="sheet-item">Ouvrir un itinéraire</button>
+      <button type="button" id="menu-logout" class="sheet-item">Se déconnecter</button>
+      <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
+    </div>
+  </div>
+
+  <!-- Ouvrir un itinéraire : séjours et leurs itinéraires -->
+  <div id="open-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="open-title">
+    <div class="sheet-panel">
+      <h3 id="open-title">Ouvrir un itinéraire</h3>
+      <div id="open-list"></div>
+      <p id="open-error" class="sheet-error" role="alert"></p>
+      <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
+    </div>
+  </div>
+
+  <!-- Confirmation avant de remplacer une carte non enregistrée -->
+  <div id="replace-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="replace-title">
+    <div class="sheet-panel">
+      <h3 id="replace-title">Remplacer la carte actuelle ?</h3>
+      <p class="sheet-empty">La carte actuelle n'est pas enregistrée : ses lieux et ses tâches seront perdus.</p>
+      <div class="sheet-actions">
+        <button type="button" class="btn-secondary" data-close>Annuler</button>
+        <button type="button" id="replace-confirm" class="btn-primary">Remplacer</button>
       </div>
     </div>
   </div>
@@ -1081,6 +1199,7 @@
         if (message.type === "state") syncPois(message);
         else if (message.type === "ui") onUiCommand(message);
         else if (message.type === "tasks") onTasks(message.tasks);
+        else if (message.type === "itinerary") onItinerary(message.current);
         else if (message.type === "voice") onVoiceServerState(message);
         else if (message.type === "agent") onAgentState(message.state);
       };
@@ -1132,6 +1251,8 @@
     function syncPois(state) {
       if (state.version <= lastStateVersion) return; // message plus ancien que l'état affiché
       lastStateVersion = state.version;
+      // Renumérotation demandée (suppression, cadenas) : l'ordre affiché sera renvoyé au serveur
+      if (state.renumber_pending) lastNumbers = "";
       const placed = new Map(state.pois.filter((p) => p.status === "resolved" && p.place).map((p) => [p.id, p]));
       let changed = false;
       let pinsChanged = false;
@@ -1177,6 +1298,7 @@
           poi.pin = null;
           changed = true;
         }
+        poi.absIndex = p.abs_index; // numéro absolu dans l'itinéraire (figé, donné par le serveur)
         // Étape figée ou libérée (par le guide, ou depuis cet écran)
         if (JSON.stringify(poi.pin || null) !== JSON.stringify(p.pin || null)) {
           poi.pin = p.pin;
@@ -2084,6 +2206,7 @@
       if (excluded.length) items.push(el("li", "section-title", "Exclus"), ...excluded.map((poi) => buildPoiRow(poi, "excluded")));
       poiRowsEl.replaceChildren(...items);
       updateEraseButton();
+      updateSaveButton();
       if (poiListEl.classList.contains("open")) fitDescriptions();
     }
 
@@ -2108,6 +2231,11 @@
       if (kind === "todo") bullet.style.background = poi.color; // couleur de la tâche qui l'a proposé
       name.append(bullet, el("span", null, props.name));
       main.append(name);
+      // Numéro absolu dans l'itinéraire (le gros numéro est la place parmi les étapes restantes)
+      if (poi.absIndex && kind !== "excluded") {
+        const total = pois.reduce((m, p) => Math.max(m, p.absIndex || 0), 0);
+        main.append(el("p", "poi-row-abs", `étape ${poi.absIndex}/${total}`));
+      }
       const leg = kind === "todo" && legs.get(poi);
       if (leg) main.append(el("p", "poi-row-leg", `${formatMeters(leg.meters)} · ${formatMinutes(leg.seconds)} à pied`));
       if (kind === "visited") main.append(el("p", "poi-row-leg", `Visité à ${formatTime(poi.visitedAt)}`));
@@ -2284,7 +2412,6 @@
 
     // Barre sous la carte : glisser vers le haut (hors bouton et interrupteur) ouvre la liste
     onVerticalSwipe(document.getElementById("list-handle"), { up: openPoiList }, ".bottom-controls button, .route-toggle");
-    document.getElementById("select-steps-btn").addEventListener("click", openPoiList);
     const nextBtn = document.getElementById("next-btn");
     nextBtn.addEventListener("click", showDepartureLandmark);
     document.getElementById("route-toggle").addEventListener("change", (e) => setRouteVisible(e.target.checked));
@@ -2299,6 +2426,215 @@
       confirmEraseEl.hidden = true;
       api("/api/pois/clear", {}); // la liste vide revient du serveur et met la carte à jour
     });
+
+    // ---- Itinéraires enregistrés : séjours (dossiers), enregistrer, ouvrir ----
+
+    let currentItinerary = null; // { id, name, tripName } : itinéraire ouvert, mis à jour en continu
+
+    function onItinerary(current) {
+      currentItinerary = current;
+      const label = document.getElementById("itinerary-label");
+      label.hidden = !current;
+      label.textContent = current ? `${current.name} · ${current.tripName}` : "";
+    }
+
+    async function getJson(path) {
+      const response = await fetch(path);
+      if (response.status === 401) showAuth();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Erreur du serveur.");
+      return data;
+    }
+
+    async function postJson(path, body) {
+      const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (response.status === 401) showAuth();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Erreur du serveur.");
+      return data;
+    }
+
+    // Fenêtres : fermeture par « Annuler / Fermer » ou en touchant à côté
+    function openSheet(sheet) { sheet.hidden = false; }
+    function closeSheet(sheet) { sheet.hidden = true; }
+    document.querySelectorAll(".sheet-overlay").forEach((sheet) => {
+      sheet.addEventListener("click", (e) => { if (e.target === sheet || e.target.closest("[data-close]")) closeSheet(sheet); });
+    });
+
+    // -- Enregistrer --
+    const saveBtn = document.getElementById("save-btn");
+    const saveSheet = document.getElementById("save-sheet");
+    const tripChoices = document.getElementById("trip-choices");
+    const newTripForm = document.getElementById("new-trip-form");
+    const newTripName = document.getElementById("new-trip-name");
+    const itineraryName = document.getElementById("itinerary-name");
+    const saveConfirm = document.getElementById("save-confirm");
+    const saveError = document.getElementById("save-error");
+    let selectedTripId = null;
+    let suggestedTripName = "";
+
+    function updateSaveConfirm() {
+      saveConfirm.disabled = !selectedTripId || !itineraryName.value.trim();
+    }
+
+    // Liste des séjours ; « + Nouveau séjour » toujours en tête. Un séjour doit être choisi.
+    function renderTripChoices(trips) {
+      const add = el("button", "sheet-item add", "+ Nouveau séjour");
+      add.type = "button";
+      add.addEventListener("click", () => {
+        newTripForm.hidden = false;
+        if (!newTripName.value) newTripName.value = suggestedTripName;
+        newTripName.focus();
+      });
+      const items = [el("li")];
+      items[0].append(add);
+      if (!trips.length) items.push(el("li", "sheet-empty", "Aucun séjour pour l'instant : crée le premier."));
+      for (const trip of trips) {
+        const li = el("li");
+        const b = el("button", `sheet-item${trip.id === selectedTripId ? " selected" : ""}`, trip.name);
+        b.type = "button";
+        b.append(el("span", "meta", `${trip.itineraries.length} itinéraire(s)`));
+        b.addEventListener("click", () => {
+          selectedTripId = trip.id;
+          renderTripChoices(trips);
+          updateSaveConfirm();
+        });
+        li.append(b);
+        items.push(li);
+      }
+      tripChoices.replaceChildren(...items);
+    }
+
+    async function openSaveSheet() {
+      selectedTripId = null;
+      suggestedTripName = "";
+      newTripForm.hidden = true;
+      newTripName.value = "";
+      itineraryName.value = "";
+      saveError.textContent = "";
+      updateSaveConfirm();
+      openSheet(saveSheet);
+      // Les noms proposés arrivent en 1 à 2 s ; la fenêtre est utilisable tout de suite
+      getJson("/api/names/suggest").then(({ folderName, itineraryName: name }) => {
+        suggestedTripName = folderName || "";
+        if (!newTripForm.hidden && !newTripName.value) newTripName.value = suggestedTripName;
+        if (name && !itineraryName.value) itineraryName.value = name;
+        updateSaveConfirm();
+      }).catch(() => {});
+      try {
+        renderTripChoices((await getJson("/api/trips")).trips);
+      } catch (err) {
+        saveError.textContent = err.message;
+      }
+    }
+
+    document.getElementById("new-trip-create").addEventListener("click", async () => {
+      saveError.textContent = "";
+      try {
+        const { trip } = await postJson("/api/trips", { name: newTripName.value });
+        selectedTripId = trip.id; // le séjour créé est choisi d'office
+        newTripForm.hidden = true;
+        newTripName.value = "";
+        renderTripChoices((await getJson("/api/trips")).trips);
+        updateSaveConfirm();
+      } catch (err) {
+        saveError.textContent = err.message;
+      }
+    });
+
+    itineraryName.addEventListener("input", updateSaveConfirm);
+
+    saveConfirm.addEventListener("click", async () => {
+      saveError.textContent = "";
+      saveConfirm.disabled = true;
+      try {
+        const { itinerary } = await postJson("/api/itineraries", { tripId: selectedTripId, name: itineraryName.value });
+        closeSheet(saveSheet);
+        showVoiceStatus(`Itinéraire « ${itinerary.name} » enregistré dans « ${itinerary.tripName} »`);
+      } catch (err) {
+        saveError.textContent = err.message; // ex. « Un itinéraire porte déjà ce nom dans le séjour … »
+      } finally {
+        updateSaveConfirm();
+      }
+    });
+
+    saveBtn.addEventListener("click", openSaveSheet);
+
+    // Disquette utilisable dès qu'il y a au moins un lieu
+    function updateSaveButton() {
+      saveBtn.disabled = !pois.length && !unplacedPois.length;
+    }
+
+    // -- Menu ☰ --
+    const menuSheet = document.getElementById("menu-sheet");
+    document.getElementById("menu-btn").addEventListener("click", () => {
+      document.getElementById("menu-logout").textContent = `Se déconnecter${currentPseudo ? ` (${currentPseudo})` : ""}`;
+      openSheet(menuSheet);
+    });
+    document.getElementById("menu-logout").addEventListener("click", logout);
+    document.getElementById("menu-open").addEventListener("click", () => {
+      closeSheet(menuSheet);
+      openOpenSheet();
+    });
+
+    // -- Ouvrir un itinéraire --
+    const openSheetEl = document.getElementById("open-sheet");
+    const openList = document.getElementById("open-list");
+    const openError = document.getElementById("open-error");
+    const replaceSheet = document.getElementById("replace-sheet");
+    let pendingOpenId = null;
+
+    async function openOpenSheet() {
+      openError.textContent = "";
+      openList.replaceChildren(el("p", "sheet-empty", "Chargement…"));
+      openSheet(openSheetEl);
+      try {
+        const { trips } = await getJson("/api/trips");
+        const blocks = [];
+        for (const trip of trips) {
+          blocks.push(el("p", "trip-title", trip.name));
+          if (!trip.itineraries.length) blocks.push(el("p", "sheet-empty", "Aucun itinéraire dans ce séjour."));
+          const ul = el("ul", "sheet-list");
+          for (const it of trip.itineraries) {
+            const li = el("li");
+            const b = el("button", `sheet-item${currentItinerary?.id === it.id ? " selected" : ""}`, it.name);
+            b.type = "button";
+            b.append(el("span", "meta", `${it.visitedCount}/${it.poiCount} visité(s)`));
+            b.addEventListener("click", () => requestOpen(it.id));
+            li.append(b);
+            ul.append(li);
+          }
+          blocks.push(ul);
+        }
+        openList.replaceChildren(...(blocks.length ? blocks : [el("p", "sheet-empty", "Aucun itinéraire enregistré pour l'instant.")]));
+      } catch (err) {
+        openError.textContent = err.message;
+      }
+    }
+
+    // Carte actuelle avec des lieux mais non enregistrée : confirmation avant de la remplacer
+    function requestOpen(id) {
+      pendingOpenId = id;
+      const unsaved = (pois.length || unplacedPois.length) && !currentItinerary;
+      if (unsaved) openSheet(replaceSheet);
+      else doOpen();
+    }
+
+    document.getElementById("replace-confirm").addEventListener("click", () => {
+      closeSheet(replaceSheet);
+      doOpen();
+    });
+
+    async function doOpen() {
+      try {
+        const { itinerary } = await postJson("/api/itineraries/open", { id: pendingOpenId });
+        closeSheet(openSheetEl);
+        if (poiListEl.classList.contains("open")) closePoiList();
+        showVoiceStatus(`Itinéraire « ${itinerary.name} » ouvert`);
+      } catch (err) {
+        openError.textContent = err.message;
+      }
+    }
 
     // ---- Écran « Mes préférences » (glisser vers le haut depuis le bas de la liste) ----
     const prefsPanelEl = document.getElementById("prefs-panel");
@@ -2333,11 +2669,7 @@
       if (p.transport && p.transport !== "à pied") row("Déplacement", p.transport);
       (p.notes || []).forEach((note) => row("Note", note));
       if (!rows.length) rows.push(el("p", "pref-empty", "Aucune préférence pour l'instant."));
-      const account = el("div", "account-row");
-      const logoutBtn = el("button", null, "Se déconnecter");
-      logoutBtn.addEventListener("click", logout);
-      account.append(el("span", null, `Connecté : ${currentPseudo || "?"}`), logoutBtn);
-      prefsBodyEl.replaceChildren(...rows, el("p", "pref-hint", "Pour changer une préférence, dis-le au guide (« finalement, les restaurants c'est bon »)."), account);
+      prefsBodyEl.replaceChildren(...rows, el("p", "pref-hint", "Pour changer une préférence, dis-le au guide (« finalement, les restaurants c'est bon »)."));
     }
 
     function openPrefs() {
@@ -2755,9 +3087,10 @@
         onUserMoved();
         return;
       }
-      // Arrivée sur un lieu : l'itinéraire change (sans animation s'il est affiché)
+      // Arrivée sur un lieu : l'ordre des étapes restantes est réoptimisé depuis ici (cadenas
+      // respectés), ce qui donne la nouvelle prochaine étape (numéro relatif 1). Sans animation.
       routeStale = true;
-      if (routeVisible) computeRoute();
+      computeRoute();
     }
 
     // Élément HTML posé sur la carte à une position donnée (point bleu animé, étiquettes des portions).

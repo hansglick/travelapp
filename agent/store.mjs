@@ -71,6 +71,7 @@ export class PoiStore extends EventEmitter {
 
   reset() {
     this.version = 0;
+    this.renumberPending = false; // numéros absolus à recalculer (après une suppression ou un cadenas)
     this.pois = new Map();      // id → POI, dans l'ordre d'ajout
     this.nextId = 1;
     this.doneOps = new Map();   // op_id → résultat déjà renvoyé (idempotence)
@@ -99,11 +100,12 @@ export class PoiStore extends EventEmitter {
     return {
       nextId: this.nextId,
       version: this.version,
+      renumberPending: this.renumberPending,
       preferences: this.preferences,
       pois: [...this.pois.values()].map((p) => ({
         id: p.id, name: p.name, query: p.query, category: p.category, reason: p.reason, sources: p.sources,
         area: p.area, status: p.status, included: p.included, visitedAt: p.visitedAt, pin: p.pin,
-        createdAt: p.createdAt, taskId: p.taskId, colorIndex: p.colorIndex,
+        createdAt: p.createdAt, taskId: p.taskId, colorIndex: p.colorIndex, absIndex: p.absIndex || null,
         place: p.place?.placeId ? {
           placeId: p.place.placeId,
           location: p.place.location,
@@ -119,6 +121,7 @@ export class PoiStore extends EventEmitter {
     if (!data) return [];
     this.nextId = Number.isInteger(data.nextId) ? data.nextId : 1;
     this.version = Number.isInteger(data.version) ? data.version : 0;
+    this.renumberPending = Boolean(data.renumberPending);
     if (data.preferences) this.preferences = { ...this.preferences, ...data.preferences };
     const stale = [];
     for (const p of data.pois || []) {
@@ -150,6 +153,7 @@ export class PoiStore extends EventEmitter {
       included: poi.included,
       visited: Boolean(poi.visitedAt),
       map_number: poi.mapNumber || null,
+      abs_index: poi.absIndex || null,
       pin: poi.pin || null,
       place: poi.place,
       candidates: poi.candidates,
@@ -164,6 +168,7 @@ export class PoiStore extends EventEmitter {
       version: this.version,
       pois: [...this.pois.values()].map((p) => this.poiView(p)),
       preferences: this.preferences,
+      renumber_pending: this.renumberPending, // la page doit renvoyer son ordre pour renuméroter
     };
   }
 
@@ -269,6 +274,7 @@ export class PoiStore extends EventEmitter {
       }
       if (category) for (const poi of this.pois.values()) if (poi.category === category && !removed.includes(poi)) removed.push(poi);
       for (const poi of removed) this.pois.delete(poi.id);
+      if (removed.length) this.#needRenumber();
       if (!removed.length) {
         // Idempotent : supprimer un lieu déjà absent n'est pas une erreur
         return { status: "unchanged", version: this.version, message: "Ces lieux n'étaient déjà plus dans la liste.", unknown_ids: unknown, selection: this.selectionForModel() };
@@ -345,9 +351,35 @@ export class PoiStore extends EventEmitter {
       createdAt: Date.now(),
       taskId: origin?.taskId || null,
       colorIndex: Number.isInteger(origin?.colorIndex) ? origin.colorIndex : null,
+      absIndex: null,
     };
     this.pois.set(poi.id, poi);
+    if (poi.status === "resolved") this.#assignLast(poi);
     return poi;
+  }
+
+  // ---- Numéros d'étape ----
+  // Numéro absolu : la place du lieu dans tout l'itinéraire. Il est figé : un lieu ajouté prend le
+  // dernier numéro (avant une étape figée « en dernier ») ; une suppression ou un cadenas fait
+  // renuméroter les lieux non visités (les visités gardent le leur), selon l'ordre affiché par la
+  // page (setMapNumbers). Le numéro relatif (1 = prochaine étape) est calculé par la page.
+
+  #assignLast(poi) {
+    if (!poi.included || poi.visitedAt || poi.absIndex) return;
+    const numbered = [...this.pois.values()].filter((p) => p !== poi && p.absIndex);
+    const max = numbered.reduce((m, p) => Math.max(m, p.absIndex), 0);
+    const lastPinned = numbered.find((p) => p.absIndex === max && p.pin?.position === "last" && !p.visitedAt);
+    if (lastPinned) {
+      poi.absIndex = max;
+      lastPinned.absIndex = max + 1;
+    } else {
+      poi.absIndex = max + 1;
+    }
+  }
+
+  // Les lieux non visités seront renumérotés au prochain ordre transmis par la page
+  #needRenumber() {
+    this.renumberPending = true;
   }
 
   #commit({ added = [], removed = [], skipped = [], unknownIds = [], replaced = false, removedCategory = null }) {
@@ -420,13 +452,33 @@ export class PoiStore extends EventEmitter {
       const n = numbers[poi.id];
       poi.mapNumber = Number.isInteger(n) && n > 0 && n < 1000 ? n : null;
     }
+    if (!this.renumberPending) return;
+    // Les visités gardent leur numéro ; les autres prennent les numéros libres, dans l'ordre affiché
+    this.renumberPending = false;
+    const all = [...this.pois.values()];
+    const taken = new Set(all.filter((p) => p.visitedAt && p.absIndex).map((p) => p.absIndex));
+    const toNumber = all.filter((p) => !p.visitedAt && p.included && p.mapNumber).sort((a, b) => a.mapNumber - b.mapNumber);
+    for (const p of all) if (!p.visitedAt && !toNumber.includes(p)) p.absIndex = null;
+    let next = 1;
+    for (const p of toNumber) {
+      while (taken.has(next)) next++;
+      p.absIndex = next++;
+    }
+    this.version++;
+    this.emit("change", { added: [], removed: [] });
   }
 
   setIncluded(id, included) {
     const poi = this.pois.get(id);
     if (!poi || poi.included === included) return null;
     poi.included = included;
-    if (!included) poi.pin = null; // exclu : il n'a plus de place dans l'itinéraire
+    if (!included) {
+      poi.pin = null; // exclu : il n'a plus de place dans l'itinéraire, ni de numéro
+      poi.absIndex = null;
+      this.#needRenumber();
+    } else {
+      this.#assignLast(poi);
+    }
     this.version++;
     this.emit("change", { added: [], removed: [] });
     return poi;
@@ -436,6 +488,7 @@ export class PoiStore extends EventEmitter {
   clearPois() {
     this.candidates.clear(); // candidats proposés lors des recherches effacées
     const removed = [...this.pois.values()];
+    this.renumberPending = false;
     if (!removed.length) return 0;
     this.pois.clear();
     this.version++;
@@ -493,6 +546,8 @@ export class PoiStore extends EventEmitter {
     if (!applied.length) {
       return { status: "rejected", rejected, version: this.version, selection: this.selectionForModel() };
     }
+    for (const r of reincluded) this.#assignLast(this.pois.get(r.id));
+    this.#needRenumber();
     this.version++;
     this.emit("change", { added: [], removed: [] });
     return {
@@ -523,6 +578,7 @@ export class PoiStore extends EventEmitter {
     if (!poi) return null;
     Object.assign(poi, resolution);
     if (poi.place) poi.place.locationSavedAt = Date.now(); // coordonnées gardées 30 jours au plus
+    if (poi.status === "resolved") this.#assignLast(poi);
     this.version++;
     this.emit("change", { added: [], removed: [], resolved: poi });
     return poi;
@@ -533,6 +589,7 @@ export class PoiStore extends EventEmitter {
     const poi = this.pois.get(id);
     if (!poi) return null;
     this.pois.delete(id);
+    this.#needRenumber();
     this.version++;
     this.history.push({ version: this.version, removedNames: new Set(), replaced: false });
     this.emit("change", { added: [], removed: [poi] });

@@ -41,6 +41,25 @@ export function openDatabase(path) {
       data TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS trips (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      name TEXT NOT NULL COLLATE NOCASE,
+      created_at INTEGER NOT NULL,
+      UNIQUE (user_id, name)
+    );
+    CREATE TABLE IF NOT EXISTS itineraries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trip_id INTEGER NOT NULL REFERENCES trips(id),
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      name TEXT NOT NULL COLLATE NOCASE,
+      data TEXT NOT NULL,
+      poi_count INTEGER NOT NULL DEFAULT 0,
+      visited_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE (trip_id, name)
+    );
   `);
   return db;
 }
@@ -129,6 +148,81 @@ export function createAccounts(db, { inviteCodes, devInvite = null }) {
   }
 
   return { register, login, userForToken, logout, invitesStatus };
+}
+
+// Nom de séjour ou d'itinéraire : 1 à 60 caractères, espaces superflus retirés
+export function cleanName(raw) {
+  const name = String(raw || "").normalize("NFC").replace(/\s+/g, " ").trim();
+  return name && name.length <= 60 ? name : null;
+}
+
+// Séjours (dossiers) et itinéraires enregistrés d'un compte. Un itinéraire = la liste de lieux
+// (avec leurs numéros) et le tableau des tâches qui les regroupent, au même format que l'espace.
+export function createTripStorage(db) {
+  const summary = (data) => {
+    const pois = (data?.store?.pois || []).filter((p) => p.included || p.visitedAt);
+    return { poiCount: pois.length, visitedCount: pois.filter((p) => p.visitedAt).length };
+  };
+
+  return {
+    list(userId) {
+      const trips = db.prepare("SELECT id, name, created_at FROM trips WHERE user_id = ? ORDER BY created_at DESC").all(userId);
+      const its = db.prepare(`SELECT id, trip_id, name, poi_count, visited_count, updated_at FROM itineraries
+        WHERE user_id = ? ORDER BY updated_at DESC`).all(userId);
+      return trips.map((t) => ({
+        id: t.id,
+        name: t.name,
+        itineraries: its.filter((i) => i.trip_id === t.id).map((i) => ({
+          id: i.id, name: i.name, poiCount: i.poi_count, visitedCount: i.visited_count, updatedAt: i.updated_at,
+        })),
+      }));
+    },
+
+    createTrip(userId, rawName) {
+      const name = cleanName(rawName);
+      if (!name) return { error: "Donne un nom au séjour (60 caractères au plus).", status: 400 };
+      if (db.prepare("SELECT 1 FROM trips WHERE user_id = ? AND name = ?").get(userId, name)) {
+        return { error: "Un séjour porte déjà ce nom.", status: 409 };
+      }
+      const { lastInsertRowid } = db.prepare("INSERT INTO trips (user_id, name, created_at) VALUES (?, ?, ?)").run(userId, name, Date.now());
+      return { trip: { id: Number(lastInsertRowid), name, itineraries: [] } };
+    },
+
+    // Nouvel itinéraire dans un séjour ; un nom déjà pris dans ce séjour est refusé
+    createItinerary(userId, tripId, rawName, data) {
+      const trip = db.prepare("SELECT id, name FROM trips WHERE id = ? AND user_id = ?").get(tripId, userId);
+      if (!trip) return { error: "Choisis un séjour.", status: 400 };
+      const name = cleanName(rawName);
+      if (!name) return { error: "Donne un nom à l'itinéraire (60 caractères au plus).", status: 400 };
+      if (db.prepare("SELECT 1 FROM itineraries WHERE trip_id = ? AND name = ?").get(trip.id, name)) {
+        return { error: `Un itinéraire porte déjà ce nom dans le séjour « ${trip.name} ».`, status: 409 };
+      }
+      const now = Date.now();
+      const { poiCount, visitedCount } = summary(data);
+      const { lastInsertRowid } = db.prepare(`INSERT INTO itineraries
+        (trip_id, user_id, name, data, poi_count, visited_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(trip.id, userId, name, JSON.stringify(data), poiCount, visitedCount, now, now);
+      return { itinerary: { id: Number(lastInsertRowid), name, tripId: trip.id, tripName: trip.name } };
+    },
+
+    // Avancement d'un itinéraire ouvert, enregistré à chaque changement
+    updateItinerary(userId, id, data) {
+      const { poiCount, visitedCount } = summary(data);
+      db.prepare("UPDATE itineraries SET data = ?, poi_count = ?, visited_count = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+        .run(JSON.stringify(data), poiCount, visitedCount, Date.now(), id, userId);
+    },
+
+    getItinerary(userId, id) {
+      const row = db.prepare(`SELECT i.id, i.name, i.data, t.id AS trip_id, t.name AS trip_name FROM itineraries i
+        JOIN trips t ON t.id = i.trip_id WHERE i.id = ? AND i.user_id = ?`).get(id, userId);
+      if (!row) return null;
+      try {
+        return { id: row.id, name: row.name, tripId: row.trip_id, tripName: row.trip_name, data: JSON.parse(row.data) };
+      } catch {
+        return null;
+      }
+    },
+  };
 }
 
 // Espace enregistré de chaque compte (lieux, tâches, préférences), en JSON

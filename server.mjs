@@ -12,7 +12,8 @@ import { createResolver, reverseGeocode } from "./agent/places.mjs";
 import { distanceM } from "./agent/live.mjs";
 import { createMetrics } from "./agent/metrics.mjs";
 import { createBriefing } from "./agent/briefing.mjs";
-import { openDatabase, createAccounts, createWorkspaceStorage } from "./agent/db.mjs";
+import { openDatabase, createAccounts, createWorkspaceStorage, createTripStorage } from "./agent/db.mjs";
+import { createNamer } from "./agent/naming.mjs";
 import { createWorkspaces } from "./agent/workspace.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -66,7 +67,9 @@ const accounts = createAccounts(db, { inviteCodes: INVITE_CODES, devInvite: DEV 
 const sharedMetrics = createMetrics(); // Google et météo, communs à tous les comptes
 const resolvePoi = createResolver({ apiKey: GOOGLE_API_KEY, metrics: sharedMetrics });
 const briefing = OPENAI_API_KEY ? createBriefing({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
-const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, briefing, storage: createWorkspaceStorage(db) });
+const trips = createTripStorage(db);
+const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, briefing, storage: createWorkspaceStorage(db), trips });
+const suggestNames = OPENAI_API_KEY ? createNamer({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
 
 // ---- HTTP ----
 
@@ -147,6 +150,7 @@ const routes = {
     res.write(`data: ${JSON.stringify({ type: "state", ...ws.store.snapshot() })}\n\n`);
     res.write(`data: ${JSON.stringify(ws.voiceState())}\n\n`);
     res.write(`data: ${JSON.stringify({ type: "tasks", tasks: ws.board.snapshot() })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "itinerary", current: ws.linked() })}\n\n`);
     ws.clients.add(res);
     ws.watchClients();
     const ping = setInterval(() => res.write(": ping\n\n"), 25000);
@@ -225,6 +229,7 @@ const routes = {
     const stopped = ws.board.clearAll();
     const count = ws.store.clearPois();
     ws.live.clearConversation(); // le contexte de la conversation est oublié aussi
+    if (ws.linked()) ws.unlink(); // l'itinéraire ouvert reste enregistré tel quel
     ws.live.appNote(`L'utilisateur a tout effacé depuis l'écran : la liste de lieux est vide, toutes les tâches${stopped ? " (y compris celles en cours)" : ""} sont annulées, et tout ce qui a été demandé jusqu'ici est oublié. Repars de zéro : ne parle plus des anciens lieux, des anciennes recherches ni des demandes précédentes. Seules ses préférences sont conservées.`);
     json(res, 200, { ok: true, removed: count, stoppedTasks: stopped, version: ws.store.version });
   },
@@ -255,6 +260,52 @@ const routes = {
     const sent = ws.sentAt.get(version);
     if (sent) ws.metrics.time("ui_refresh_ms", Date.now() - sent);
     res.writeHead(204).end();
+  },
+
+  // ---- Séjours et itinéraires ----
+
+  "GET /api/trips": (req, res, ws) => json(res, 200, { trips: trips.list(ws.user.id), current: ws.linked() }),
+
+  "POST /api/trips": async (req, res, ws) => {
+    const result = trips.createTrip(ws.user.id, (await readJson(req)).name);
+    if (result.error) return json(res, result.status, { error: result.error });
+    json(res, 201, result);
+  },
+
+  // Enregistre la carte actuelle dans un séjour ; le nom doit être libre dans ce séjour
+  "POST /api/itineraries": async (req, res, ws) => {
+    const { tripId, name } = await readJson(req);
+    if (!ws.store.pois.size) return json(res, 400, { error: "La carte est vide : rien à enregistrer." });
+    const result = ws.saveAsItinerary(Number(tripId), name);
+    if (result.error) return json(res, result.status, { error: result.error });
+    console.log(`[comptes] ${ws.user.pseudo} enregistre « ${result.itinerary.name} » (séjour « ${result.itinerary.tripName} »)`);
+    json(res, 201, result);
+  },
+
+  "POST /api/itineraries/open": async (req, res, ws) => {
+    const result = ws.openItinerary(Number((await readJson(req)).id));
+    if (result.error) return json(res, result.status, { error: result.error });
+    json(res, 200, result);
+  },
+
+  // Noms proposés pour un nouveau séjour et pour l'itinéraire
+  "GET /api/names/suggest": async (req, res, ws) => {
+    if (!suggestNames) return json(res, 503, { error: "Suggestions indisponibles." });
+    const list = trips.list(ws.user.id);
+    const visible = [...ws.store.pois.values()].filter((p) => p.included || p.visitedAt);
+    try {
+      json(res, 200, await suggestNames({
+        pois: visible.map((p) => ({ name: p.place?.name || p.name, category: p.category })),
+        tasks: ws.board.snapshot().map((t) => [t.title, ...(t.criteria || []).map((c) => c.value)].join(" : ")),
+        place: ws.store.context.place,
+        timezone: ws.store.context.timezone,
+        existingTrips: list.map((t) => t.name),
+        existingItineraries: list.flatMap((t) => t.itineraries.map((i) => i.name)),
+      }));
+    } catch (err) {
+      console.warn("[noms]", err.message);
+      json(res, 502, { error: "Suggestions indisponibles." });
+    }
   },
 
   "GET /api/metrics": (req, res, ws) => json(res, 200, { compte: ws.metrics.summary(), services: sharedMetrics.summary() }),
