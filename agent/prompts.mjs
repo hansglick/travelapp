@@ -27,6 +27,7 @@ Delegate to the backend when:
 - L'utilisateur cherche des idées de lieux ou d'activités, ou une information qui peut avoir changé (horaires, prix, ouverture).
 - Il demande d'ajouter, retirer, garder seulement certains lieux, ou de tout remplacer, y compris en les désignant par leur numéro sur la carte (« supprime le 6 et le 7 »).
 - Il veut ajouter un lieu qu'il décrit par rapport à un autre (« le parking au sud de la forteresse, près du terrain de foot »).
+- Il pose une question pratique sur un lieu de la liste : ouvert en ce moment, horaires, prix, note, téléphone, site web, adresse.
 - Il veut voir un lieu de la liste, sa bulle ou ses photos, en le désignant par son nom ou son numéro (« montre-moi la fontaine », « les photos du 3 »), ou fermer la bulle.
 - Il veut imposer l'ordre de certaines étapes (« la première étape doit être le restaurant », « le parking en dernier », « le musée en troisième ») ou libérer une étape figée.
 - Il exprime une préférence ou une contrainte, ou revient sur une préférence.
@@ -91,6 +92,10 @@ Ne propose pas un lieu déjà présent dans la liste. Respecte les lieux marqué
 - Un seul candidat respecte clairement toute la description → update_pois add avec son candidate_id (et name, query, category comme d'habitude).
 - Plusieurs la respectent → n'ajoute rien : propose 2 ou 3 candidats à l'utilisateur, chacun avec son nom et sa position en quelques mots, et demande lequel il veut. À sa réponse, ajoute celui-là avec son candidate_id (les candidats restent valables).
 - Aucun ne correspond → dis-le et propose d'élargir la recherche (radius_m plus grand).
+
+## Informations pratiques sur un lieu
+« Est-ce que la taverne est ouverte ? », « c'est cher ? », « à quelle heure ferme le musée ? », « quel est leur numéro ? » → retrouve le lieu (nom ou map_number), puis get_place_details : note et nombre d'avis, niveau de prix, ouvert en ce moment, horaires de la semaine, téléphone, site web, adresse, résumé de Google. Réponds avec ces données, en précisant qu'elles viennent de Google. Ne lis jamais une URL à voix haute ; pour un numéro de téléphone, indique plutôt que l'icône téléphone de la bulle permet d'appeler.
+Avant de présenter un lieu comme ouvert ou fermé, vérifie avec get_place_details.
 
 ## Afficher un lieu
 « Montre-moi la fontaine », « je veux voir les photos du 3 » → retrouve le lieu par son nom approximatif ou son map_number (get_selection), puis show_place avec son id : sa bulle s'ouvre sur la carte, avec sa description et ses photos. « Ferme la bulle » → show_place avec poi_id null. Si plusieurs lieux correspondent au nom, demande lequel.
@@ -193,6 +198,18 @@ export const BACKEND_TOOLS = [
         anchor_place: { type: ["string", "null"], description: "Repère hors de la liste, par son nom et sa ville (ex. « stade municipal de Réthymnon, Grèce ») ; la recherche est centrée dessus. Sinon null." },
         radius_m: { type: ["integer", "null"], description: "Rayon de recherche en mètres (100 à 2000, 400 par défaut)." },
       },
+    },
+  },
+  {
+    type: "function",
+    name: "get_place_details",
+    description: "Informations pratiques Google d'un lieu de la liste : note, nombre d'avis, prix, ouvert en ce moment, horaires, téléphone, site web, adresse, résumé.",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["poi_id"],
+      properties: { poi_id: { type: "string", description: "Identifiant interne du lieu (poi_…)." } },
     },
   },
   {

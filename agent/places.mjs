@@ -249,8 +249,54 @@ export function createResolver({ apiKey, metrics }) {
     return settled;
   }
 
+  // Informations pratiques d'un lieu (pour répondre aux questions de l'utilisateur), demandées
+  // seulement quand le modèle en a besoin et gardées 1 h en mémoire
+  const details = new Map(); // placeId → { at, value: Promise }
+  const PRICE_LEVELS = {
+    PRICE_LEVEL_FREE: "gratuit", PRICE_LEVEL_INEXPENSIVE: "bon marché (€)", PRICE_LEVEL_MODERATE: "prix moyens (€€)",
+    PRICE_LEVEL_EXPENSIVE: "cher (€€€)", PRICE_LEVEL_VERY_EXPENSIVE: "très cher (€€€€)",
+  };
+
+  async function fetchDetails(placeId) {
+    const fields = [
+      "rating", "userRatingCount", "priceLevel", "currentOpeningHours.openNow", "regularOpeningHours.weekdayDescriptions",
+      "nationalPhoneNumber", "internationalPhoneNumber", "websiteUri", "editorialSummary", "formattedAddress", "businessStatus",
+    ].join(",");
+    const response = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?languageCode=fr`, {
+      headers: { "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": fields },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    metrics.count("google_place_details");
+    if (!response.ok) throw new Error(`Place Details ${response.status}`);
+    const p = await response.json();
+    return {
+      rating: p.rating ?? null,
+      rating_count: p.userRatingCount ?? null,
+      price: PRICE_LEVELS[p.priceLevel] || null,
+      open_now: p.currentOpeningHours?.openNow ?? null,
+      opening_hours: p.regularOpeningHours?.weekdayDescriptions || null,
+      phone: p.internationalPhoneNumber || p.nationalPhoneNumber || null,
+      website: p.websiteUri || null,
+      google_summary: p.editorialSummary?.text || null,
+      address: p.formattedAddress || null,
+      ...(p.businessStatus && p.businessStatus !== "OPERATIONAL" ? { business_status: p.businessStatus } : {}),
+    };
+  }
+
+  function getDetails(placeId) {
+    const hit = details.get(placeId);
+    if (hit && Date.now() - hit.at < 60 * 60 * 1000) return hit.value;
+    const value = fetchDetails(placeId).catch((err) => {
+      details.delete(placeId);
+      throw err;
+    });
+    details.set(placeId, { at: Date.now(), value });
+    return value;
+  }
+
   resolve.searchNear = searchNear;
   resolve.locate = locate;
+  resolve.getDetails = getDetails;
   return resolve;
 }
 

@@ -421,6 +421,17 @@ export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcas
     if (name === "update_preferences") return store.updatePreferences(args);
     if (name === "pin_steps") return store.pinSteps(args);
     if (name === "find_places_near") return findPlacesNear(args);
+    if (name === "get_place_details") {
+      const poi = store.pois.get(args.poi_id);
+      if (!poi) return { status: "error", message: "Identifiant inconnu : relis la sélection." };
+      if (!poi.place?.placeId) return { status: "error", message: "Ce lieu n'est pas encore localisé dans Google : pas d'informations pratiques." };
+      try {
+        const info = await resolvePoi.getDetails(poi.place.placeId);
+        return { status: "ok", id: poi.id, name: poi.place.name || poi.name, ...info, note: "Données Google : horaires et ouverture à jour selon Google, sans garantie." };
+      } catch {
+        return { status: "error", message: "Informations Google indisponibles pour le moment." };
+      }
+    }
     if (name === "show_place") {
       if (!uiConnected()) return { status: "error", message: "L'écran de l'application n'est pas ouvert." };
       if (args.poi_id === null) {
