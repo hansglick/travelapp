@@ -29,6 +29,7 @@ const CATEGORY_TYPES = {
   monument: ["historical_landmark", "historical_place", "monument", "church", "place_of_worship", "mosque", "synagogue", "castle", "cultural_landmark", "tourist_attraction", "sculpture"],
   garden: ["park", "garden", "botanical_garden", "city_park", "national_park"],
   viewpoint: ["observation_deck", "scenic_spot", "tourist_attraction", "park", "beach", "natural_feature", "hiking_area", "historical_landmark"],
+  parking: ["parking", "parking_lot", "parking_garage"],
   activity: null, // tout type convient
   other: null,
 };
@@ -40,6 +41,7 @@ const GENERIC = new Set([
   "musee", "museum", "galerie", "gallery", "eglise", "church", "chapelle", "cathedrale", "mosquee", "mosque",
   "jardin", "jardins", "garden", "gardens", "parc", "park", "plage", "beach", "place", "square", "point", "vue",
   "monument", "porte", "gate", "fontaine", "fountain", "tour", "tower", "chateau", "castle", "fort", "forteresse",
+  "parking", "car", "park", "lot", "garage",
   "old", "town", "vieille", "ville", "city", "centre", "center", "public", "municipal", "national", "historique", "historical",
 ]);
 
@@ -103,8 +105,8 @@ export function createResolver({ apiKey, metrics }) {
   // Un même lieu n'est cherché qu'une fois par session (clé : requête + zone + position arrondie)
   const cache = new Map();
 
-  async function textSearch(poi, position, languageCode) {
-    const body = { textQuery: poi.query, languageCode, maxResultCount: 5 };
+  async function textSearch(poi, position, languageCode, textQuery = poi.query) {
+    const body = { textQuery, languageCode, maxResultCount: 5 };
     if (position && !poi.area) {
       body.locationBias = { circle: { center: { latitude: position.lat, longitude: position.lng }, radius: BIAS_RADIUS_M } };
     }
@@ -120,8 +122,11 @@ export function createResolver({ apiKey, metrics }) {
   }
 
   function choose(poi, places, position) {
+    // « Fermé définitivement » n'écarte que les établissements : un monument (ancienne mosquée devenue
+    // conservatoire…) se visite toujours, même si Google le marque fermé
+    const business = ["restaurant", "museum", "activity", "parking"].includes(poi.category);
     const scored = places
-      .filter((p) => p.location && p.businessStatus !== "CLOSED_PERMANENTLY")
+      .filter((p) => p.location && !(business && p.businessStatus === "CLOSED_PERMANENTLY"))
       .map((p) => {
         const location = { lat: p.location.latitude, lng: p.location.longitude };
         const name = p.displayName?.text || "";
@@ -157,7 +162,56 @@ export function createResolver({ apiKey, metrics }) {
     return { status: "resolved", place: toPlace(best), candidates: null };
   }
 
-  return async function resolve(poi, position) {
+  // Lieux correspondant à une recherche (« parking ») autour d'un ou deux repères, avec leur position
+  // relative à chacun (« 460 m au sud de la forteresse, 130 m au nord-est du stade ») : le modèle
+  // choisit, ou fait choisir l'utilisateur. La recherche est centrée sur le premier repère.
+  async function searchNear({ textQuery, anchors, radius, position }) {
+    const anchor = anchors[0].location;
+    const body = {
+      textQuery, languageCode: "fr", maxResultCount: 10,
+      locationBias: { circle: { center: { latitude: anchor.lat, longitude: anchor.lng }, radius } },
+    };
+    const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": FIELD_MASK },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    metrics.count("google_text_search");
+    if (!response.ok) throw new Error(`Places Text Search ${response.status}`);
+    return ((await response.json()).places || [])
+      .filter((p) => p.location && p.businessStatus !== "CLOSED_PERMANENTLY")
+      .map((p) => {
+        const location = { lat: p.location.latitude, lng: p.location.longitude };
+        const meters = Math.round(distanceKm(anchor, location) * 1000);
+        return {
+          place: {
+            placeId: p.id,
+            name: p.displayName?.text || "",
+            address: p.formattedAddress || null,
+            location,
+            types: (p.types || []).slice(0, 5),
+          },
+          distance_m: meters,
+          direction: anchors
+            .map((a) => `${Math.round(distanceKm(a.location, location) * 1000)} m ${direction(a.location, location)} de ${a.name}`)
+            .join(", "),
+          ...(position ? { distance_from_user_m: Math.round(distanceKm(position, location) * 1000) } : {}),
+        };
+      })
+      .filter((c) => c.distance_m <= Math.max(radius * 1.5, 300))
+      .sort((a, b) => a.distance_m - b.distance_m)
+      .slice(0, 6);
+  }
+
+  // Coordonnées d'un lieu décrit par son nom (repère qui n'est pas dans la liste) : premier résultat
+  async function locate(textQuery, position) {
+    const places = await textSearch({ query: textQuery }, position, "fr");
+    const p = places.find((x) => x.location);
+    return p ? { name: p.displayName?.text || textQuery, location: { lat: p.location.latitude, lng: p.location.longitude } } : null;
+  }
+
+  async function resolve(poi, position) {
     const key = [normalize(poi.query), poi.area || "", position ? `${position.lat.toFixed(2)},${position.lng.toFixed(2)}` : ""].join("|");
     if (cache.has(key)) {
       metrics.count("google_cache_hit");
@@ -166,7 +220,14 @@ export function createResolver({ apiKey, metrics }) {
     const started = Date.now();
     const result = withSlot(async () => {
       try {
-        const french = await textSearch(poi, position, "fr");
+        let french = await textSearch(poi, position, "fr");
+        // Aucun résultat : l'adresse donnée par le modèle est peut-être fausse (numéro, code postal).
+        // Nouvel essai avec seulement le nom, la ville et le pays, sans aucun numéro.
+        const parts = poi.query.split(",").map((x) => x.trim()).filter(Boolean);
+        if (!french.length && parts.length > 2) {
+          const tail = parts.slice(-2).map((x) => x.replace(/\d+/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
+          french = await textSearch(poi, position, "fr", [parts[0], ...tail].join(", "));
+        }
         const result = choose(poi, french, position);
         if (result.status === "resolved" || !french.length) return result;
         // Le modèle écrit parfois le nom en anglais (d'après ses sources) alors que Google répond en
@@ -186,7 +247,21 @@ export function createResolver({ apiKey, metrics }) {
     const settled = await result;
     if (settled.status === "error") cache.delete(key); // une panne passagère pourra être réessayée
     return settled;
-  };
+  }
+
+  resolve.searchNear = searchNear;
+  resolve.locate = locate;
+  return resolve;
+}
+
+// Direction d'un point vu depuis un autre, en toutes lettres (« au sud »)
+const DIRECTIONS = ["au nord", "au nord-est", "à l'est", "au sud-est", "au sud", "au sud-ouest", "à l'ouest", "au nord-ouest"];
+function direction(from, to) {
+  const rad = (d) => (d * Math.PI) / 180;
+  const y = Math.sin(rad(to.lng - from.lng)) * Math.cos(rad(to.lat));
+  const x = Math.cos(rad(from.lat)) * Math.sin(rad(to.lat)) - Math.sin(rad(from.lat)) * Math.cos(rad(to.lat)) * Math.cos(rad(to.lng - from.lng));
+  const bearing = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+  return DIRECTIONS[Math.round(bearing / 45) % 8];
 }
 
 // Ville / quartier de l'utilisateur à partir de sa position (Geocoding inverse), pour le contexte

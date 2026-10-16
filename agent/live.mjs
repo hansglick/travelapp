@@ -36,7 +36,7 @@ export function distanceM(a, b) {
   return 12742000 * Math.asin(Math.sqrt(h));
 }
 
-export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcast }) {
+export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcast, uiConnected }) {
   let session = null; // une seule conversation à la fois (prototype mono-utilisateur)
 
   function describePlace(place) {
@@ -398,6 +398,20 @@ export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcas
       return { status: "ok", ...store.selectionForModel(), ...(busy ? { search_in_progress: true } : {}) };
     }
     if (name === "update_preferences") return store.updatePreferences(args);
+    if (name === "pin_steps") return store.pinSteps(args);
+    if (name === "find_places_near") return findPlacesNear(args);
+    if (name === "show_place") {
+      if (!uiConnected()) return { status: "error", message: "L'écran de l'application n'est pas ouvert." };
+      if (args.poi_id === null) {
+        broadcast({ type: "ui", action: "close_bubble" });
+        return { status: "ok", message: "Bulle fermée." };
+      }
+      const poi = store.pois.get(args.poi_id);
+      if (!poi) return { status: "error", message: "Identifiant inconnu : relis la sélection." };
+      if (poi.status !== "resolved") return { status: "error", message: "Ce lieu n'est pas encore placé sur la carte : pas de bulle ni de photos." };
+      broadcast({ type: "ui", action: "open_bubble", id: poi.id });
+      return { status: "ok", message: `Bulle de « ${poi.place?.name || poi.name} » ouverte sur la carte (photos et description).` };
+    }
     if (name === "note_refinement") {
       const criterion = typeof args.criterion === "string" ? args.criterion.trim().slice(0, 160) : "";
       if (!criterion) return { status: "error", message: "criterion manquant." };
@@ -414,8 +428,9 @@ export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcas
       if (result.status === "applied" && result.added?.length) {
         task.addedIds.push(...result.added.map((p) => p.id));
         // Localisation sur la carte : on attend un court instant pour renvoyer au modèle le statut
-        // de chaque lieu (il peut corriger une requête introuvable dans la foulée)
-        const pending = result.added.map((p) => resolveAndStore(p.id));
+        // de chaque lieu (il peut corriger une requête introuvable dans la foulée). Les lieux choisis
+        // parmi les candidats de find_places_near sont déjà localisés.
+        const pending = result.added.filter((p) => p.status === "pending").map((p) => resolveAndStore(p.id));
         await Promise.race([Promise.all(pending), new Promise((r) => setTimeout(r, RESOLUTION_WAIT_MS))]);
         const byId = new Map(store.selectionForModel().pois.map((p) => [p.id, p]));
         result.added = result.added.map((p) => ({ ...p, status: byId.get(p.id)?.status || "removed_duplicate" }));
@@ -427,6 +442,41 @@ export function createLiveManager({ apiKey, store, resolvePoi, metrics, broadcas
       return result;
     }
     return { status: "error", message: `Fonction inconnue : ${name}` };
+  }
+
+  // Lieux autour d'un repère : un lieu de la liste, la position de l'utilisateur, ou un endroit nommé
+  async function findPlacesNear(args) {
+    const what = typeof args.what === "string" ? args.what.trim().slice(0, 120) : "";
+    if (!what) return { status: "error", message: "what manquant." };
+    const radius = Math.min(2000, Math.max(100, Number.isInteger(args.radius_m) ? args.radius_m : 400));
+    const position = store.context.position;
+    // Repères : l'endroit nommé (« près du terrain de foot ») centre la recherche ; le lieu de la liste
+    // sert à situer les candidats (« au sud de la forteresse »). À défaut, l'utilisateur.
+    const anchors = [];
+    if (args.anchor_place) {
+      const found = await resolvePoi.locate(args.anchor_place.slice(0, 160), position);
+      if (!found) return { status: "not_found", message: `Repère introuvable : « ${args.anchor_place} ».` };
+      anchors.push(found);
+    }
+    if (args.anchor_poi_id) {
+      const poi = store.pois.get(args.anchor_poi_id);
+      if (!poi?.place) return { status: "error", message: "Repère inconnu ou pas encore placé sur la carte." };
+      anchors.push({ name: poi.place.name || poi.name, location: poi.place.location });
+    }
+    if (!anchors.length) {
+      if (!position) return { status: "error", message: "Aucun repère : position de l'utilisateur inconnue." };
+      anchors.push({ name: "l'utilisateur", location: position });
+    }
+    const found = await resolvePoi.searchNear({ textQuery: what, anchors, radius, position });
+    const anchorNames = anchors.map((a) => a.name).join(" et ");
+    console.log(`[places] « ${what} » près de ${anchorNames} :`, found.map((c) => `${c.place.name} (${c.direction})`).join(" | ") || "rien");
+    if (!found.length) return { status: "not_found", anchors: anchorNames, message: `Aucun résultat pour « ${what} » à moins de ${radius} m.` };
+    return {
+      status: "ok",
+      anchors: anchorNames,
+      candidates: store.rememberCandidates(found),
+      note: "Choisis le candidat qui correspond à la description de l'utilisateur et ajoute-le avec update_pois (candidate_id). Si plusieurs correspondent, propose-les à l'utilisateur (nom et position en quelques mots) et demande-lui lequel.",
+    };
   }
 
   // Résolution Google d'un lieu ajouté, puis mise à jour de l'état (ignorée si le lieu a été retiré)

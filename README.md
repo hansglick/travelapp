@@ -23,6 +23,22 @@ Node.js 22.6 ou plus récent. Le micro demande une page servie en `localhost` ou
 - `agent/metrics.mjs` : délais et coût estimé de chaque session.
 - `dev/` : tests sans micro (`QFO_DEV=1 npm start`, puis `node dev/scenario.mjs <journal du serveur> '["demande 1", "demande 2"]' reset`).
 
-## Clés
+## Clés et variables d'environnement
 
-Les clés restent dans `.env` (non publié). La clé Google est transmise à la page au chargement, car l'affichage de la carte en a besoin : la restreindre au domaine de l'application et aux API utilisées dans la console Google Cloud.
+En local, dans `.env` (non publié, voir `.env.example`) ; sur Render, dans Environment.
+
+| Variable | Obligatoire | Rôle |
+|---|---|---|
+| `OPENAI_API_KEY` | oui | Guide vocal (GPT-Live) et modèle de calcul |
+| `GOOGLE_MAPS_API_KEY` | oui | Carte, photos, itinéraires, localisation des lieux |
+| `APP_PASSWORD` | conseillé en ligne | Mot de passe demandé à l'ouverture de l'application |
+| `GOOGLE_MAPS_BROWSER_KEY` | non | Clé distincte pour la page (sinon `GOOGLE_MAPS_API_KEY`) |
+| `MAX_SESSIONS_PER_HOUR` | non | Conversations vocales par heure (30 par défaut) |
+
+Fournies par Render, à ne pas saisir : `PORT`, `RENDER`, `RENDER_EXTERNAL_URL`.
+
+La clé Google est transmise à la page au chargement, car l'affichage de la carte en a besoin : la restreindre aux API utilisées dans la console Google Cloud.
+
+## Déploiement sur Render
+
+Web Service relié à ce dépôt : build `npm ci`, start `npm start`, health check `/healthz`. La version de Node est fixée par `.node-version`.

@@ -3,6 +3,7 @@
 // Lancement : npm start, puis http://localhost:8000
 
 import http from "node:http";
+import { timingSafeEqual, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { readFileSync, existsSync } from "node:fs";
 import { extname, join, dirname, resolve } from "node:path";
@@ -14,7 +15,16 @@ import { createMetrics } from "./agent/metrics.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 8000;
-const ALLOWED_ORIGINS = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]);
+// En local, le serveur n'écoute que le PC ; sur Render (variable RENDER fournie par Render), tout le réseau
+const HOST = process.env.HOST || (process.env.RENDER ? "0.0.0.0" : "127.0.0.1");
+// Origines autorisées à appeler l'API : la page locale, et l'adresse publique (fournie par Render)
+const ALLOWED_ORIGINS = new Set([
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
+  process.env.RENDER_EXTERNAL_URL,
+  process.env.PUBLIC_URL,
+].filter(Boolean));
+const MAX_SESSIONS_PER_HOUR = Number(process.env.MAX_SESSIONS_PER_HOUR) || 30; // garde-fou de coût
 const MAX_BODY = 64 * 1024;
 const GEOCODE_MIN_MOVE_M = 300;
 
@@ -34,6 +44,10 @@ const localEnv = readEnvFile(join(ROOT, ".env"));
 const openaiEnvFile = process.env.OPENAI_ENV_FILE || localEnv.OPENAI_ENV_FILE;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || localEnv.OPENAI_API_KEY || readEnvFile(openaiEnvFile && resolve(ROOT, openaiEnvFile)).OPENAI_API_KEY;
 const GOOGLE_API_KEY = process.env.GOOGLE_MAPS_API_KEY || localEnv.GOOGLE_MAPS_API_KEY;
+// Clé donnée à la page pour la carte (facultative) : peut être restreinte au site ; sinon la même clé
+const GOOGLE_BROWSER_KEY = process.env.GOOGLE_MAPS_BROWSER_KEY || localEnv.GOOGLE_MAPS_BROWSER_KEY || GOOGLE_API_KEY;
+// Mot de passe d'accès (facultatif) : demandé par le navigateur avant d'ouvrir l'application
+const APP_PASSWORD = process.env.APP_PASSWORD || localEnv.APP_PASSWORD || "";
 
 if (!OPENAI_API_KEY) console.warn("⚠ OPENAI_API_KEY introuvable : la conversation vocale sera indisponible.");
 if (!GOOGLE_API_KEY) console.warn("⚠ GOOGLE_MAPS_API_KEY introuvable : les lieux ne pourront pas être localisés.");
@@ -54,7 +68,7 @@ function broadcast(message) {
   for (const res of clients) res.write(data);
 }
 
-const live = createLiveManager({ apiKey: OPENAI_API_KEY, store, resolvePoi, metrics, broadcast });
+const live = createLiveManager({ apiKey: OPENAI_API_KEY, store, resolvePoi, metrics, broadcast, uiConnected: () => clients.size > 0 });
 
 // Chaque changement de l'état est poussé au navigateur (regroupé sur quelques ms) ; le navigateur
 // confirme l'affichage, ce qui mesure le délai d'actualisation de l'interface
@@ -105,6 +119,17 @@ const validPosition = (p) =>
   p && Number.isFinite(p.lat) && Number.isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180;
 
 let lastGeocoded = null;
+const sessionStarts = []; // heures de création des dernières conversations (limite par heure)
+
+// Accès protégé par mot de passe (authentification HTTP « Basic », n'importe quel identifiant)
+const digest = (text) => createHash("sha256").update(text).digest();
+function authorized(req) {
+  if (!APP_PASSWORD) return true;
+  const [scheme, encoded] = (req.headers.authorization || "").split(" ");
+  if (scheme !== "Basic" || !encoded) return false;
+  const password = Buffer.from(encoded, "base64").toString("utf8").split(":").slice(1).join(":");
+  return timingSafeEqual(digest(password), digest(APP_PASSWORD));
+}
 
 const routes = {
   "GET /api/events": (req, res) => {
@@ -124,6 +149,10 @@ const routes = {
   // Offre SDP du navigateur → session GPT-Live (la clé reste ici)
   "POST /api/live/session": async (req, res) => {
     if (!OPENAI_API_KEY) return json(res, 503, { error: "Clé OpenAI absente sur le serveur." });
+    const hourAgo = Date.now() - 3600_000;
+    while (sessionStarts.length && sessionStarts[0] < hourAgo) sessionStarts.shift();
+    if (sessionStarts.length >= MAX_SESSIONS_PER_HOUR) return json(res, 429, { error: "Trop de conversations cette heure-ci." });
+    sessionStarts.push(Date.now());
     const { sdp } = await readJson(req);
     if (typeof sdp !== "string" || !sdp.trim() || sdp.length > MAX_BODY) return json(res, 400, { error: "Offre SDP manquante." });
     try {
@@ -174,6 +203,18 @@ const routes = {
     json(res, 200, { ok: true, version: store.version });
   },
 
+  // Cadenas posé ou retiré à la main dans la page : pin = { position: "index", index } ou null
+  "POST /api/pois/pin": async (req, res) => {
+    const { id, pin } = await readJson(req);
+    if (typeof id !== "string") return json(res, 400, { error: "id manquant." });
+    const result = pin ? store.pinSteps({ pins: [{ id, ...pin }] }) : store.pinSteps({ unpin_ids: [id] });
+    const changed = result.applied?.[0];
+    if (changed) live.appNote(pin
+      ? `L'utilisateur a figé « ${changed.name} » en ${changed.position} depuis l'écran.`
+      : `L'utilisateur a retiré le cadenas de « ${changed.name} » depuis l'écran.`);
+    json(res, 200, { ok: result.status === "applied", version: store.version });
+  },
+
   // Numéros d'étape affichés par la page ({ id: numéro }), pour « supprime le point n° 6 »
   "POST /api/pois/numbers": async (req, res) => {
     const { numbers } = await readJson(req);
@@ -193,7 +234,7 @@ const routes = {
   "GET /api/metrics": (req, res) => json(res, 200, metrics.summary()),
 
   // Clé Google pour la carte : lue dans .env, jamais écrite dans le code de la page (dépôt public)
-  "GET /api/config": (req, res) => json(res, 200, { googleMapsKey: GOOGLE_API_KEY || null }),
+  "GET /api/config": (req, res) => json(res, 200, { googleMapsKey: GOOGLE_BROWSER_KEY || null }),
 
   // Tests sans micro (QFO_DEV=1) : demande tapée envoyée au guide de la session en cours
   "POST /api/dev/say": async (req, res) => {
@@ -216,6 +257,12 @@ const routes = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const route = routes[`${req.method} ${url.pathname}`];
+  // Vérification de santé de Render : publique, sans aucune donnée
+  if (url.pathname === "/healthz") return json(res, 200, { ok: true });
+  if (!authorized(req)) {
+    res.writeHead(401, { "WWW-Authenticate": 'Basic realm="Que fait-on", charset="UTF-8"', "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("Mot de passe requis.");
+  }
   try {
     if (route) {
       // Seule la page servie par ce serveur peut appeler l'API
@@ -233,4 +280,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => console.log(`Que fait-on ? → http://localhost:${PORT}`));
+server.listen(PORT, HOST, () => {
+  console.log(`Que fait-on ? → ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`}`);
+  console.log(`Clés : OpenAI ${OPENAI_API_KEY ? "✓" : "✗"}, Google ${GOOGLE_API_KEY ? "✓" : "✗"}${GOOGLE_BROWSER_KEY !== GOOGLE_API_KEY ? " (+ clé navigateur)" : ""}, mot de passe ${APP_PASSWORD ? "✓" : "aucun"}`);
+});

@@ -6,7 +6,19 @@
 import { EventEmitter } from "node:events";
 
 // Catégories normalisées, partagées avec le navigateur (icônes) et le modèle (schéma de l'outil)
-export const CATEGORIES = ["restaurant", "museum", "monument", "garden", "viewpoint", "activity", "other"];
+export const CATEGORIES = ["restaurant", "museum", "monument", "garden", "viewpoint", "activity", "parking", "other"];
+
+// Place d'une étape figée (cadenas) : { position: "first" } et { position: "last" } restent relatives
+// (toujours la première / la dernière, même si des lieux sont ajoutés) ; { position: "index", index }
+// fige un numéro précis. Numéro d'étape correspondant (1 à n), n = nombre d'étapes à visiter.
+export function pinSlot(pin, n) {
+  if (!pin) return null;
+  if (pin.position === "first") return 1;
+  if (pin.position === "last") return n;
+  return pin.index;
+}
+
+const describePin = (pin) => (pin.position === "first" ? "première étape" : pin.position === "last" ? "dernière étape" : `étape n° ${pin.index}`);
 
 export const LIMITS = {
   addPerOperation: 10,
@@ -48,6 +60,8 @@ export class PoiStore extends EventEmitter {
     this.pois = new Map();      // id → POI, dans l'ordre d'ajout
     this.nextId = 1;
     this.doneOps = new Map();   // op_id → résultat déjà renvoyé (idempotence)
+    this.candidates = new Map(); // cand_… → lieu Google proposé par find_places_near
+    this.nextCandidate = 1;
     this.history = [];          // { version, removedNames: Set, removedCategories: Set, replaced: bool }
     this.preferences = {
       excluded_categories: [],
@@ -76,6 +90,7 @@ export class PoiStore extends EventEmitter {
       included: poi.included,
       visited: Boolean(poi.visitedAt),
       map_number: poi.mapNumber || null,
+      pin: poi.pin || null,
       place: poi.place,
       candidates: poi.candidates,
     };
@@ -100,6 +115,7 @@ export class PoiStore extends EventEmitter {
         category: p.category,
         status: p.status,
         ...(p.mapNumber ? { map_number: p.mapNumber } : {}),
+        ...(p.pin ? { pinned: p.pin.position === "index" ? p.pin.index : p.pin.position } : {}),
         ...(p.place?.address ? { address: p.place.address } : {}),
         ...(p.candidates?.length ? { google_candidates: p.candidates.map((c) => `${c.name} (${c.address || "adresse inconnue"})`) } : {}),
         ...(p.included ? {} : { excluded_by_user: true }),
@@ -123,6 +139,16 @@ export class PoiStore extends EventEmitter {
       local_time: localTime,
       timezone,
     };
+  }
+
+  // Lieux Google proposés au modèle : il pourra en ajouter un tel quel (candidate_id dans update_pois),
+  // sans nouvelle recherche, donc sans risque de confusion
+  rememberCandidates(list) {
+    return list.map((c) => {
+      const id = `cand_${this.nextCandidate++}`;
+      this.candidates.set(id, c.place);
+      return { candidate_id: id, name: c.place.name, address: c.place.address, position: c.direction, ...(c.distance_from_user_m != null ? { distance_from_user_m: c.distance_from_user_m } : {}) };
+    });
   }
 
   // ---- Contexte ----
@@ -212,8 +238,19 @@ export class PoiStore extends EventEmitter {
         skipped.push({ name, reason: `catégorie « ${category} » exclue par l'utilisateur (update_preferences pour lever l'exclusion s'il a changé d'avis)` });
         continue;
       }
+      // Lieu choisi parmi les candidats de find_places_near : déjà localisé
+      let place = null;
+      if (typeof raw.candidate_id === "string" && raw.candidate_id) {
+        place = this.candidates.get(raw.candidate_id) || null;
+        if (!place) {
+          skipped.push({ name, reason: `candidate_id inconnu (${raw.candidate_id}) : relance find_places_near` });
+          continue;
+        }
+      }
       const key = normalize(name);
-      const dup = [...existing, ...accepted].find((p) => normalize(p.name) === key || normalize(p.query) === normalize(query) || (p.place && normalize(p.place.name) === key));
+      const dup = [...existing, ...accepted].find((p) =>
+        normalize(p.name) === key || normalize(p.query) === normalize(query) || (p.place && normalize(p.place.name) === key) ||
+        (place && p.place?.placeId === place.placeId));
       if (dup) {
         skipped.push({ name, reason: `déjà dans la liste (id ${dup.id || "nouveau"})` });
         continue;
@@ -226,7 +263,7 @@ export class PoiStore extends EventEmitter {
         skipped.push({ name, reason: `liste pleine (${LIMITS.selectionSize} lieux au maximum)` });
         continue;
       }
-      accepted.push({ name, query, category, reason: cleanText(raw.reason, LIMITS.reason), sources: cleanSources(raw.sources) });
+      accepted.push({ name, query, category, reason: cleanText(raw.reason, LIMITS.reason), sources: cleanSources(raw.sources), place });
     }
     return { accepted, skipped };
   }
@@ -236,10 +273,11 @@ export class PoiStore extends EventEmitter {
       id: `poi_${this.nextId++}`,
       ...p,
       area: cleanText(area, LIMITS.area) || null,
-      status: "pending",
+      status: p.place ? "resolved" : "pending",
       included: true,
       visitedAt: null,
-      place: null,
+      pin: null,
+      place: p.place || null,
       candidates: null,
       createdAt: Date.now(),
     };
@@ -254,7 +292,7 @@ export class PoiStore extends EventEmitter {
     const result = {
       status: "applied",
       version: this.version,
-      ...(added.length ? { added: added.map((p) => ({ id: p.id, name: p.name, status: "pending" })) } : {}),
+      ...(added.length ? { added: added.map((p) => ({ id: p.id, name: p.name, status: p.status })) } : {}),
       ...(removed.length ? { removed: removed.map((p) => ({ id: p.id, name: p.name })) } : {}),
       ...(removedCategory ? { removed_category: removedCategory } : {}),
       ...(skipped.length ? { skipped } : {}),
@@ -323,15 +361,80 @@ export class PoiStore extends EventEmitter {
     const poi = this.pois.get(id);
     if (!poi || poi.included === included) return null;
     poi.included = included;
+    if (!included) poi.pin = null; // exclu : il n'a plus de place dans l'itinéraire
     this.version++;
     this.emit("change", { added: [], removed: [] });
     return poi;
+  }
+
+  // ---- Étapes figées (cadenas), demandées par le modèle (pin_steps) ou posées à la main ----
+
+  // Nombre d'étapes à visiter (lieux placés sur la carte, cochés, pas encore visités)
+  stepCount() {
+    return [...this.pois.values()].filter((p) => p.status === "resolved" && p.included && !p.visitedAt).length;
+  }
+
+  pinSteps(args) {
+    const applied = [], rejected = [], reincluded = [], replaced = [];
+    for (const id of Array.isArray(args.unpin_ids) ? args.unpin_ids : []) {
+      const poi = this.pois.get(id);
+      if (!poi?.pin) continue;
+      poi.pin = null;
+      applied.push({ id, name: poi.place?.name || poi.name, position: "cadenas retiré" });
+    }
+    for (const raw of (Array.isArray(args.pins) ? args.pins : []).slice(0, 10)) {
+      const poi = this.pois.get(raw?.id);
+      const name = poi?.place?.name || poi?.name;
+      if (!poi) { rejected.push({ id: raw?.id, reason: "identifiant inconnu" }); continue; }
+      if (poi.visitedAt) { rejected.push({ id: poi.id, name, reason: "lieu déjà visité" }); continue; }
+      if (poi.status !== "resolved") { rejected.push({ id: poi.id, name, reason: "lieu pas encore placé sur la carte" }); continue; }
+      let pin;
+      if (raw.position === "first" || raw.position === "last") pin = { position: raw.position };
+      else if (raw.position === "index" && Number.isInteger(raw.index) && raw.index >= 1) pin = { position: "index", index: raw.index };
+      else { rejected.push({ id: poi.id, name, reason: "position invalide" }); continue; }
+      // Lieu exclu (décoché) : il revient dans l'itinéraire
+      const n = this.stepCount() + (poi.included ? 0 : 1);
+      if (pin.position === "index" && pin.index > n) {
+        rejected.push({ id: poi.id, name, reason: `il n'y a que ${n} étape(s)` });
+        continue;
+      }
+      if (!poi.included) {
+        poi.included = true;
+        reincluded.push({ id: poi.id, name });
+      }
+      // La dernière demande l'emporte : un autre lieu figé à la même place perd son cadenas
+      for (const other of this.pois.values()) {
+        if (other === poi || !other.pin || other.visitedAt || !other.included) continue;
+        if (pinSlot(other.pin, n) === pinSlot(pin, n)) {
+          other.pin = null;
+          replaced.push({ id: other.id, name: other.place?.name || other.name });
+        }
+      }
+      poi.pin = pin;
+      applied.push({ id: poi.id, name, position: describePin(pin) });
+    }
+    if (!applied.length) {
+      return { status: "rejected", rejected, version: this.version, selection: this.selectionForModel() };
+    }
+    this.version++;
+    this.emit("change", { added: [], removed: [] });
+    return {
+      status: "applied",
+      version: this.version,
+      applied,
+      ...(reincluded.length ? { reincluded, note_reincluded: "Ces lieux étaient exclus : ils ont été remis dans l'itinéraire." } : {}),
+      ...(replaced.length ? { unpinned_because_same_place: replaced } : {}),
+      ...(rejected.length ? { rejected } : {}),
+      note: "L'itinéraire est réorganisé autour des étapes figées ; les numéros affichés (map_number) vont changer.",
+      selection: this.selectionForModel(),
+    };
   }
 
   setVisited(id) {
     const poi = this.pois.get(id);
     if (!poi || poi.visitedAt) return null;
     poi.visitedAt = Date.now();
+    poi.pin = null; // une étape visitée perd son cadenas
     this.version++;
     this.emit("change", { added: [], removed: [] });
     return poi;

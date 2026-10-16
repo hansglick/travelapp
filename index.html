@@ -438,6 +438,11 @@
         color: "#e4572e",
         glyph: '<path d="M12 1.8l3.1 6.4 7 .9-5.1 4.9 1.3 7-6.3-3.4-6.3 3.4 1.3-7L1.9 9.1l7-.9z"/>',
       },
+      parking: {
+        label: "Parking",
+        color: "#e4572e",
+        glyph: '<path d="M7 3h6a5.5 5.5 0 0 1 0 11h-2.5v7H7zm3.5 3.2v4.6H13a2.3 2.3 0 0 0 0-4.6z"/>',
+      },
       other: {
         label: "Lieu",
         color: "#e4572e",
@@ -715,7 +720,7 @@
         google.maps.geometry.spherical.computeDistanceBetween(here, new google.maps.LatLng(p.position)) <= ARRIVAL_RADIUS_M);
       for (const p of arrived) {
         p.visitedAt = new Date();
-        p.locked = false;
+        p.pin = null; // une étape visitée perd son cadenas
         api("/api/pois/update", { id: p.id, visited: true }); // le guide en est informé
       }
       if (arrived.length) {
@@ -742,9 +747,39 @@
       events.onmessage = ({ data }) => {
         const message = JSON.parse(data);
         if (message.type === "state") syncPois(message);
+        else if (message.type === "ui") onUiCommand(message);
         else if (message.type === "voice") onVoiceServerState(message);
         else if (message.type === "agent") onAgentState(message.state);
       };
+    }
+
+    // Bulle d'un lieu sur la carte (toucher son icône, ou demande au guide). Un lieu décoché n'a plus
+    // d'icône : la bulle s'ouvre alors à son emplacement.
+    function openMapBubble(poi) {
+      rememberViewBeforeBubble();
+      infoWindow.setContent(buildPoiCard(poi.props, poiCardSize()));
+      if (poi.marker.getMap()) {
+        infoWindow.open({ map, anchor: poi.marker });
+      } else {
+        infoWindow.setPosition(poi.position);
+        infoWindow.open({ map });
+      }
+    }
+
+    // Commandes d'affichage demandées par le guide : on revient sur la carte et on ouvre la bulle
+    function onUiCommand(message) {
+      if (message.action === "close_bubble") {
+        closeBubble();
+        return;
+      }
+      if (message.action !== "open_bubble") return;
+      const poi = pois.find((p) => p.id === message.id);
+      if (!poi) return;
+      closeCarousel();
+      closeListBubble();
+      if (poiListEl.classList.contains("open")) closePoiList();
+      closeBubble();
+      openMapBubble(poi);
     }
 
     function poiProps(p) {
@@ -766,6 +801,7 @@
       lastStateVersion = state.version;
       const placed = new Map(state.pois.filter((p) => p.status === "resolved" && p.place).map((p) => [p.id, p]));
       let changed = false;
+      let pinsChanged = false;
 
       // Lieux retirés par le guide (ou plus localisés)
       for (const poi of [...pois]) {
@@ -784,12 +820,11 @@
           const position = p.place.location;
           const props = poiProps(p);
           const marker = new MarkerClass({ map, position, title: props.name, icon: poiIcon(props.category) });
-          poi = { id: p.id, props, position, marker, included: true, locked: false, visitedAt: null };
-          marker.addListener("click", () => {
-            rememberViewBeforeBubble();
-            infoWindow.setContent(buildPoiCard(poi.props, poiCardSize()));
-            infoWindow.open({ map, anchor: marker });
-          });
+          poi = {
+            id: p.id, props, position, marker, included: true, pin: p.pin, visitedAt: null,
+            get locked() { return Boolean(this.pin); }, // cadenas : étape figée (pin du serveur)
+          };
+          marker.addListener("click", () => openMapBubble(poi));
           pois.push(poi);
           // Nouvelle étape : à la suite des étapes restantes
           routeOrder = [...includedPois(), poi, ...routeOrder.filter((x) => !isToVisit(x))];
@@ -805,16 +840,22 @@
         }
         if (p.visited && !poi.visitedAt) {
           poi.visitedAt = new Date();
-          poi.locked = false;
+          poi.pin = null;
           changed = true;
+        }
+        // Étape figée ou libérée (par le guide, ou depuis cet écran)
+        if (JSON.stringify(poi.pin || null) !== JSON.stringify(p.pin || null)) {
+          poi.pin = p.pin;
+          pinsChanged = true;
         }
       }
 
       unplacedPois = state.pois.filter((p) => p.status !== "resolved");
       renderSteps();
-      if (changed) {
+      if (changed || pinsChanged) {
         routeStale = true;
-        if (routeVisible) {
+        // Étapes figées : l'ordre est réoptimisé autour d'elles tout de suite (numéros à jour)
+        if (routeVisible || pinsChanged) {
           clearTimeout(routeTimer);
           routeTimer = setTimeout(computeRoute, 300);
         }
@@ -839,6 +880,8 @@
 
     // Numéros d'étape sur la carte (pastille ✓ grise pour les lieux déjà visités) et dans la liste
     function renderSteps() {
+      // Étapes figées toujours à leur place, quel que soit le changement (ajout, arrivée, lieu remis…)
+      routeOrder = [...arrangeByPins(includedPois()), ...routeOrder.filter((p) => !isToVisit(p))];
       includedPois().forEach((poi, i) => poi.marker.setIcon(poiIcon(poi.props.category, i + 1, poi.locked)));
       visitedPois().forEach((poi) => poi.marker.setIcon(poiIcon(poi.props.category, null, false, true)));
       renderPoiList();
@@ -859,6 +902,7 @@
     // Retirer / remettre un POI dans l'itinéraire
     function setIncluded(poi, included) {
       poi.included = included;
+      if (!included) poi.pin = null; // exclu : plus de place dans l'itinéraire, donc plus de cadenas
       api("/api/pois/update", { id: poi.id, included }); // le guide en est informé
       poi.marker.setMap(included ? map : null);
       closeBubble();
@@ -941,9 +985,39 @@
     // Meilleur ordre de visite : les POI cadenassés gardent leur numéro, les autres sont placés
     // sur les numéros libres de façon à minimiser le temps de marche total (recherche exhaustive
     // avec élagage ; au-delà de 9 POI libres, on prend à chaque fois le POI libre le plus proche).
+    // Place imposée de chaque étape (0 à n − 1), ou -1 si elle est libre. « Première » et « dernière »
+    // passent avant les numéros précis ; une place déjà prise ou hors de la liste est ignorée.
+    function slotsOf(stops) {
+      const n = stops.length;
+      const slots = Array(n).fill(-1);
+      const taken = new Set();
+      const want = (pin) => (pin.position === "first" ? 0 : pin.position === "last" ? n - 1 : pin.index - 1);
+      const rank = (pin) => (pin.position === "index" ? 1 : 0);
+      stops
+        .map((p, i) => ({ i, pin: p.pin }))
+        .filter((x) => x.pin)
+        .sort((a, b) => rank(a.pin) - rank(b.pin))
+        .forEach(({ i, pin }) => {
+          const slot = want(pin);
+          if (slot < 0 || slot >= n || taken.has(slot)) return;
+          slots[i] = slot;
+          taken.add(slot);
+        });
+      return slots;
+    }
+
+    // Étapes figées à leur place, les autres dans leur ordre actuel autour d'elles
+    function arrangeByPins(stops) {
+      const slots = slotsOf(stops);
+      const result = Array(stops.length).fill(null);
+      stops.forEach((p, i) => { if (slots[i] >= 0) result[slots[i]] = p; });
+      const free = stops.filter((_, i) => slots[i] < 0);
+      return result.map((p) => p || free.shift());
+    }
+
     function bestOrder(stops, times) {
       const n = stops.length;
-      const slotOf = stops.map((p, i) => (p.locked ? i : -1)); // numéro imposé, ou -1
+      const slotOf = slotsOf(stops); // numéro imposé, ou -1
       const lockedAt = Array(n).fill(-1);
       slotOf.forEach((slot, i) => { if (slot >= 0) lockedAt[slot] = i; });
       const free = stops.map((_, i) => i).filter((i) => slotOf[i] < 0);
@@ -995,11 +1069,11 @@
         return;
       }
 
-      let ordered = stops;
+      let ordered = arrangeByPins(stops);
       let route;
       try {
         // 1. Ordre optimisé, en respectant les étapes cadenassées
-        const freeCount = stops.filter((p) => !p.locked).length;
+        const freeCount = slotsOf(stops).filter((slot) => slot < 0).length;
         if (freeCount > 1) {
           ordered = bestOrder(stops, await walkingTimes(origin.toJSON(), stops));
           if (requestId !== routeRequestId) return;
@@ -1708,9 +1782,7 @@
       lock.setAttribute("aria-pressed", String(poi.locked));
       lock.addEventListener("click", (e) => {
         e.stopPropagation();
-        poi.locked = !poi.locked;
-        renderSteps(); // cadenas à jour dans la liste et sur la carte
-        computeRoute();
+        setPin(poi, poi.locked ? null : { position: "index", index: includedPois().indexOf(poi) + 1 });
       });
 
       const photosBtn = el("button", "poi-row-photos");
@@ -1752,6 +1824,15 @@
       return row;
     }
 
+    // Cadenas posé ou retiré à la main : appliqué tout de suite, puis enregistré par le serveur
+    // (le guide en est informé ; si un autre lieu occupait cette place, le serveur lui retire son cadenas)
+    function setPin(poi, pin) {
+      poi.pin = pin;
+      api("/api/pois/pin", { id: poi.id, pin });
+      renderSteps(); // cadenas à jour dans la liste et sur la carte
+      computeRoute();
+    }
+
     // Réordonner à la main : on attrape la poignée ≡ et la ligne suit le doigt parmi les POI inclus.
     // Au relâchement, l'étape déplacée est cadenassée à sa nouvelle place et l'itinéraire est
     // réoptimisé autour d'elle.
@@ -1778,9 +1859,7 @@
         const newIncluded = [...poiRowsEl.querySelectorAll(".poi-row.todo")].map((r) => r.poi);
         routeOrder = [...newIncluded, ...routeOrder.filter((p) => !isToVisit(p))];
         if (newIncluded.some((p, i) => p !== row.dragStartOrder[i])) {
-          row.poi.locked = true;
-          renderSteps();
-          computeRoute();
+          setPin(row.poi, { position: "index", index: newIncluded.indexOf(row.poi) + 1 });
         }
       };
       handle.addEventListener("pointerdown", (e) => {

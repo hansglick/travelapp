@@ -48,6 +48,6 @@ for (const text of steps) {
   console.log("  guide :", answers().at(-1)?.replace("[backend →  guide] ", ""), `(${Math.round((Date.now() - t) / 1000)} s)`);
   const s = await state();
   console.log(`  v${s.version} prefs exclues=[${s.preferences.excluded_categories}] max_walk=${s.preferences.max_walk_minutes}`);
-  for (const p of s.pois) console.log(`   - n°${p.map_number ?? "-"} ${p.id} ${p.status.padEnd(9)} ${p.category.padEnd(10)} ${p.place?.name || p.name}${p.included ? "" : " (décoché)"}`);
+  for (const p of s.pois) console.log(`   - n°${p.map_number ?? "-"} ${p.id} ${p.status.padEnd(9)} ${p.category.padEnd(10)} ${p.place?.name || p.name}${p.included ? "" : " (décoché)"}${p.pin ? " 🔒" + (p.pin.position === "index" ? p.pin.index : p.pin.position) : ""}`);
 }
 await post("/api/live/close", {});

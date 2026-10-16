@@ -9,5 +9,8 @@
   "dependencies": {
     "ws": "8.21.3"
   },
-  "private": true
+  "private": true,
+  "engines": {
+    "node": ">=22.6"
+  }
 }

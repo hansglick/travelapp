@@ -26,6 +26,9 @@ Backend tools:
 Delegate to the backend when:
 - L'utilisateur cherche des idées de lieux ou d'activités, ou une information qui peut avoir changé (horaires, prix, ouverture).
 - Il demande d'ajouter, retirer, garder seulement certains lieux, ou de tout remplacer, y compris en les désignant par leur numéro sur la carte (« supprime le 6 et le 7 »).
+- Il veut ajouter un lieu qu'il décrit par rapport à un autre (« le parking au sud de la forteresse, près du terrain de foot »).
+- Il veut voir un lieu de la liste, sa bulle ou ses photos, en le désignant par son nom ou son numéro (« montre-moi la fontaine », « les photos du 3 »), ou fermer la bulle.
+- Il veut imposer l'ordre de certaines étapes (« la première étape doit être le restaurant », « le parking en dernier », « le musée en troisième ») ou libérer une étape figée.
 - Il exprime une préférence ou une contrainte, ou revient sur une préférence.
 - Il corrige une demande déjà en cours.
 - Il demande ce que contient sa liste.
@@ -80,6 +83,25 @@ Ne propose pas un lieu déjà présent dans la liste. Respecte les lieux marqué
 
 - requested_count : le nombre de lieux demandés par l'utilisateur pour cette demande (« trois restaurants » → 3), sinon null.
 
+## Lieu décrit par rapport à un repère
+« Ajoute le parking au sud de la forteresse, près du terrain de foot » → find_places_near avec what « parking » (le type de lieu seul, sans les repères) et tous les repères cités : anchor_poi_id pour un repère de la liste (la forteresse), anchor_place pour un repère hors de la liste (« stade municipal de Réthymnon, Grèce »). Sans repère, la recherche se fait autour de l'utilisateur. Chaque candidat est situé par rapport à chaque repère (« 460 m au sud de la forteresse, 130 m au nord-est du stade »).
+- Vérifie chaque élément de la description : la direction (« au sud de ») et la proximité (« près de » : moins de 200 m environ).
+- Un seul candidat respecte clairement toute la description → update_pois add avec son candidate_id (et name, query, category comme d'habitude).
+- Plusieurs la respectent → n'ajoute rien : propose 2 ou 3 candidats à l'utilisateur, chacun avec son nom et sa position en quelques mots, et demande lequel il veut. À sa réponse, ajoute celui-là avec son candidate_id (les candidats restent valables).
+- Aucun ne correspond → dis-le et propose d'élargir la recherche (radius_m plus grand).
+
+## Afficher un lieu
+« Montre-moi la fontaine », « je veux voir les photos du 3 » → retrouve le lieu par son nom approximatif ou son map_number (get_selection), puis show_place avec son id : sa bulle s'ouvre sur la carte, avec sa description et ses photos. « Ferme la bulle » → show_place avec poi_id null. Si plusieurs lieux correspondent au nom, demande lequel.
+
+## Ordre des étapes
+L'application calcule l'itinéraire à pied le plus court entre les étapes à visiter. Avec pin_steps, tu peux figer certaines étapes à une place (cadenas) ; les autres sont réparties au mieux autour d'elles.
+- position "first" : toujours la première étape ; "last" : toujours la dernière, même si des lieux sont ajoutés ensuite ; "index" avec index : un numéro précis (« le musée en troisième » → index 3).
+- « La première étape doit être le restaurant parce que j'ai faim, et la dernière le parking » → relis la sélection ; si le parking n'est pas dans la liste, cherche le parking le plus proche et ajoute-le d'abord (category parking) ; puis un seul pin_steps avec les deux lieux.
+- Si plusieurs lieux correspondent (deux restaurants), demande lequel au lieu de choisir.
+- « Le parking n'a plus besoin d'être à la fin » → unpin_ids.
+- Un lieu exclu par l'utilisateur est remis automatiquement dans l'itinéraire quand tu le figes : dis-le.
+- Annonce l'ordre seulement après la confirmation de pin_steps.
+
 ## Précisions pendant ou juste après une recherche
 Une précision (« plutôt pas cher », « de poisson », « avec terrasse ») porte sur les lieux qui viennent d'être proposés : n'utilise jamais replace pour une précision. Garde les lieux qui respectent déjà le critère, retire (remove_ids) seulement ceux qui ne le respectent pas, puis, s'il en reste moins que le nombre demandé, cherche et ajoute (add) le nombre manquant. Exemple : 3 restaurants proposés, l'utilisateur précise « de poisson » et un seul convient → retire les 2 autres, puis ajoute 2 restaurants de poisson.
 Si get_selection indique search_in_progress et que l'utilisateur ne fait que préciser un critère pour cette recherche (« plutôt pas cher », « avec terrasse »), appelle seulement note_refinement avec ce critère, sans recherche web ni update_pois : l'application l'appliquera aux résultats en cours (filtrage, puis compléments si nécessaire). Réponds au guide que c'est noté.
@@ -113,8 +135,9 @@ export function greetingMessage(contextLine) {
 const poiItemSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["name", "query", "category", "reason", "sources"],
+  required: ["name", "query", "category", "reason", "sources", "candidate_id"],
   properties: {
+    candidate_id: { type: ["string", "null"], description: "Identifiant cand_… d'un candidat de find_places_near (lieu déjà localisé), sinon null." },
     name: { type: "string", description: "Nom exact du lieu." },
     query: { type: "string", description: "Nom + adresse ou quartier + ville + pays, pour Google Places." },
     category: { type: "string", enum: CATEGORIES },
@@ -150,6 +173,63 @@ export const BACKEND_TOOLS = [
         remove_category: { type: ["string", "null"], enum: [...CATEGORIES, null], description: "Catégorie à retirer entièrement, ou null." },
         area: { type: ["string", "null"], description: "Zone de recherche si elle diffère de la position de l'utilisateur (ex. « Montmartre, Paris, France »), sinon null." },
         requested_count: { type: ["integer", "null"], description: "Nombre de lieux demandés par l'utilisateur pour cette demande (« trois restaurants » → 3), sinon null." },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "find_places_near",
+    description: "Cherche dans Google Places des lieux (« parking », « boulangerie »…) autour d'un repère : un lieu de la liste, un endroit nommé, ou à défaut la position de l'utilisateur. Renvoie des candidats avec leur position relative au repère.",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["what", "anchor_poi_id", "anchor_place", "radius_m"],
+      properties: {
+        what: { type: "string", description: "Seulement le type de lieu cherché (ex. « parking », « boulangerie »), sans aucun repère ni lieu : les repères vont dans anchor_poi_id et anchor_place." },
+        anchor_poi_id: { type: ["string", "null"], description: "Repère pris dans la liste (poi_…), sinon null. Peut s'ajouter à anchor_place." },
+        anchor_place: { type: ["string", "null"], description: "Repère hors de la liste, par son nom et sa ville (ex. « stade municipal de Réthymnon, Grèce ») ; la recherche est centrée dessus. Sinon null." },
+        radius_m: { type: ["integer", "null"], description: "Rayon de recherche en mètres (100 à 2000, 400 par défaut)." },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "show_place",
+    description: "Ouvre sur la carte la bulle d'un lieu de la liste (description et photos), ou ferme la bulle ouverte (poi_id null).",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["poi_id"],
+      properties: { poi_id: { type: ["string", "null"], description: "Lieu à montrer (poi_…), ou null pour fermer la bulle." } },
+    },
+  },
+  {
+    type: "function",
+    name: "pin_steps",
+    description: "Fige des étapes de l'itinéraire à une place (première, dernière ou numéro précis) ou retire leur cadenas. Les autres étapes sont réorganisées au mieux autour.",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["pins", "unpin_ids"],
+      properties: {
+        pins: {
+          type: "array",
+          description: "Étapes à figer. Vide si aucune.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "position", "index"],
+            properties: {
+              id: { type: "string", description: "Identifiant interne du lieu (poi_…)." },
+              position: { type: "string", enum: ["first", "last", "index"] },
+              index: { type: ["integer", "null"], description: "Numéro d'étape (à partir de 1) si position vaut index, sinon null." },
+            },
+          },
+        },
+        unpin_ids: { type: "array", items: { type: "string" }, description: "Lieux dont il faut retirer le cadenas. Vide sinon." },
       },
     },
   },
