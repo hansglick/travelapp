@@ -18,7 +18,11 @@ const KEEP_TASKS = 40;             // tâches gardées dans le tableau
 const WAIT_FOR_MORE_MAX_MS = 8000; // phrase inachevée : on attend la suite au plus ce délai
 const EXTRACTOR_REASONING = process.env.EXTRACTOR_REASONING || "none"; // détection rapide
 
-const STATUS_WORDS = { pending: "en attente", running: "en cours", done: "terminée", failed: "échouée", cancelled: "annulée" };
+// Noms des couleurs des groupes (même ordre que la palette de la page)
+const COLOR_NAMES = ["orange", "bleu", "vert", "magenta", "bleu-vert", "violet", "ambre", "rose"];
+const colorName = (i) => (Number.isInteger(i) ? COLOR_NAMES[i] || `couleur n° ${i + 1}` : null);
+
+const STATUS_WORDS ={ pending: "en attente", running: "en cours", done: "terminée", failed: "échouée", cancelled: "annulée" };
 
 export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notify }) {
   const tasks = new Map();
@@ -39,7 +43,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       createdAt: t.createdAt, startedAt: t.startedAt, endedAt: t.endedAt,
       actions: t.actions.slice(-30), result: t.result, replaces: t.replaces, replacedBy: t.replacedBy,
       requestedCount: t.requestedCount, placedCount: placedCount(t), criteria: t.criteria, maxDistanceM: t.maxDistanceM,
-      colorIndex: t.colorIndex,
+      colorIndex: t.colorIndex, extends: t.extends,
     };
   }
 
@@ -77,11 +81,19 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     if (heldUtterance && Date.now() - heldUtterance.at < WAIT_FOR_MORE_MAX_MS) text = `${heldUtterance.text} ${text}`;
     heldUtterance = null;
     lastConversation = conversation.slice(-8);
-    const board = list().slice(-15).map((t) => ({
-      task_id: t.id, title: t.title, request: t.request, status: t.status,
-      ...(t.result ? { result: t.result } : {}),
-      ...(t.candidates.length ? { candidates: t.candidates.slice(-6) } : {}),
-    }));
+    // Chaque tâche avec son groupe : couleur et lieux encore sur la carte (n° d'étape compris)
+    const board = list().slice(-15).map((t) => {
+      const places = groupPlaces(t).map((p) => `${p.mapNumber ? `n°${p.mapNumber} ` : ""}${p.place?.name || p.name}`);
+      return {
+        task_id: t.id, title: t.title, request: t.request, status: t.status,
+        ...(t.criteria.length ? { criteria: t.criteria.map((c) => `${c.value} (${c.strict ? "strict" : "souple"})`) } : {}),
+        ...(colorName(t.colorIndex) ? { group_color: colorName(t.colorIndex) } : {}),
+        ...(places.length ? { group_places: places } : {}),
+        ...(t.replacedBy ? { replaced_by: t.replacedBy } : {}),
+        ...(t.result ? { result: t.result } : {}),
+        ...(t.candidates.length ? { candidates: t.candidates.slice(-6) } : {}),
+      };
+    });
     const selection = store.selectionForModel().pois.map((p) => `${p.map_number ? `n°${p.map_number} ` : ""}${p.name} (${p.category})`);
     const input = [
       "Tableau des tâches :", JSON.stringify(board),
@@ -116,15 +128,24 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     }
     for (const id of out.cancel || []) cancel(id, "annulée par l'utilisateur");
     for (const r of out.refine || []) refine(r.task_id, r.request, text, r.count, r.criteria);
-    for (const t of out.new_tasks || []) add({ title: t.title, request: t.request, kind: t.kind, utterance: text, count: t.count, criteria: t.criteria });
-    if (out.new_tasks?.length || out.refine?.length || out.cancel?.length) {
+    for (const e of out.extend || []) extend(e.task_id, e.additional_count, e.request, e.criteria, text);
+    for (const t of out.new_tasks || []) {
+      // Garde-fou : une demande qui nomme la couleur d'un groupe existant complète ce groupe
+      const group = groupNamedIn(`${text} ${t.request}`);
+      if (group && !(out.extend || []).some((e) => e.task_id === group.id)) {
+        extend(group.id, t.count || 1, t.request, t.criteria?.length ? t.criteria : null, text);
+        continue;
+      }
+      add({ title: t.title, request: t.request, kind: t.kind, utterance: text, count: t.count, criteria: t.criteria });
+    }
+    if (out.new_tasks?.length || out.refine?.length || out.extend?.length || out.cancel?.length) {
       console.log(`[tâches] « ${text.slice(0, 80)} » →`, JSON.stringify(out));
     }
   }
 
   // ---- Gestion du tableau ----
 
-  function add({ title, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, criteria = [] }) {
+  function add({ title, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, criteria = [], extends: extending = false }) {
     const cleanCriteria = (Array.isArray(criteria) ? criteria : []).slice(0, 10).map((c) => ({
       type: c.type, value: String(c.value || "").slice(0, 120), strict: Boolean(c.strict),
       maxWalkMinutes: Number.isInteger(c.max_walk_minutes) && c.max_walk_minutes > 0 ? c.max_walk_minutes : null,
@@ -140,6 +161,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       addedIds: [], candidates: [], previousAddedIds,
       requestedCount: Number.isInteger(count) && count > 0 && count <= 15 ? count : null, // nombre de lieux exigé
       criteria: cleanCriteria, maxDistanceM,
+      extends: extending, // complète un groupe : ses lieux existants sont gardés tels quels
       continuations: 0,
       abort: new AbortController(), nudges: 0, lastNudgeAt: 0, conversation: lastConversation,
     };
@@ -195,6 +217,45 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     return next;
   }
 
+  // Groupe désigné par sa couleur dans une phrase (« le groupe bleu ») : la tâche la plus récente de
+  // cette couleur, ou null
+  function groupNamedIn(text) {
+    const lower = text.toLowerCase();
+    const match = list().filter((t) => Number.isInteger(t.colorIndex) && !t.replacedBy)
+      .reverse()
+      .find((t) => new RegExp(`groupe\\s+(?:de\\s+(?:couleur\\s+)?)?${colorName(t.colorIndex)}(?![\\w-])`).test(lower)); // « bleu » ≠ « bleu-vert »
+    return match || null;
+  }
+
+  // Lieux d'un groupe encore sur la carte : ceux de la tâche et des versions qu'elle remplace
+  function groupPlaces(t) {
+    if (!Number.isInteger(t.colorIndex)) return [];
+    return [...store.pois.values()].filter((p) => p.colorIndex === t.colorIndex && p.status !== "not_found");
+  }
+
+  // Compléter un groupe : nouvelle tâche qui hérite des critères (éventuellement mis à jour) et de la
+  // couleur, garde les lieux déjà présents et en ajoute « additional » de plus
+  function extend(id, additional, request, criteria, utterance) {
+    let old = tasks.get(id);
+    while (old?.replacedBy && tasks.get(old.replacedBy)) old = tasks.get(old.replacedBy); // version la plus récente
+    if (!old) return add({ title: "Ajout", request, kind: "search", utterance, count: additional, criteria: criteria || [] });
+    const more = Number.isInteger(additional) && additional > 0 ? Math.min(additional, 10) : 1;
+    if (["pending", "running"].includes(old.status)) {
+      // Groupe encore en cours de recherche : relancé avec un objectif plus grand
+      return refine(old.id, request, utterance, (old.requestedCount || 0) + more, criteria);
+    }
+    const kept = groupPlaces(old).map((p) => p.id);
+    const next = add({
+      title: old.title, request, kind: "search", utterance, replaces: old.id,
+      previousAddedIds: kept, count: kept.length + more,
+      criteria: criteria?.length ? criteria : old.criteria.map((c) => ({ type: c.type, value: c.value, strict: c.strict, max_walk_minutes: c.maxWalkMinutes })),
+      extends: true,
+    });
+    old.replacedBy = next.id;
+    changed();
+    return next;
+  }
+
   function schedule() {
     const running = list().filter((t) => t.status === "running").length;
     const free = MAX_PARALLEL - running;
@@ -243,7 +304,9 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     ];
     if (t.previousAddedIds.length) {
       const prev = t.previousAddedIds.map((id) => store.pois.get(id)).filter(Boolean).map((p) => `${p.id} « ${p.place?.name || p.name} »`);
-      lines.push(`Lieux déjà ajoutés par la version précédente de cette tâche : ${prev.join(", ")}. Garde ceux qui respectent la demande mise à jour, retire les autres, puis complète.`);
+      lines.push(t.extends
+        ? `Cette tâche complète un groupe existant. Lieux déjà dans le groupe, à garder tels quels (ne les retire pas, ne les rajoute pas) : ${prev.join(", ")}. Ajoute ${Math.max(1, (t.requestedCount || 0) - prev.length)} lieu(x) nouveau(x) qui respectent les critères.`
+        : `Lieux déjà ajoutés par la version précédente de cette tâche : ${prev.join(", ")}. Garde ceux qui respectent la demande mise à jour, retire les autres, puis complète.`);
     }
     const recentCandidates = list().filter((x) => x !== t).flatMap((x) => x.candidates).slice(-8);
     if (recentCandidates.length) lines.push(`Candidats proposés récemment par d'autres tâches : ${recentCandidates.join(" ; ")}`);
@@ -253,7 +316,8 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
 
   async function execute(t) {
     // Tâche précisée : les lieux de la version précédente devenus trop loin sont retirés d'emblée
-    for (const id of t.previousAddedIds) tools.enforceDistance(t, id);
+    // (pas quand on complète un groupe : ses lieux existants restent tels quels)
+    if (!t.extends) for (const id of t.previousAddedIds) tools.enforceDistance(t, id);
     let previous = null;
     let input = [
       { role: "developer", content: taskContext(t) },
@@ -363,13 +427,23 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     }
   }
 
-  // Liste effacée : les couleurs repartent de l'orange (les tâches en cours gardent la leur)
-  function resetColors() {
-    const active = list().filter((t) => ["pending", "running"].includes(t.status) && t.colorIndex !== null);
-    nextColor = active.length ? Math.max(...active.map((t) => t.colorIndex)) + 1 : 0;
+  // Bouton « Effacer » : les tâches en cours sont arrêtées (leurs résultats tardifs sont ignorés) et
+  // le tableau est vidé ; les couleurs repartent de l'orange
+  function clearAll() {
+    const stopped = list().filter((t) => ["pending", "running"].includes(t.status));
+    for (const t of stopped) {
+      t.abort.abort();
+      t.status = "cancelled";
+    }
+    tasks.clear();
+    heldUtterance = null;
+    lastConversation = [];
+    nextColor = 0;
+    changed();
+    return stopped.length;
   }
 
-  return { handleUserTurn, add, cancel, snapshot, summary, searchRunning, resetColors, tasks };
+  return { handleUserTurn, add, cancel, snapshot, summary, searchRunning, clearAll, tasks };
 }
 
 // Coupure réseau ou erreur passagère d'OpenAI (429, 5xx) : jusqu'à 2 nouveaux essais, espacés

@@ -228,10 +228,12 @@ const routes = {
 
   // Bouton « Effacer » de la liste : tous les lieux disparaissent (préférences gardées)
   "POST /api/pois/clear": async (req, res) => {
+    // Tâches arrêtées d'abord (aucune ne peut plus ajouter de lieu), puis lieux effacés
+    const stopped = board.clearAll();
     const count = store.clearPois();
-    board.resetColors(); // les couleurs repartent de l'orange
-    if (count) live.appNote("L'utilisateur a effacé tous les lieux depuis l'écran : la liste est vide. Ses préférences sont conservées. Ne parle plus des anciens lieux comme s'ils étaient sélectionnés.");
-    json(res, 200, { ok: true, removed: count, version: store.version });
+    live.clearConversation(); // le contexte de la conversation est oublié aussi
+    live.appNote(`L'utilisateur a tout effacé depuis l'écran : la liste de lieux est vide, toutes les tâches${stopped ? " (y compris celles en cours)" : ""} sont annulées, et tout ce qui a été demandé jusqu'ici est oublié. Repars de zéro : ne parle plus des anciens lieux, des anciennes recherches ni des demandes précédentes. Seules ses préférences sont conservées.`);
+    json(res, 200, { ok: true, removed: count, stoppedTasks: stopped, version: store.version });
   },
 
   // Cadenas posé ou retiré à la main dans la page : pin = { position: "index", index } ou null
@@ -281,7 +283,8 @@ const routes = {
   "POST /api/reset": async (req, res) => {
     const context = store.context;
     store.reset();
-    board.resetColors();
+    board.clearAll();
+    live.clearConversation();
     store.context = context;
     store.emit("change", {});
     json(res, 200, { ok: true });

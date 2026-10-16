@@ -333,6 +333,17 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
     appNote(contextLine().replace("[APP] ", "Nouvelle position : "));
   }
 
+  // Bouton « Effacer » : la conversation retenue comme contexte des tâches est oubliée, ainsi que la
+  // phrase en cours de transcription
+  function clearConversation() {
+    conversation.length = 0;
+    const s = session;
+    if (s) {
+      clearTimeout(s.userTimer);
+      s.userTurn = "";
+    }
+  }
+
   // Demande tapée (tests sans micro) : traitée comme une prise de parole de l'utilisateur
   function typed(text) {
     console.log("[utilisateur, tapé]", text);
@@ -375,6 +386,7 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
     create,
     close,
     typed,
+    clearConversation,
     appNote,
     positionChanged,
     onTaskEvent,

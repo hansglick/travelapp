@@ -59,7 +59,7 @@ console.log("\n=== Tableau final ===");
 for (const t of [...tasks].reverse()) {
   const d = t.startedAt ? `${Math.round(((t.endedAt || Date.now()) - t.startedAt) / 1000)} s` : "-";
   const goal = t.requestedCount ? `, ${t.placedCount}/${t.requestedCount} lieux` : "";
-  console.log(`\n${t.id} [${t.status}, ${t.kind}, ${d}${goal}] ${t.title}${t.replaces ? ` (remplace ${t.replaces})` : ""}`);
+  console.log(`\n${t.id} [${t.status}, ${t.kind}, ${d}${goal}] ${t.title}${t.replaces ? ` (${t.extends ? "complète" : "remplace"} ${t.replaces})` : ""}`);
   console.log(`   entendu : ${t.utterance}`);
   console.log(`   compris : ${t.request}`);
   if (t.criteria?.length) console.log(`   critères : ${t.criteria.map((c) => `${c.value} [${c.type}${c.strict ? ", strict" : ""}]`).join(" · ")}${t.maxDistanceM ? ` · ≤ ${t.maxDistanceM} m` : ""}`);

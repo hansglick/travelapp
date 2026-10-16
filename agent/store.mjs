@@ -388,6 +388,7 @@ export class PoiStore extends EventEmitter {
 
   // Bouton « Effacer » : tous les lieux sont retirés, les préférences et le contexte sont gardés
   clearPois() {
+    this.candidates.clear(); // candidats proposés lors des recherches effacées
     const removed = [...this.pois.values()];
     if (!removed.length) return 0;
     this.pois.clear();

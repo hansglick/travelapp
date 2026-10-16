@@ -464,7 +464,7 @@
     <div id="poi-list-head" role="button" aria-label="Revenir à la carte">
       <div class="grip"></div>
       <h2>Les lieux</h2>
-      <button id="erase-btn" aria-label="Effacer tous les lieux">
+      <button id="erase-btn" aria-label="Effacer tous les lieux et toutes les tâches">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4zm-3 6h12l-1 12H7z"/></svg>
         Effacer
       </button>
@@ -498,8 +498,8 @@
 
   <div id="confirm-erase" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-erase-title">
     <div class="sheet">
-      <p id="confirm-erase-title">Effacer tous les lieux ?</p>
-      <small>La liste et la carte repartent de zéro. Tes préférences sont conservées.</small>
+      <p id="confirm-erase-title">Tout effacer ?</p>
+      <small>Les lieux, toutes les tâches de l'agent (y compris celles en cours) et le fil de la conversation sont effacés. Seules tes préférences sont conservées.</small>
       <div class="actions">
         <button class="cancel">Annuler</button>
         <button class="confirm">Effacer</button>
@@ -1951,7 +1951,7 @@
       if (visited.length) items.push(el("li", "section-title", "Déjà visité"), ...visited.map((poi) => buildPoiRow(poi, "visited")));
       if (excluded.length) items.push(el("li", "section-title", "Exclus"), ...excluded.map((poi) => buildPoiRow(poi, "excluded")));
       poiRowsEl.replaceChildren(...items);
-      eraseBtn.disabled = !pois.length && !unplacedPois.length;
+      updateEraseButton();
       if (poiListEl.classList.contains("open")) fitDescriptions();
     }
 
@@ -2246,7 +2246,10 @@
         item.append(top);
         const end = t.endedAt || Date.now();
         const timing = t.startedAt ? `durée ${seconds(end - t.startedAt)}` : `en attente depuis ${seconds(Date.now() - t.createdAt)}`;
-        const links = [t.replaces ? `remplace ${t.replaces}` : "", t.replacedBy ? `remplacée par ${t.replacedBy}` : ""].filter(Boolean).join(" · ");
+        const links = [
+          t.replaces ? `${t.extends ? "complète" : "remplace"} ${t.replaces}` : "",
+          t.replacedBy ? `suivie par ${t.replacedBy}` : "",
+        ].filter(Boolean).join(" · ");
         const goal = t.requestedCount ? ` · ${t.placedCount}/${t.requestedCount} lieu(x)` : "";
         item.append(el("div", "task-meta", `${TASK_KIND[t.kind] || t.kind} · ${clock(t.createdAt)} · ${timing}${goal}${links ? ` · ${links}` : ""}`));
         if (t.utterance) item.append(el("div", "task-heard", `« ${t.utterance} »`));
@@ -2283,8 +2286,14 @@
       clearInterval(tasksTick);
     }
 
+    // « Effacer » utile dès qu'il y a des lieux ou des tâches (même en cours, sans lieu encore)
+    function updateEraseButton() {
+      eraseBtn.disabled = !pois.length && !unplacedPois.length && !agentTasks.length;
+    }
+
     function onTasks(tasks) {
       agentTasks = tasks;
+      updateEraseButton();
       if (tasksPanelEl.classList.contains("open")) renderTasks();
     }
 

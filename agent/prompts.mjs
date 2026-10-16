@@ -62,6 +62,10 @@ Règles :
   strict : true pour place_type, distance et diet ; false pour budget, schedule, ambiance et other, sauf si l'utilisateur insiste (« absolument », « pas plus de », « surtout pas ») → true.
   Exemple : « 4 gyros au poulet pas chers, à 10 minutes à pied max, je ne mange pas de porc » → place_type « gyros au poulet » strict, budget « petit budget » souple, distance « 10 min à pied » strict (max_walk_minutes 10), diet « pas de porc » strict ; count 4.
 - Une précision met à jour la liste complète des critères (refine) : « plutôt poulet » change le critère place_type ; « moins de 10 min » change le critère distance.
+- Groupes : les lieux d'une même tâche forment un groupe, d'une même couleur sur la carte (le tableau donne la couleur et les lieux de chaque tâche, même d'une conversation précédente). Une demande de lieux EN PLUS pour un groupe existant → extend, jamais une nouvelle tâche :
+  « rajoute un restaurant de poisson » (une tâche « restaurants de poisson » existe), « ajoute un lieu au groupe bleu », « un autre comme le n° 3 », « encore deux, mais à moins de 5 minutes ».
+  additional_count = le nombre à ajouter ; criteria = les critères du groupe, avec la modification éventuelle. Si plusieurs groupes peuvent correspondre, choisis le plus récent qui a le même type de lieu.
+  Un groupe désigné par sa couleur (« le groupe bleu ») ou par un de ses lieux (« comme le n° 3 ») → extend avec le task_id de la tâche dont group_color ou group_places correspond. Ne mets JAMAIS ce genre de demande dans new_tasks.
 - request : reformule la tâche de façon complète et autonome, avec tous les critères entendus (nombre de lieux, type exact de lieu, budget, distance ou temps de marche, régime, horaire…) et les références utiles (numéros de la carte, noms, candidats proposés). Exemple : « Trouver 5 gyros au poulet (pas de porc), moins de 7 €, à emporter, à 10 minutes à pied au plus de l'utilisateur, et les ajouter à la carte. »
 - Une précision ou une correction qui porte sur une tâche existante (« plutôt poulet », « moins cher », « non, 3 suffisent ») → refine avec son task_id et la demande complète mise à jour (pas seulement la précision).
 - Les numéros (« supprime le point 6 », « montre le 3 ») désignent des lieux de la carte, jamais des tâches : crée une tâche quick, n'annule rien.
@@ -88,7 +92,7 @@ const criterionSchema = {
 export const EXTRACTOR_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["new_tasks", "refine", "cancel", "wait_for_more"],
+  required: ["new_tasks", "refine", "extend", "cancel", "wait_for_more"],
   properties: {
     new_tasks: {
       type: "array",
@@ -116,6 +120,21 @@ export const EXTRACTOR_SCHEMA = {
           request: { type: "string", description: "Demande complète mise à jour avec la précision." },
           count: { type: ["integer", "null"], description: "Nombre de lieux demandé, mis à jour, sinon null." },
           criteria: { type: "array", items: criterionSchema, description: "Liste complète des critères mise à jour (anciens + précision)." },
+        },
+      },
+    },
+    extend: {
+      type: "array",
+      description: "Ajouts de lieux à un groupe existant (même tâche, mêmes critères, même couleur).",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["task_id", "additional_count", "request", "criteria"],
+        properties: {
+          task_id: { type: "string", description: "La tâche du groupe à compléter." },
+          additional_count: { type: "integer", description: "Nombre de lieux à ajouter en plus de ceux déjà présents." },
+          request: { type: "string", description: "Demande complète : ce qu'il faut ajouter au groupe, avec ses critères." },
+          criteria: { type: "array", items: criterionSchema, description: "Critères des nouveaux lieux : ceux du groupe, mis à jour si l'utilisateur en change un." },
         },
       },
     },
