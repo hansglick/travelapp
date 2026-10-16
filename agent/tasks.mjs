@@ -145,6 +145,50 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
 
   // ---- Gestion du tableau ----
 
+  // Champs d'exécution d'une tâche (non enregistrés) : annulation, journal, relances, couleur
+  function hydrate(t) {
+    t.abort = new AbortController();
+    t.nudges = 0;
+    t.lastNudgeAt = 0;
+    t.log = (text) => log(t, text); // utilisé par les fonctions de l'appli (lieu retiré car trop loin…)
+    t.ensureColor = () => {
+      if (t.colorIndex === null) t.colorIndex = nextColor++;
+      return t.colorIndex;
+    };
+    return t;
+  }
+
+  // ---- Enregistrement (compte) ----
+
+  function toJSON() {
+    return {
+      nextId, nextColor,
+      tasks: list().map((t) => ({
+        id: t.id, title: t.title, request: t.request, kind: t.kind, utterance: t.utterance, status: t.status,
+        createdAt: t.createdAt, startedAt: t.startedAt, endedAt: t.endedAt, actions: t.actions.slice(-30),
+        result: t.result, replaces: t.replaces, replacedBy: t.replacedBy, addedIds: t.addedIds,
+        previousAddedIds: t.previousAddedIds, requestedCount: t.requestedCount, criteria: t.criteria,
+        maxDistanceM: t.maxDistanceM, extends: t.extends, continuations: t.continuations, colorIndex: t.colorIndex,
+      })),
+    };
+  }
+
+  // Une tâche en cours au moment de l'arrêt du serveur est marquée interrompue
+  function load(data) {
+    if (!data) return;
+    nextId = Number.isInteger(data.nextId) ? data.nextId : 1;
+    nextColor = Number.isInteger(data.nextColor) ? data.nextColor : 0;
+    for (const saved of data.tasks || []) {
+      const t = hydrate({ ...saved, candidates: [], conversation: [] });
+      if (["pending", "running"].includes(t.status)) {
+        t.status = "failed";
+        t.result = "Tâche interrompue par un redémarrage du serveur.";
+        t.endedAt = Date.now();
+      }
+      tasks.set(t.id, t);
+    }
+  }
+
   function add({ title, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, criteria = [], extends: extending = false }) {
     const cleanCriteria = (Array.isArray(criteria) ? criteria : []).slice(0, 10).map((c) => ({
       type: c.type, value: String(c.value || "").slice(0, 120), strict: Boolean(c.strict),
@@ -162,19 +206,14 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       requestedCount: Number.isInteger(count) && count > 0 && count <= 15 ? count : null, // nombre de lieux exigé
       criteria: cleanCriteria, maxDistanceM,
       extends: extending, // complète un groupe : ses lieux existants sont gardés tels quels
-      continuations: 0,
-      abort: new AbortController(), nudges: 0, lastNudgeAt: 0, conversation: lastConversation,
+      continuations: 0, conversation: lastConversation,
     };
-    t.log = (text) => log(t, text); // utilisé par les fonctions de l'appli (lieu retiré car trop loin…)
-    // Couleur des lieux de la tâche : attribuée à son premier ajout ; une tâche relancée garde celle
-    // de la tâche qu'elle remplace
+    // Couleur des lieux de la tâche : une tâche relancée garde celle de la tâche qu'elle remplace ;
+    // une tâche qui doit ajouter des lieux la reçoit dès sa création (la 1re est orange) ; les autres
+    // à leur premier ajout
     t.colorIndex = replaces ? tasks.get(replaces)?.colorIndex ?? null : null;
-    // Tâche qui doit ajouter des lieux : couleur attribuée dès sa création (la 1re est orange)
     if (t.colorIndex === null && t.requestedCount) t.colorIndex = nextColor++;
-    t.ensureColor = () => {
-      if (t.colorIndex === null) t.colorIndex = nextColor++;
-      return t.colorIndex;
-    };
+    hydrate(t);
     tasks.set(t.id, t);
     while (tasks.size > KEEP_TASKS) {
       const oldest = list().find((x) => !["pending", "running"].includes(x.status));
@@ -364,6 +403,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         try {
           output = await tools.run(call.name, call.arguments ? JSON.parse(call.arguments) : {}, t);
         } catch (err) {
+          console.error(`[tâches] ${t.id} ${call.name} : erreur interne`, err.stack?.split("\n").slice(0, 3).join(" | "));
           output = { status: "error", message: "Arguments invalides ou erreur interne." };
         }
         metrics.time(`function_${call.name}_ms`, Date.now() - started);
@@ -443,7 +483,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     return stopped.length;
   }
 
-  return { handleUserTurn, add, cancel, snapshot, summary, searchRunning, clearAll, tasks };
+  return { handleUserTurn, add, cancel, snapshot, summary, searchRunning, clearAll, toJSON, load, tasks };
 }
 
 // Coupure réseau ou erreur passagère d'OpenAI (429, 5xx) : jusqu'à 2 nouveaux essais, espacés

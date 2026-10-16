@@ -45,8 +45,8 @@ function latinize(text) {
 }
 
 // Comparaison de noms insensible à la casse, aux accents, à la ponctuation et à l'alphabet grec
-export function normalize(text = "") {
-  return latinize(text)
+export function normalize(text) {
+  return latinize(String(text ?? "")) // un nom absent (lieu restauré sans nom Google) compte comme vide
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
@@ -88,6 +88,52 @@ export class PoiStore extends EventEmitter {
       notes: [],
     };
     this.context = { position: null, positionSource: null, place: null, timezone: null, updatedAt: null };
+  }
+
+  // ---- Enregistrement (compte) ----
+  // Règles de Google : seul l'identifiant du lieu peut être gardé durablement ; les coordonnées
+  // 30 jours au plus. Les noms et adresses Google ne sont donc pas enregistrés (le nom proposé par
+  // le guide sert à l'affichage après rechargement).
+
+  toJSON() {
+    return {
+      nextId: this.nextId,
+      version: this.version,
+      preferences: this.preferences,
+      pois: [...this.pois.values()].map((p) => ({
+        id: p.id, name: p.name, query: p.query, category: p.category, reason: p.reason, sources: p.sources,
+        area: p.area, status: p.status, included: p.included, visitedAt: p.visitedAt, pin: p.pin,
+        createdAt: p.createdAt, taskId: p.taskId, colorIndex: p.colorIndex,
+        place: p.place?.placeId ? {
+          placeId: p.place.placeId,
+          location: p.place.location,
+          locationSavedAt: p.place.locationSavedAt || Date.now(),
+        } : null,
+      })),
+    };
+  }
+
+  // Restaure un espace enregistré ; renvoie les lieux dont les coordonnées ont plus de 30 jours
+  // (à relocaliser)
+  load(data) {
+    if (!data) return [];
+    this.nextId = Number.isInteger(data.nextId) ? data.nextId : 1;
+    this.version = Number.isInteger(data.version) ? data.version : 0;
+    if (data.preferences) this.preferences = { ...this.preferences, ...data.preferences };
+    const stale = [];
+    for (const p of data.pois || []) {
+      const old = p.place && Date.now() - (p.place.locationSavedAt || 0) > 30 * 86400000;
+      const poi = {
+        ...p,
+        candidates: null,
+        mapNumber: null,
+        place: p.place && !old ? { ...p.place, name: null, address: null, types: [] } : null,
+        status: p.status === "resolved" && (!p.place || old) ? "pending" : p.status,
+      };
+      this.pois.set(poi.id, poi);
+      if (poi.status === "pending") stale.push(poi.id);
+    }
+    return stale;
   }
 
   // ---- Lecture ----
@@ -266,7 +312,7 @@ export class PoiStore extends EventEmitter {
       }
       const key = normalize(name);
       const dup = [...existing, ...accepted].find((p) =>
-        normalize(p.name) === key || normalize(p.query) === normalize(query) || (p.place && normalize(p.place.name) === key) ||
+        normalize(p.name) === key || normalize(p.query) === normalize(query) || (p.place?.name && normalize(p.place.name) === key) ||
         (place && p.place?.placeId === place.placeId));
       if (dup) {
         skipped.push({ name, reason: `déjà dans la liste (id ${dup.id || "nouveau"})` });
@@ -294,7 +340,7 @@ export class PoiStore extends EventEmitter {
       included: true,
       visitedAt: null,
       pin: null,
-      place: p.place || null,
+      place: p.place ? { ...p.place, locationSavedAt: Date.now() } : null,
       candidates: null,
       createdAt: Date.now(),
       taskId: origin?.taskId || null,
@@ -476,6 +522,7 @@ export class PoiStore extends EventEmitter {
     const poi = this.pois.get(id);
     if (!poi) return null;
     Object.assign(poi, resolution);
+    if (poi.place) poi.place.locationSavedAt = Date.now(); // coordonnées gardées 30 jours au plus
     this.version++;
     this.emit("change", { added: [], removed: [], resolved: poi });
     return poi;

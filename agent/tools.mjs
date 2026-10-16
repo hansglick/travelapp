@@ -174,5 +174,8 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
     }
   }
 
-  return { run, enforceDistance };
+  // Lieu à relocaliser (coordonnées de plus de 30 jours après rechargement d'un compte)
+  const relocate = (id) => resolveAndStore(id, null);
+
+  return { run, enforceDistance, relocate };
 }

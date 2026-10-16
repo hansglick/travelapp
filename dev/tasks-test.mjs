@@ -3,6 +3,12 @@
 // Usage : node dev/tasks-test.mjs '[[0,"phrase 1"],[5,"phrase 2"]]' [durée max en s] [reset]
 const BASE = "http://localhost:8000";
 const H = { Origin: BASE, "Content-Type": "application/json" };
+// Compte de test (invitation « DEV », acceptée seulement avec QFO_DEV=1) : TEST_PSEUDO / TEST_PIN
+const pseudo = process.env.TEST_PSEUDO || "testeur", pin = process.env.TEST_PIN || "0000";
+await fetch(BASE + "/api/auth/register", { method: "POST", headers: H, body: JSON.stringify({ invite: "DEV", pseudo, pin }) });
+const login = await fetch(BASE + "/api/auth/login", { method: "POST", headers: H, body: JSON.stringify({ pseudo, pin }) });
+if (!login.ok) throw new Error(`connexion du compte de test impossible : ${login.status}`);
+H.Cookie = login.headers.get("set-cookie").split(";")[0];
 const post = (p, b) => fetch(BASE + p, { method: "POST", headers: H, body: JSON.stringify(b) });
 const steps = JSON.parse(process.argv[2]);
 const maxSeconds = Number(process.argv[3]) || 180;
@@ -13,7 +19,7 @@ if (process.argv[4] === "reset") await post("/api/reset", {});
 await post("/api/context", { position: { lat: 35.37, lng: 24.4715 }, timezone: "Europe/Athens" });
 
 let lastTasks = "", lastPois = "", tasks = [];
-const res = await fetch(BASE + "/api/events");
+const res = await fetch(BASE + "/api/events", { headers: { Cookie: H.Cookie } });
 const reader = res.body.getReader();
 const dec = new TextDecoder();
 let buf = "";

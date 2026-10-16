@@ -276,6 +276,40 @@
     .pref-empty { padding: 16px 0; color: #a0a0a0; font-style: italic; }
     .pref-hint { margin-top: 18px; font-size: 0.85rem; color: #777; text-align: center; }
 
+    /* Écran de connexion : pseudo + code PIN (inscription avec un code d'invitation) */
+    #auth-screen {
+      position: fixed; inset: 0; z-index: 2000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+      padding: 24px 16px; background: #000; color: #fff;
+    }
+    #auth-screen[hidden] { display: none; }
+    #auth-screen h1 { margin: 0 0 8px; }
+    .auth-tabs { display: flex; gap: 6px; padding: 4px; border-radius: 999px; background: #1b1b1b; }
+    .auth-tabs button {
+      padding: 8px 16px; border: 0; border-radius: 999px; background: none; color: #a0a0a0;
+      font: 600 0.9rem system-ui, sans-serif; cursor: pointer;
+    }
+    .auth-tabs button.active { background: #e4572e; color: #fff; }
+    #auth-form { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 320px; }
+    #auth-form label { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: #a0a0a0; }
+    #auth-form label[hidden], .auth-hint[hidden] { display: none; }
+    #auth-form input {
+      padding: 12px 14px; border: 1px solid #444; border-radius: 12px; background: #111; color: #fff;
+      font-size: 1.05rem;
+    }
+    #auth-form input:focus { outline: 2px solid #e4572e; border-color: transparent; }
+    #auth-form .pin { letter-spacing: 0.6em; text-align: center; }
+    #auth-submit {
+      margin-top: 6px; padding: 13px; border: 0; border-radius: 999px; background: #e4572e; color: #fff;
+      font: 600 1rem system-ui, sans-serif; cursor: pointer;
+    }
+    #auth-submit:disabled { opacity: 0.5; }
+    #auth-error { min-height: 1.2em; margin: 0; color: #ff8a80; font-size: 0.9rem; text-align: center; }
+    .auth-hint { max-width: 320px; margin: 0; font-size: 0.8rem; color: #777; text-align: center; }
+    /* Compte connecté, en bas des préférences */
+    .account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; color: #a0a0a0; font-size: 0.9rem; }
+    .account-row button { padding: 8px 14px; border: 1px solid #444; border-radius: 999px; background: none; color: #ddd; cursor: pointer; }
+
     /* Bas de l'écran des préférences : glisser vers le haut ouvre l'écran « Tâches » (mode test) */
     #prefs-panel #prefs-body { padding-bottom: 16px; }
     #tasks-handle {
@@ -506,6 +540,28 @@
       </div>
     </div>
   </div>
+
+  <section id="auth-screen" hidden aria-label="Connexion">
+    <h1>Que fait-on ?</h1>
+    <div class="auth-tabs" role="tablist">
+      <button type="button" data-mode="login" class="active" role="tab">Se connecter</button>
+      <button type="button" data-mode="register" role="tab">Créer un compte</button>
+    </div>
+    <form id="auth-form" novalidate>
+      <label id="invite-field" hidden>Code d'invitation
+        <input id="auth-invite" autocomplete="off" autocapitalize="characters" placeholder="CRETE-XXXX">
+      </label>
+      <label>Pseudo
+        <input id="auth-pseudo" autocomplete="username" autocapitalize="off" maxlength="30" required>
+      </label>
+      <label>Code PIN (4 chiffres)
+        <input id="auth-pin" class="pin" type="password" inputmode="numeric" pattern="\d{4}" maxlength="4" autocomplete="current-password" required>
+      </label>
+      <button id="auth-submit" type="submit">Se connecter</button>
+      <p id="auth-error" role="alert"></p>
+    </form>
+    <p class="auth-hint" id="auth-hint">Pas encore de compte ? Il faut un code d'invitation.</p>
+  </section>
 
   <div id="list-bubble" hidden></div>
 
@@ -936,8 +992,84 @@
 
     function api(path, body) {
       return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+        .then((response) => {
+          if (response.status === 401) showAuth(); // connexion expirée : on redemande pseudo + PIN
+          return response;
+        })
         .catch((err) => console.warn("Serveur injoignable", path, err));
     }
+
+    // ---- Compte : pseudo + code PIN (inscription avec un code d'invitation) ----
+    // La connexion est retenue par le navigateur (cookie) : l'écran n'apparaît que la première fois,
+    // ou après une déconnexion.
+    const authScreen = document.getElementById("auth-screen");
+    const authForm = document.getElementById("auth-form");
+    const authSubmit = document.getElementById("auth-submit");
+    const authError = document.getElementById("auth-error");
+    let authMode = "login";
+    let currentPseudo = null;
+    let resolveAuthenticated;
+    const authenticated = new Promise((resolve) => { resolveAuthenticated = resolve; });
+
+    function setAuthMode(mode) {
+      authMode = mode;
+      document.querySelectorAll(".auth-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+      document.getElementById("invite-field").hidden = mode !== "register";
+      document.getElementById("auth-hint").hidden = mode !== "login";
+      document.getElementById("auth-pin").autocomplete = mode === "register" ? "new-password" : "current-password";
+      authSubmit.textContent = mode === "register" ? "Créer mon compte" : "Se connecter";
+      authError.textContent = "";
+    }
+
+    function showAuth() {
+      authScreen.hidden = false;
+    }
+
+    function signedIn(pseudo) {
+      currentPseudo = pseudo;
+      authScreen.hidden = true;
+      resolveAuthenticated();
+    }
+
+    document.querySelectorAll(".auth-tabs button").forEach((b) => b.addEventListener("click", () => setAuthMode(b.dataset.mode)));
+
+    authForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const pseudo = document.getElementById("auth-pseudo").value.trim();
+      const pin = document.getElementById("auth-pin").value.trim();
+      const invite = document.getElementById("auth-invite").value.trim();
+      if (!pseudo) return (authError.textContent = "Indique ton pseudo.");
+      if (!/^\d{4}$/.test(pin)) return (authError.textContent = "Le code PIN doit contenir 4 chiffres.");
+      if (authMode === "register" && !invite) return (authError.textContent = "Indique ton code d'invitation.");
+      authSubmit.disabled = true;
+      authError.textContent = "";
+      try {
+        const response = await fetch(`/api/auth/${authMode}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(authMode === "register" ? { invite, pseudo, pin } : { pseudo, pin }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || "Connexion impossible.");
+        if (currentPseudo !== null) return location.reload(); // changement de compte : on repart de zéro
+        signedIn(result.pseudo);
+      } catch (err) {
+        authError.textContent = err.message;
+      } finally {
+        authSubmit.disabled = false;
+      }
+    });
+
+    async function logout() {
+      await fetch("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
+      location.reload();
+    }
+
+    // Au chargement : déjà connecté ? sinon, écran de connexion
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => (me ? signedIn(me.pseudo) : showAuth()))
+      .catch(showAuth);
 
     // Flux d'événements du serveur : liste des POI (state), état de la conversation (voice) et du
     // travail du guide (agent). Le navigateur se reconnecte tout seul si le flux est coupé.
@@ -2201,7 +2333,11 @@
       if (p.transport && p.transport !== "à pied") row("Déplacement", p.transport);
       (p.notes || []).forEach((note) => row("Note", note));
       if (!rows.length) rows.push(el("p", "pref-empty", "Aucune préférence pour l'instant."));
-      prefsBodyEl.replaceChildren(...rows, el("p", "pref-hint", "Pour changer une préférence, dis-le au guide (« finalement, les restaurants c'est bon »)."));
+      const account = el("div", "account-row");
+      const logoutBtn = el("button", null, "Se déconnecter");
+      logoutBtn.addEventListener("click", logout);
+      account.append(el("span", null, `Connecté : ${currentPseudo || "?"}`), logoutBtn);
+      prefsBodyEl.replaceChildren(...rows, el("p", "pref-hint", "Pour changer une préférence, dis-le au guide (« finalement, les restaurants c'est bon »)."), account);
     }
 
     function openPrefs() {
@@ -2726,7 +2862,8 @@
       infoWindow = new google.maps.InfoWindow({ headerDisabled: true });
       setUserPosition(DEFAULT_POSITION);
       renderSteps();
-      listenToServer(); // lieux proposés par le guide, état de la conversation
+      // Lieux, tâches et conversation du compte : une fois connecté
+      authenticated.then(listenToServer);
     }
 
     const mapError = () => { document.getElementById("map").textContent = "Impossible de charger Google Maps."; };
