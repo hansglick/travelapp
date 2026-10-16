@@ -275,6 +275,50 @@
     .pref-chips span { padding: 3px 10px; border-radius: 999px; background: #e4572e; color: #fff; font-size: 0.85rem; }
     .pref-empty { padding: 16px 0; color: #a0a0a0; font-style: italic; }
     .pref-hint { margin-top: 18px; font-size: 0.85rem; color: #777; text-align: center; }
+
+    /* Bas de l'écran des préférences : glisser vers le haut ouvre l'écran « Tâches » (mode test) */
+    #prefs-panel #prefs-body { padding-bottom: 16px; }
+    #tasks-handle {
+      flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px;
+      padding: 8px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid #333;
+      color: #a0a0a0; font-size: 0.85rem; touch-action: none; user-select: none; cursor: pointer;
+    }
+
+    /* Écran « Tâches » : ce que l'agent a compris et fait, mis à jour en direct */
+    #tasks-panel {
+      position: fixed; inset: 0; z-index: 940;
+      display: flex; flex-direction: column; background: #000;
+      transform: translateY(100%); transition: transform 0.3s ease; visibility: hidden;
+    }
+    #tasks-panel.open { transform: none; visibility: visible; }
+    #tasks-head {
+      flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px;
+      padding: max(10px, env(safe-area-inset-top)) 16px 14px; touch-action: none; user-select: none; cursor: pointer;
+    }
+    #tasks-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
+    #tasks-body { flex: 1; overflow-y: auto; padding: 4px 16px max(16px, env(safe-area-inset-bottom)); }
+    .task { padding: 14px 0; border-bottom: 1px solid #333; }
+    .task:first-child { border-top: 1px solid #333; }
+    .task-top { display: flex; align-items: center; gap: 10px; }
+    .task-title { flex: 1; min-width: 0; font-size: 1.05rem; color: #fff; }
+    /* Pastille de la couleur des lieux de la tâche sur la carte */
+    .task-color { display: inline-block; width: 12px; height: 12px; margin-right: 8px; border: 2px solid #fff; border-radius: 50%; vertical-align: -1px; }
+    .task-status { flex: none; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .task-status.pending { background: #444; color: #ddd; }
+    .task-status.running { background: #1a73e8; color: #fff; animation: voice-blink 1.2s ease-in-out infinite; }
+    .task-status.done { background: #2e9e4f; color: #fff; }
+    .task-status.failed { background: #c0392b; color: #fff; }
+    .task-status.cancelled { background: #333; color: #999; }
+    .task-meta { margin-top: 4px; font-size: 0.75rem; color: #888; }
+    .task-heard { margin-top: 8px; font-size: 0.85rem; font-style: italic; color: #a0a0a0; }
+    /* Critères de la tâche : plein = strict, contour = souple */
+    .task-criteria { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .task-criteria span { padding: 2px 10px; border-radius: 999px; font-size: 0.8rem; border: 1px solid #e4572e; }
+    .task-criteria .strict { background: #e4572e; color: #fff; }
+    .task-criteria .soft { color: #f0a080; }
+    .task-request { margin-top: 6px; font-size: 0.9rem; color: #ddd; }
+    .task-actions { margin: 8px 0 0; padding-left: 18px; font-size: 0.8rem; color: #aaa; }
+    .task-result { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #161616; font-size: 0.9rem; color: #fff; }
     /* Total de l'itinéraire, sous la dernière étape à visiter */
     .route-total { padding: 16px 0 0; font-size: 1.05rem; color: #fff; }
     .route-total span { color: #e4572e; }
@@ -438,6 +482,18 @@
       <h2>Mes préférences</h2>
     </div>
     <div id="prefs-body"></div>
+    <div id="tasks-handle" role="button" aria-label="Voir les tâches de l'agent">
+      <div class="grip"></div>
+      Tâches de l'agent
+    </div>
+  </section>
+
+  <section id="tasks-panel" aria-label="Tâches de l'agent">
+    <div id="tasks-head" role="button" aria-label="Revenir aux préférences">
+      <div class="grip"></div>
+      <h2>Tâches de l'agent</h2>
+    </div>
+    <div id="tasks-body"></div>
   </section>
 
   <div id="confirm-erase" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-erase-title">
@@ -543,12 +599,33 @@
       },
     };
 
-    // Icône d'un POI : rond orange + pictogramme blanc, avec en haut à droite une petite pastille
-    // portant le numéro de l'étape (blanc sur orange). Étape cadenassée : la pastille s'allonge
-    // et affiche un petit cadenas devant le numéro.
+    // Couleur des lieux d'une même tâche : la 1re tâche est orange, les suivantes prennent des teintes
+    // bien éloignées, de même saturation et même luminosité. Palette fixe pour les 8 premières tâches
+    // (ordre choisi pour que deux tâches voisines contrastent), puis teintes générées par l'angle d'or.
+    const TASK_COLORS = [
+      "#e4572e",              // orange (couleur de l'appli)
+      "hsl(208, 72%, 48%)",   // bleu
+      "hsl(140, 60%, 38%)",   // vert
+      "hsl(300, 55%, 48%)",   // magenta
+      "hsl(178, 70%, 34%)",   // bleu-vert
+      "hsl(262, 55%, 55%)",   // violet
+      "hsl(42, 85%, 44%)",    // ambre
+      "hsl(340, 70%, 50%)",   // rose
+    ];
+
+    function taskColor(index) {
+      if (!Number.isInteger(index) || index < 0) return TASK_COLORS[0];
+      if (index < TASK_COLORS.length) return TASK_COLORS[index];
+      const hue = Math.round((13 + index * 137.508) % 360);
+      return `hsl(${hue}, 65%, 46%)`;
+    }
+
+    // Icône d'un POI : rond de la couleur de sa tâche + pictogramme blanc, avec en haut à droite une
+    // petite pastille portant le numéro de l'étape (blanc sur la même couleur). Étape cadenassée : la
+    // pastille s'allonge et affiche un petit cadenas devant le numéro.
     // Lieu déjà visité : pastille gris foncé avec une coche blanche à la place du numéro.
-    function poiIcon(category, step, locked = false, visited = false) {
-      const { color, glyph } = CATEGORIES[category] || CATEGORIES.other;
+    function poiIcon(category, step, locked = false, visited = false, color = TASK_COLORS[0]) {
+      const glyph = (CATEGORIES[category] || CATEGORIES.other).glyph.replaceAll("#e4572e", color);
       const number = (x) =>
         `<text x="${x}" y="16.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#fff">${step}</text>`;
       let badge = "";
@@ -558,13 +635,13 @@
         <path d="M37.5 12.2l3 3 6-6.2" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
       } else if (step && locked) {
         badge = `
-        <rect x="31" y="2" width="30" height="20" rx="10" fill="#e4572e" stroke="#fff" stroke-width="2"/>
+        <rect x="31" y="2" width="30" height="20" rx="10" fill="${color}" stroke="#fff" stroke-width="2"/>
         <path d="M38 11.5V9.5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="#fff" stroke-width="1.6"/>
         <rect x="36.5" y="11.5" width="8" height="6" rx="1" fill="#fff"/>
         ${number(52)}`;
       } else if (step) {
         badge = `
-        <circle cx="42" cy="12" r="10" fill="#e4572e" stroke="#fff" stroke-width="2"/>
+        <circle cx="42" cy="12" r="10" fill="${color}" stroke="#fff" stroke-width="2"/>
         ${number(42)}`;
       }
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="62" height="54" viewBox="0 0 62 54">
@@ -871,6 +948,7 @@
         const message = JSON.parse(data);
         if (message.type === "state") syncPois(message);
         else if (message.type === "ui") onUiCommand(message);
+        else if (message.type === "tasks") onTasks(message.tasks);
         else if (message.type === "voice") onVoiceServerState(message);
         else if (message.type === "agent") onAgentState(message.state);
       };
@@ -942,9 +1020,10 @@
         if (!poi) {
           const position = p.place.location;
           const props = poiProps(p);
-          const marker = new MarkerClass({ map, position, title: props.name, icon: poiIcon(props.category) });
+          const color = taskColor(p.color_index);
+          const marker = new MarkerClass({ map, position, title: props.name, icon: poiIcon(props.category, null, false, false, color) });
           poi = {
-            id: p.id, props, position, marker, included: true, pin: p.pin, visitedAt: null,
+            id: p.id, props, position, marker, included: true, pin: p.pin, visitedAt: null, color,
             get locked() { return Boolean(this.pin); }, // cadenas : étape figée (pin du serveur)
           };
           marker.addListener("click", () => openMapBubble(poi));
@@ -1007,8 +1086,8 @@
     function renderSteps() {
       // Étapes figées toujours à leur place, quel que soit le changement (ajout, arrivée, lieu remis…)
       routeOrder = [...arrangeByPins(includedPois()), ...routeOrder.filter((p) => !isToVisit(p))];
-      includedPois().forEach((poi, i) => poi.marker.setIcon(poiIcon(poi.props.category, i + 1, poi.locked)));
-      visitedPois().forEach((poi) => poi.marker.setIcon(poiIcon(poi.props.category, null, false, true)));
+      includedPois().forEach((poi, i) => poi.marker.setIcon(poiIcon(poi.props.category, i + 1, poi.locked, false, poi.color)));
+      visitedPois().forEach((poi) => poi.marker.setIcon(poiIcon(poi.props.category, null, false, true, poi.color)));
       renderPoiList();
       reportMapNumbers();
     }
@@ -1893,7 +1972,9 @@
       const main = el("div", "poi-row-main");
       const name = el("p", "poi-row-name");
       const badge = kind === "todo" ? String(step) : kind === "visited" ? "✓" : "–";
-      name.append(el("span", "poi-row-step", badge), el("span", null, props.name));
+      const bullet = el("span", "poi-row-step", badge);
+      if (kind === "todo") bullet.style.background = poi.color; // couleur de la tâche qui l'a proposé
+      name.append(bullet, el("span", null, props.name));
       main.append(name);
       const leg = kind === "todo" && legs.get(poi);
       if (leg) main.append(el("p", "poi-row-leg", `${formatMeters(leg.meters)} · ${formatMinutes(leg.seconds)} à pied`));
@@ -2129,11 +2210,86 @@
     }
 
     function closePrefs() {
+      closeTasks();
       prefsPanelEl.classList.remove("open");
     }
 
     onVerticalSwipe(document.getElementById("prefs-handle"), { up: openPrefs, tap: openPrefs });
     onVerticalSwipe(document.getElementById("prefs-head"), { down: closePrefs, tap: closePrefs });
+
+    // ---- Écran « Tâches de l'agent » (mode test) : tableau des tâches reçu du serveur ----
+    const tasksPanelEl = document.getElementById("tasks-panel");
+    const tasksBodyEl = document.getElementById("tasks-body");
+    const TASK_STATUS = { pending: "en attente", running: "en cours", done: "terminée", failed: "échouée", cancelled: "annulée" };
+    const TASK_KIND = { search: "recherche", quick: "action rapide", info: "information" };
+    let agentTasks = [];
+    let tasksTick = null;
+
+    const seconds = (ms) => `${Math.max(0, Math.round(ms / 1000))} s`;
+    const clock = (ts) => new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+    function renderTasks() {
+      if (!agentTasks.length) {
+        tasksBodyEl.replaceChildren(el("p", "pref-empty", "Aucune tâche pour l'instant : parle au guide."));
+        return;
+      }
+      tasksBodyEl.replaceChildren(...agentTasks.map((t) => {
+        const item = el("div", "task");
+        const top = el("div", "task-top");
+        const title = el("span", "task-title", `${t.id} · ${t.title}`);
+        if (Number.isInteger(t.colorIndex)) {
+          const dot = el("span", "task-color");
+          dot.style.background = taskColor(t.colorIndex);
+          title.prepend(dot);
+        }
+        top.append(title, el("span", `task-status ${t.status}`, TASK_STATUS[t.status] || t.status));
+        item.append(top);
+        const end = t.endedAt || Date.now();
+        const timing = t.startedAt ? `durée ${seconds(end - t.startedAt)}` : `en attente depuis ${seconds(Date.now() - t.createdAt)}`;
+        const links = [t.replaces ? `remplace ${t.replaces}` : "", t.replacedBy ? `remplacée par ${t.replacedBy}` : ""].filter(Boolean).join(" · ");
+        const goal = t.requestedCount ? ` · ${t.placedCount}/${t.requestedCount} lieu(x)` : "";
+        item.append(el("div", "task-meta", `${TASK_KIND[t.kind] || t.kind} · ${clock(t.createdAt)} · ${timing}${goal}${links ? ` · ${links}` : ""}`));
+        if (t.utterance) item.append(el("div", "task-heard", `« ${t.utterance} »`));
+        if (t.criteria?.length) {
+          const chips = el("div", "task-criteria");
+          t.criteria.forEach((c) => {
+            const chip = el("span", c.strict ? "strict" : "soft", c.value);
+            chip.title = c.strict ? "critère strict" : "critère souple";
+            chips.append(chip);
+          });
+          if (t.maxDistanceM) chips.append(el("span", "soft", `≤ ${t.maxDistanceM} m à vol d'oiseau`));
+          item.append(chips);
+        }
+        item.append(el("div", "task-request", t.request));
+        if (t.actions.length) {
+          const actions = el("ul", "task-actions");
+          t.actions.forEach((a) => actions.append(el("li", null, `${seconds(a.at - (t.startedAt || t.createdAt))} — ${a.text}`)));
+          item.append(actions);
+        }
+        if (t.result) item.append(el("div", "task-result", t.result));
+        return item;
+      }));
+    }
+
+    function openTasks() {
+      renderTasks();
+      tasksPanelEl.classList.add("open");
+      clearInterval(tasksTick);
+      tasksTick = setInterval(() => { if (agentTasks.some((t) => ["pending", "running"].includes(t.status))) renderTasks(); }, 1000);
+    }
+
+    function closeTasks() {
+      tasksPanelEl.classList.remove("open");
+      clearInterval(tasksTick);
+    }
+
+    function onTasks(tasks) {
+      agentTasks = tasks;
+      if (tasksPanelEl.classList.contains("open")) renderTasks();
+    }
+
+    onVerticalSwipe(document.getElementById("tasks-handle"), { up: openTasks, tap: openTasks });
+    onVerticalSwipe(document.getElementById("tasks-head"), { down: closeTasks, tap: closeTasks });
 
     // En-tête de la liste (doigt ou souris) : la liste suit le geste ; un simple toucher la ferme
     const listHead = document.getElementById("poi-list-head");

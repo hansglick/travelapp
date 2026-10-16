@@ -13,6 +13,8 @@ import { createResolver, reverseGeocode } from "./agent/places.mjs";
 import { createLiveManager, distanceM } from "./agent/live.mjs";
 import { createMetrics } from "./agent/metrics.mjs";
 import { createBriefing } from "./agent/briefing.mjs";
+import { createTools } from "./agent/tools.mjs";
+import { createTaskBoard } from "./agent/tasks.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 8000;
@@ -70,7 +72,20 @@ function broadcast(message) {
 }
 
 const briefing = OPENAI_API_KEY ? createBriefing({ apiKey: OPENAI_API_KEY, metrics }) : null;
-const live = createLiveManager({ apiKey: OPENAI_API_KEY, store, resolvePoi, metrics, broadcast, uiConnected: () => clients.size > 0, briefing });
+// Tableau des tâches (détection et exécution) et session vocale, qui se tiennent mutuellement informés
+let board = null;
+const live = createLiveManager({ apiKey: OPENAI_API_KEY, store, metrics, broadcast, briefing, board: () => board });
+const tools = createTools({ store, resolvePoi, broadcast, uiConnected: () => clients.size > 0, appNote: (text) => live.appNote(text) });
+let tasksTimer = null;
+board = createTaskBoard({
+  apiKey: OPENAI_API_KEY, store, tools, metrics,
+  // Écran « Tâches » mis à jour en direct (regroupé sur 100 ms)
+  onChange: () => {
+    clearTimeout(tasksTimer);
+    tasksTimer = setTimeout(() => broadcast({ type: "tasks", tasks: board.snapshot() }), 100);
+  },
+  notify: (event) => live.onTaskEvent(event),
+});
 
 // Chaque changement de l'état est poussé au navigateur (regroupé sur quelques ms) ; le navigateur
 // confirme l'affichage, ce qui mesure le délai d'actualisation de l'interface
@@ -138,6 +153,7 @@ const routes = {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive" });
     res.write(`data: ${JSON.stringify({ type: "state", ...store.snapshot() })}\n\n`);
     res.write(`data: ${JSON.stringify(voiceState)}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "tasks", tasks: board.snapshot() })}\n\n`);
     clients.add(res);
     watchClients();
     const ping = setInterval(() => res.write(": ping\n\n"), 25000);
@@ -208,6 +224,7 @@ const routes = {
   // Bouton « Effacer » de la liste : tous les lieux disparaissent (préférences gardées)
   "POST /api/pois/clear": async (req, res) => {
     const count = store.clearPois();
+    board.resetColors(); // les couleurs repartent de l'orange
     if (count) live.appNote("L'utilisateur a effacé tous les lieux depuis l'écran : la liste est vide. Ses préférences sont conservées. Ne parle plus des anciens lieux comme s'ils étaient sélectionnés.");
     json(res, 200, { ok: true, removed: count, version: store.version });
   },
@@ -245,18 +262,21 @@ const routes = {
   // Clé Google pour la carte : lue dans .env, jamais écrite dans le code de la page (dépôt public)
   "GET /api/config": (req, res) => json(res, 200, { googleMapsKey: GOOGLE_BROWSER_KEY || null }),
 
-  // Tests sans micro (QFO_DEV=1) : demande tapée envoyée au guide de la session en cours
+  // Tests sans micro (QFO_DEV=1) : demande tapée, traitée comme une prise de parole (pas besoin de
+  // session vocale) ; la réponse arrive une fois les tâches détectées
   "POST /api/dev/say": async (req, res) => {
     if (process.env.QFO_DEV !== "1") return json(res, 404, { error: "Introuvable." });
     const { text } = await readJson(req);
     if (typeof text !== "string" || !text.trim()) return json(res, 400, { error: "text manquant." });
-    json(res, live.typed(text.slice(0, 500)) ? 200 : 409, { ok: live.active() });
+    await live.typed(text.slice(0, 500));
+    json(res, 200, { ok: true, tasks: board.snapshot().slice(0, 5).map((t) => `${t.id} ${t.status} ${t.title}`) });
   },
 
   // Repartir d'une liste vide (tests)
   "POST /api/reset": async (req, res) => {
     const context = store.context;
     store.reset();
+    board.resetColors();
     store.context = context;
     store.emit("change", {});
     json(res, 200, { ok: true });

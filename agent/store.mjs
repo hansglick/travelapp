@@ -30,9 +30,23 @@ export const LIMITS = {
   area: 120,
 };
 
-// Comparaison de noms insensible à la casse, aux accents et à la ponctuation
+// Translittération simple du grec, pour comparer « Τα Γουρουνάκια » et « Ta Gourounakia »
+const GREEK_DIGRAPHS = [["ου", "ou"], ["αι", "ai"], ["ει", "ei"], ["οι", "oi"], ["μπ", "b"], ["ντ", "nt"], ["γκ", "g"], ["γγ", "ng"]];
+const GREEK_LETTERS = {
+  α: "a", β: "v", γ: "g", δ: "d", ε: "e", ζ: "z", η: "i", θ: "th", ι: "i", κ: "k", λ: "l", μ: "m", ν: "n",
+  ξ: "x", ο: "o", π: "p", ρ: "r", σ: "s", ς: "s", τ: "t", υ: "y", φ: "f", χ: "ch", ψ: "ps", ω: "o",
+};
+
+function latinize(text) {
+  let out = text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  if (!/[Ͱ-Ͽ]/.test(out)) return out;
+  for (const [g, l] of GREEK_DIGRAPHS) out = out.replaceAll(g, l);
+  return out.replace(/[Ͱ-Ͽ]/g, (c) => GREEK_LETTERS[c] ?? c);
+}
+
+// Comparaison de noms insensible à la casse, aux accents, à la ponctuation et à l'alphabet grec
 export function normalize(text = "") {
-  return text
+  return latinize(text)
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
@@ -93,6 +107,8 @@ export class PoiStore extends EventEmitter {
       pin: poi.pin || null,
       place: poi.place,
       candidates: poi.candidates,
+      task_id: poi.taskId || null,
+      color_index: Number.isInteger(poi.colorIndex) ? poi.colorIndex : null,
     };
   }
 
@@ -160,17 +176,18 @@ export class PoiStore extends EventEmitter {
   // ---- Modifications demandées par le modèle ----
 
   // update_pois : add | remove | replace. Renvoie toujours un résultat structuré pour le modèle.
-  updatePois(args) {
+  // origin : { taskId, colorIndex } de la tâche qui ajoute les lieux (couleur sur la carte)
+  updatePois(args, origin = null) {
     const opId = cleanText(args.op_id, 80);
     if (opId && this.doneOps.has(opId)) {
       return { ...this.doneOps.get(opId), note: "Opération déjà appliquée (même op_id) : rien n'a été refait." };
     }
-    const result = this.#applyUpdate(args);
+    const result = this.#applyUpdate(args, origin);
     if (opId && result.status !== "rejected") this.doneOps.set(opId, result);
     return result;
   }
 
-  #applyUpdate(args) {
+  #applyUpdate(args, origin) {
     const { operation } = args;
     const base = Number.isInteger(args.base_version) ? args.base_version : -1;
     const stale = base !== this.version;
@@ -182,14 +199,14 @@ export class PoiStore extends EventEmitter {
       if (!accepted.length) return this.#reject("invalid", "Aucun lieu valide à mettre dans la nouvelle sélection.", skipped);
       const removed = [...this.pois.values()];
       this.pois.clear();
-      const added = accepted.map((p) => this.#insert(p, args.area));
+      const added = accepted.map((p) => this.#insert(p, args.area, origin));
       return this.#commit({ removed, added, skipped, replaced: true });
     }
 
     if (operation === "add") {
       const { accepted, skipped } = this.#validateNewPois(args.pois, { sinceVersion: stale ? base : null });
       if (!accepted.length) return this.#reject("nothing_added", "Aucun lieu ajouté.", skipped);
-      const added = accepted.map((p) => this.#insert(p, args.area));
+      const added = accepted.map((p) => this.#insert(p, args.area, origin));
       return this.#commit({ added, skipped });
     }
 
@@ -268,7 +285,7 @@ export class PoiStore extends EventEmitter {
     return { accepted, skipped };
   }
 
-  #insert(p, area) {
+  #insert(p, area, origin = null) {
     const poi = {
       id: `poi_${this.nextId++}`,
       ...p,
@@ -280,6 +297,8 @@ export class PoiStore extends EventEmitter {
       place: p.place || null,
       candidates: null,
       createdAt: Date.now(),
+      taskId: origin?.taskId || null,
+      colorIndex: Number.isInteger(origin?.colorIndex) ? origin.colorIndex : null,
     };
     this.pois.set(poi.id, poi);
     return poi;

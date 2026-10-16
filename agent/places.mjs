@@ -158,7 +158,14 @@ export function createResolver({ apiKey, metrics }) {
       return { status: "not_found", place: null, candidates: scored.slice(0, 3).map(toPlace) };
     }
     const close = second && second.similarity >= 0.5 && second.score >= best.score - 0.1 && second.place.id !== best.place.id;
-    if (close) return { status: "ambiguous", place: null, candidates: scored.slice(0, 3).map(toPlace) };
+    if (close) {
+      // Même enseigne à plusieurs adresses : la rue citée dans la requête départage
+      const queryWords = distinctive(words(poi.query.split(",").slice(1).join(" "))).filter((w) => !/^\d+$/.test(w));
+      const addressScore = (c) => distinctive(words(c.place.formattedAddress || "")).filter((w) => queryWords.some((q) => same(w, q))).length;
+      const [a, b] = [addressScore(best), addressScore(second)];
+      if (a !== b) return { status: "resolved", place: toPlace(a > b ? best : second), candidates: null };
+      return { status: "ambiguous", place: null, candidates: scored.slice(0, 3).map(toPlace) };
+    }
     return { status: "resolved", place: toPlace(best), candidates: null };
   }
 
