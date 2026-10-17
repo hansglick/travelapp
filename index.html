@@ -1714,6 +1714,9 @@
     let contextTimer = null;
     function sendContext() {
       clearTimeout(contextTimer);
+      // Pas de position tant que le départ n'est pas choisi : la position par défaut (ou celle d'un
+      // autre écran ouvert sur le même compte) ne doit pas remplacer le vrai point de départ
+      if (startMode === "zero" || startMode === "awaiting") return;
       contextTimer = setTimeout(() => {
         api("/api/context", {
           position: userMarker.getPosition().toJSON(),
@@ -3552,6 +3555,11 @@
     }
 
     async function startVoice() {
+      // Itinéraire ouvert, départ pas encore choisi : le guide chercherait autour d'une position inconnue
+      if (startMode === "awaiting") {
+        showVoiceStatus("Choisis d'abord ton point de départ : touche la carte, ou « Ma position ».", { error: true });
+        return;
+      }
       if (!window.RTCPeerConnection || !navigator.mediaDevices?.getUserMedia) {
         showVoiceStatus("Ce navigateur ne permet pas la conversation vocale.", { error: true });
         return;
