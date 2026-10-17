@@ -21,8 +21,9 @@ const WIND_DIRECTIONS = ["nord", "nord-est", "est", "sud-est", "sud", "sud-ouest
 const windFrom = (deg) => (Number.isFinite(deg) ? WIND_DIRECTIONS[Math.round(deg / 45) % 8] : null);
 
 // Étape 1 : langue majoritaire d'une région (appel rapide, mémorisé par région)
-const LANGUAGE_INSTRUCTIONS = `Donne la langue majoritairement parlée au quotidien par les habitants de la région indiquée (pas du pays entier : à Vancouver, l'anglais ; à Montréal, le français ; à Barcelone, l'espagnol).
-language : le nom de la langue en français, en minuscules (« anglais », « grec », « hébreu »), ou null seulement si aucune langue n'est clairement majoritaire dans cette région.`;
+const LANGUAGE_INSTRUCTIONS = `Donne la langue majoritairement parlée au quotidien par les habitants du lieu indiqué (ville, région, pays).
+Le lieu précis compte plus que le pays entier : à Vancouver, l'anglais ; à Montréal, le français ; à Barcelone, l'espagnol. Si la ville et la région sont inconnues, donne la langue majoritaire du pays (Grèce → grec, Israël → hébreu).
+language : le nom de la langue en français, en minuscules (« anglais », « grec », « hébreu »). null seulement dans le cas rare où aucune langue n'est clairement majoritaire à cet endroit.`;
 
 const LANGUAGE_SCHEMA = {
   type: "object",
@@ -128,29 +129,32 @@ export function createPractical({ apiKey, metrics, storage }) {
     return request;
   }
 
-  // Langue majoritaire d'une région (« Colombie-Britannique, Canada » → « anglais »), mémorisée
-  function regionLanguage(region, country) {
-    const key = `region:${[region, country].filter(Boolean).join(", ")}`;
+  // Langue majoritaire d'un lieu (« Vancouver, Colombie-Britannique, Canada » → « anglais »),
+  // mémorisée par région (ou par pays si la région est inconnue). Une réponse « incertaine » n'est
+  // pas mémorisée : elle sera redemandée la prochaine fois.
+  function regionLanguage({ city, region, country }) {
+    const key = region ? `region:${region}, ${country}` : `country:${country}`;
     const saved = storage.get(key);
-    if (saved) return Promise.resolve(saved.language);
+    if (saved?.language) return Promise.resolve(saved.language);
     return once(key, async () => {
       const out = await ask({
-        instructions: LANGUAGE_INSTRUCTIONS, input: `Région : ${region || "inconnue"}. Pays : ${country}.`,
+        instructions: LANGUAGE_INSTRUCTIONS,
+        input: `Ville : ${city || "inconnue"}. Région : ${region || "inconnue"}. Pays : ${country}.`,
         name: "region_language", schema: LANGUAGE_SCHEMA, effort: "none", timeout: 15000,
       });
       const language = typeof out.language === "string" && out.language.trim() ? out.language.trim().toLowerCase().slice(0, 40) : null;
-      storage.set(key, { language });
+      if (language) storage.set(key, { language });
       return language;
     });
   }
 
   // Guide de conversation du lieu : pas de guide si la langue est le français ou incertaine
-  async function phrasebook({ region, country }) {
+  async function phrasebook({ city, region, country }) {
     if (!country) return null;
     const started = Date.now();
-    const language = await regionLanguage(region, country);
+    const language = await regionLanguage({ city, region, country });
     if (!language || language === "français") {
-      console.log(`[infos pratiques] ${region || "?"}, ${country} : ${language || "langue incertaine"}, pas de guide`);
+      console.log(`[infos pratiques] ${[city, region, country].filter(Boolean).join(", ")} : ${language || "langue incertaine"}, pas de guide`);
       return { language: null, phrases: [], generatedAt: Date.now() };
     }
     const key = `lang:${language}`;

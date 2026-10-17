@@ -224,7 +224,7 @@ const routes = {
     ws.store.setPractical({ weather, place: place ? { city: place.city || place.neighborhood, region: place.region, country: place.country, countryCode: place.countryCode } : null, ...(phrasebook ? { phrasebook: { pending: true } } : {}) });
     if (!phrasebook) return;
     const book = OPENAI_API_KEY && place?.country
-      ? await practical.phrasebook({ region: place.region, country: place.country }).catch((err) => {
+      ? await practical.phrasebook({ city: place.city || place.neighborhood, region: place.region, country: place.country }).catch((err) => {
         console.warn("[infos pratiques] guide :", err.message);
         return null;
       })

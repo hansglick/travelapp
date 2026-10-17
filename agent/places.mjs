@@ -374,7 +374,7 @@ export async function reverseGeocode(apiKey, position) {
     return {
       neighborhood: pick("neighborhood") || pick("sublocality"),
       city: pick("locality"),
-      region: pick("administrative_area_level_1"), // « Colombie-Britannique » (langue de la région)
+      region: pick("administrative_area_level_1") || pick("administrative_area_level_2"), // « Colombie-Britannique » (langue de la région)
       country: pick("country"),
       countryCode: components.find((c) => c.types.includes("country"))?.short_name || null, // « GR » (drapeau)
     };
