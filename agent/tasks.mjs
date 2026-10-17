@@ -22,6 +22,8 @@ const WAIT_FOR_MORE_MAX_MS = 8000; // phrase inachevée : on attend la suite au 
 const EXTRACTOR_REASONING = process.env.EXTRACTOR_REASONING || "none"; // détection rapide
 const MAX_QUESTIONS = 3;           // questions d'affinage posées au plus avant une recherche
 const MAX_DIMENSIONS = 6;
+const COUNT_DIMENSION = "nombre de suggestions"; // toujours demandé, en dernier, sauf nombre déjà dit
+const DEFAULT_COUNT = 3;
 const QUESTION_GRACE_MS = 2000;    // une prise de parole finie avant ce délai ne répond pas à la question
 const ACTIVE = ["clarifying", "pending", "running"];
 
@@ -159,7 +161,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         extend(group.id, t.count || 1, t.request, t.criteria?.length ? t.criteria : null, text);
         continue;
       }
-      add({ title: t.title, groupName: t.group_name, request: t.request, kind: t.kind, utterance: text, count: t.count, criteria: t.criteria, dimensions: t.dimensions });
+      add({ title: t.title, groupName: t.group_name, request: t.request, kind: t.kind, utterance: text, count: t.count, countGiven: t.count_given, criteria: t.criteria, dimensions: t.dimensions });
     }
     if (out.new_tasks?.length || out.refine?.length || out.extend?.length || out.cancel?.length || out.clarify?.length) {
       console.log(`[tâches] « ${text.slice(0, 80)} » →`, JSON.stringify(out));
@@ -198,6 +200,13 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   }
 
   function launch(t, reason) {
+    // Nombre de suggestions demandé mais sans réponse chiffrée (« peu importe ») : 3 par défaut
+    const countDim = t.dimensions.find((d) => d.name === COUNT_DIMENSION);
+    if (countDim && !["known", "answered"].includes(countDim.status)) t.requestedCount = DEFAULT_COUNT;
+    if (countDim?.status === "answered") {
+      const n = parseInt(String(countDim.value).match(/\d+/)?.[0], 10);
+      if (n > 0 && n <= 15) t.requestedCount = n;
+    }
     t.status = "pending";
     log(t, `recherche lancée (${reason})`);
     schedule();
@@ -305,16 +314,28 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
 
   // Caractéristiques d'une nouvelle recherche : connues, à demander (les MAX_QUESTIONS premières qui
   // manquent) ou non demandées
-  function initialDimensions(list) {
+  // Le nombre de suggestions est toujours demandé en dernier (en plus des MAX_QUESTIONS), sauf si
+  // l'utilisateur l'a déjà dit ; une recherche sans caractéristique (lieu précis nommé) n'en a pas
+  function initialDimensions(list, count, countGiven) {
     let toAsk = 0;
-    return (Array.isArray(list) ? list : []).slice(0, MAX_DIMENSIONS).map((d) => {
-      const known = typeof d.known_value === "string" && d.known_value.trim() ? d.known_value.trim().slice(0, 80) : null;
-      const status = known ? "known" : toAsk++ < MAX_QUESTIONS ? "to_ask" : "not_asked";
-      return { name: String(d.name || "").slice(0, 40), value: known, question: String(d.question || "").slice(0, 200), status, askedAt: null };
+    const dims = (Array.isArray(list) ? list : []).slice(0, MAX_DIMENSIONS)
+      .filter((d) => normalize(d.name) !== normalize(COUNT_DIMENSION))
+      .map((d) => {
+        const known = typeof d.known_value === "string" && d.known_value.trim() ? d.known_value.trim().slice(0, 80) : null;
+        const status = known ? "known" : toAsk++ < MAX_QUESTIONS ? "to_ask" : "not_asked";
+        return { name: String(d.name || "").slice(0, 40), value: known, question: String(d.question || "").slice(0, 200), status, askedAt: null };
+      });
+    if (!dims.length) return dims;
+    const given = countGiven && Number.isInteger(count) && count > 0;
+    dims.push({
+      name: COUNT_DIMENSION, value: given ? String(count) : null,
+      question: "Combien de suggestions veux-tu : par exemple 3, 5 ou 10 ?",
+      status: given ? "known" : "to_ask", askedAt: null,
     });
+    return dims;
   }
 
-  function add({ title, groupName = null, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, criteria = [], extends: extending = false, dimensions = [] }) {
+  function add({ title, groupName = null, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, countGiven = false, criteria = [], extends: extending = false, dimensions = [] }) {
     const t = {
       id: `t${nextId++}`, title: (title || "Tâche").slice(0, 60), request: (request || "").slice(0, 600),
       kind: ["search", "quick", "info"].includes(kind) ? kind : "search", utterance: (utterance || "").slice(0, 400),
@@ -333,7 +354,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     t.groupName = (typeof groupName === "string" && groupName.trim() ? groupName.trim().slice(0, 60) : null)
       ?? (replaces ? tasks.get(replaces)?.groupName ?? null : null);
     // Nouvelle recherche : « à préciser » tant qu'il reste des questions à poser
-    t.dimensions = t.kind === "search" && !replaces ? initialDimensions(dimensions) : [];
+    t.dimensions = t.kind === "search" && !replaces ? initialDimensions(dimensions, count, countGiven) : [];
     if (t.dimensions.some((d) => d.status === "to_ask")) t.status = "clarifying";
     t.colorIndex = replaces ? tasks.get(replaces)?.colorIndex ?? null : null;
     if (t.colorIndex === null && t.requestedCount) t.colorIndex = nextColor++;

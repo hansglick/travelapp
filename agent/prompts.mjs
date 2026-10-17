@@ -90,6 +90,7 @@ Règles :
   launch_now true si l'utilisateur veut lancer sans répondre au reste (« lance », « vas-y », « cherche », « peu importe le reste »).
   Une réponse peut porter sur une autre caractéristique que la question posée : « pas trop cher » répond à budget même si la question portait sur la distance ; rattache chaque information à la bonne caractéristique, et n'en oublie aucune.
   « Peu importe » seul répond seulement à pending_question.
+  Réponse à la caractéristique « nombre de suggestions » (« 5 », « trois ou quatre », « une dizaine ») : mets ce nombre dans count (le plus grand si c'est une fourchette) et dans answers.
 - Une réponse courte (« pas trop cher », « grec », « non », « 10 minutes ») alors qu'une question d'affinage est en attente est complète : jamais wait_for_more.
 - Phrase visiblement inachevée (coupée au milieu d'une demande) → wait_for_more true, sans tâche.
 - Les transcriptions contiennent des erreurs (« gyrons » = gyros) : corrige le sens, pas les mots.`;
@@ -132,13 +133,14 @@ export const EXTRACTOR_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "group_name", "request", "kind", "count", "criteria", "dimensions"],
+        required: ["title", "group_name", "request", "kind", "count", "count_given", "criteria", "dimensions"],
         properties: {
           title: { type: "string", description: "Titre court (3 à 6 mots) pour l'écran des tâches." },
           group_name: { type: "string", description: "Tâche search : nom des lieux trouvés, au pluriel et sans verbe, pour la légende de la carte (« Restaurants de poisson », « Musées d'histoire », « Pâtisseries »). Vide sinon." },
           request: { type: "string", description: "Demande complète et autonome, avec tous les critères." },
           kind: { type: "string", enum: ["search", "quick", "info"] },
           count: { type: ["integer", "null"], description: "Nombre de lieux à ajouter demandé (« 4 gyros » → 4, « un parking » → 1, « des pâtisseries » → 3), sinon null." },
+          count_given: { type: "boolean", description: "true seulement si l'utilisateur a dit un nombre explicite (« 4 gyros », « deux musées », « un seul », « trois ou quatre ») ; false pour « un restaurant », « des pâtisseries », « quelques bars »." },
           criteria: { type: "array", items: criterionSchema, description: "Critères des lieux à trouver (tâche search) ; vide sinon." },
           dimensions: { type: "array", items: dimensionSchema, description: "Tâche search : 3 à 6 caractéristiques importantes de ce type de lieu, la plus importante en premier. Vide sinon." },
         },
