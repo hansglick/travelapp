@@ -13,8 +13,10 @@ const mem = new Map();
 const practical = createPractical({ apiKey, storage: { get: (k) => mem.get(k), set: (k, v) => mem.set(k, v) } });
 const w = await practical.weather({ lat: 35.2386, lng: 25.1597 }).catch((err) => (console.log("météo :", err.message), null));
 if (w) console.log(w.timezone, w.points.map((p) => `${p.label} ${p.time.slice(11)} ${p.temperature}° ${p.sky}, pluie ${p.rain_probability}% ${p.rain_mm} mm, vent ${p.wind_kmh} km/h ${p.wind_from}`).join(" | "));
-const countries = (process.argv[2] || "Grèce,Israël,Espagne,France,Suisse").split(",");
-await Promise.all(countries.map(async (c) => {
-  const b = await practical.phrasebook(c);
+// Lieux « région/pays » séparés par des virgules
+const places = (process.argv[2] || "Colombie-Britannique/Canada,Québec/Canada,Crète/Grèce,Île-de-France/France").split(",");
+await Promise.all(places.map(async (c) => {
+  const [region, country] = c.split("/");
+  const b = await practical.phrasebook({ region, country });
   console.log(`\n${c} → ${b.language || "aucun guide"}${b.phrases.length ? "\n  " + b.phrases.map((p) => `${p.fr} = ${p.local}`).join("\n  ") : ""}`);
 }));

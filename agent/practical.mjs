@@ -1,8 +1,8 @@
 // Infos pratiques du point de départ (écran « Infos pratiques ») :
 // - météo maintenant, dans 4 h et dans 24 h (Open-Meteo : vraies prévisions, gratuites, sans clé) ;
 // - petit guide de conversation dans la langue principale du pays (petit modèle, sortie structurée),
-//   mémorisé par pays dans la base pour ne pas le redemander. Pas de guide si la langue est le
-//   français ou si aucune langue n'est nettement majoritaire.
+//   langue majoritaire de la région (mémorisée par région), puis guide mémorisé par langue dans la
+//   base. Pas de guide si la langue est le français ou si aucune n'est nettement majoritaire.
 
 import { EXTRACTOR_MODEL } from "./prompts.mjs";
 
@@ -20,20 +20,28 @@ const sky = (code) => WEATHER_WORDS.find(([codes]) => codes.includes(code))?.[1]
 const WIND_DIRECTIONS = ["nord", "nord-est", "est", "sud-est", "sud", "sud-ouest", "ouest", "nord-ouest"];
 const windFrom = (deg) => (Number.isFinite(deg) ? WIND_DIRECTIONS[Math.round(deg / 45) % 8] : null);
 
-const INSTRUCTIONS = `Tu prépares un petit guide de conversation pour un voyageur francophone (un homme).
-1. Détermine la langue majoritaire parlée par les habitants du pays indiqué.
-   Si c'est le français, ou si aucune langue n'est nettement majoritaire (plusieurs langues d'importance comparable), skip = true, language = null et phrases vide.
-2. Sinon, traduis chaque expression française dans cette langue, telle qu'on la dit couramment et poliment, dans le même ordre. Le voyageur est un homme : forme masculine quand elle diffère.
-3. Alphabet non latin (grec, hébreu, arabe, cyrillique, chinois, japonais, coréen, thaï…) : local = seulement la transcription phonétique pour un francophone, la syllabe accentuée marquée d'un accent aigu si utile (ex. grec « Ευχαριστώ » → « efkharistó », hébreu « תודה » → « toda »), jamais l'écriture d'origine. latin_script = false.
+// Étape 1 : langue majoritaire d'une région (appel rapide, mémorisé par région)
+const LANGUAGE_INSTRUCTIONS = `Donne la langue majoritairement parlée au quotidien par les habitants de la région indiquée (pas du pays entier : à Vancouver, l'anglais ; à Montréal, le français ; à Barcelone, l'espagnol).
+language : le nom de la langue en français, en minuscules (« anglais », « grec », « hébreu »), ou null seulement si aucune langue n'est clairement majoritaire dans cette région.`;
+
+const LANGUAGE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["language"],
+  properties: { language: { type: ["string", "null"] } },
+};
+
+// Étape 2 : guide de conversation dans une langue (mémorisé par langue)
+const INSTRUCTIONS = `Tu prépares un petit guide de conversation pour un voyageur francophone (un homme), dans la langue indiquée.
+1. Traduis chaque expression française dans cette langue, telle qu'on la dit couramment et poliment, dans le même ordre. Le voyageur est un homme : forme masculine quand elle diffère.
+2. Alphabet non latin (grec, hébreu, arabe, cyrillique, chinois, japonais, coréen, thaï…) : local = seulement la transcription phonétique pour un francophone, la syllabe accentuée marquée d'un accent aigu si utile (ex. grec « Ευχαριστώ » → « efkharistó », hébreu « תודה » → « toda »), jamais l'écriture d'origine. latin_script = false.
    Alphabet latin : local = la traduction écrite normalement, avec ses accents. latin_script = true.`;
 
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["skip", "language", "latin_script", "phrases"],
+  required: ["latin_script", "phrases"],
   properties: {
-    skip: { type: "boolean" },
-    language: { type: ["string", "null"], description: "Nom de la langue en français (« grec », « hébreu »), ou null." },
     latin_script: { type: "boolean" },
     phrases: {
       type: "array",
@@ -89,51 +97,79 @@ export function createPractical({ apiKey, metrics, storage }) {
     return { generatedAt: Date.now(), timezone: data.timezone, points: [at(0, "Maintenant"), at(4, "Dans 4 h"), at(24, "Dans 24 h")] };
   }
 
-  // Guide de conversation du pays : mémorisé dans la base (un seul appel au modèle par pays)
-  const pending = new Map();
-  async function phrasebook(country) {
-    if (!country) return null;
-    const saved = storage.get(country);
-    if (saved) return saved;
-    if (pending.has(country)) return pending.get(country);
-    const request = generate(country).finally(() => pending.delete(country));
-    pending.set(country, request);
-    return request;
-  }
-
-  async function generate(country) {
-    const started = Date.now();
+  // Appel structuré au petit modèle ; renvoie l'objet JSON produit
+  async function ask({ instructions, input, name, schema, effort, timeout }) {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: EXTRACTOR_MODEL,
-        reasoning: { effort: "low" },
-        instructions: INSTRUCTIONS,
-        input: `Pays : ${country}.\nExpressions à traduire, dans cet ordre :\n${PHRASES.map((p) => `- ${p}`).join("\n")}`,
-        text: { format: { type: "json_schema", name: "phrasebook", strict: true, schema: SCHEMA } },
+        reasoning: { effort },
+        instructions,
+        input,
+        text: { format: { type: "json_schema", name, strict: true, schema } },
         store: false,
       }),
-      signal: AbortSignal.timeout(40000),
+      signal: AbortSignal.timeout(timeout),
     });
-    if (!response.ok) throw new Error(`guide de conversation ${response.status}`);
+    if (!response.ok) throw new Error(`${name} ${response.status}`);
     const data = await response.json();
     metrics?.backendUsage(data.usage);
-    metrics?.time("phrasebook_ms", Date.now() - started);
     const text = (data.output || []).filter((o) => o.type === "message").flatMap((o) => o.content || []).map((c) => c.text || "").join("");
-    const out = JSON.parse(text || "{}");
-    // Les expressions françaises font foi (ordre et texte) ; une traduction manquante est ignorée
-    const phrases = out.skip ? [] : PHRASES.map((fr, i) => ({ fr, local: String(out.phrases?.[i]?.local || "").trim().slice(0, 120) })).filter((p) => p.local);
-    const result = {
-      country,
-      language: out.skip ? null : String(out.language || "").slice(0, 40) || null,
-      latinScript: Boolean(out.latin_script),
-      phrases,
-      generatedAt: Date.now(),
-    };
-    storage.set(country, result);
-    console.log(`[infos pratiques] guide « ${country} » : ${result.language || "aucun (français ou langue incertaine)"} en ${Date.now() - started} ms`);
-    return result;
+    return JSON.parse(text || "{}");
+  }
+
+  // Une seule demande à la fois pour une même clé (deux écrans qui partent ensemble)
+  const pending = new Map();
+  function once(key, compute) {
+    if (pending.has(key)) return pending.get(key);
+    const request = compute().finally(() => pending.delete(key));
+    pending.set(key, request);
+    return request;
+  }
+
+  // Langue majoritaire d'une région (« Colombie-Britannique, Canada » → « anglais »), mémorisée
+  function regionLanguage(region, country) {
+    const key = `region:${[region, country].filter(Boolean).join(", ")}`;
+    const saved = storage.get(key);
+    if (saved) return Promise.resolve(saved.language);
+    return once(key, async () => {
+      const out = await ask({
+        instructions: LANGUAGE_INSTRUCTIONS, input: `Région : ${region || "inconnue"}. Pays : ${country}.`,
+        name: "region_language", schema: LANGUAGE_SCHEMA, effort: "none", timeout: 15000,
+      });
+      const language = typeof out.language === "string" && out.language.trim() ? out.language.trim().toLowerCase().slice(0, 40) : null;
+      storage.set(key, { language });
+      return language;
+    });
+  }
+
+  // Guide de conversation du lieu : pas de guide si la langue est le français ou incertaine
+  async function phrasebook({ region, country }) {
+    if (!country) return null;
+    const started = Date.now();
+    const language = await regionLanguage(region, country);
+    if (!language || language === "français") {
+      console.log(`[infos pratiques] ${region || "?"}, ${country} : ${language || "langue incertaine"}, pas de guide`);
+      return { language: null, phrases: [], generatedAt: Date.now() };
+    }
+    const key = `lang:${language}`;
+    const saved = storage.get(key);
+    if (saved) return saved;
+    return once(key, async () => {
+      const out = await ask({
+        instructions: INSTRUCTIONS,
+        input: `Langue : ${language}.\nExpressions à traduire, dans cet ordre :\n${PHRASES.map((p) => `- ${p}`).join("\n")}`,
+        name: "phrasebook", schema: SCHEMA, effort: "low", timeout: 40000,
+      });
+      // Les expressions françaises font foi (ordre et texte) ; une traduction manquante est ignorée
+      const phrases = PHRASES.map((fr, i) => ({ fr, local: String(out.phrases?.[i]?.local || "").trim().slice(0, 120) })).filter((p) => p.local);
+      const result = { language, latinScript: Boolean(out.latin_script), phrases, generatedAt: Date.now() };
+      if (phrases.length) storage.set(key, result);
+      metrics?.time("phrasebook_ms", Date.now() - started);
+      console.log(`[infos pratiques] guide « ${language} » créé en ${Date.now() - started} ms`);
+      return result;
+    });
   }
 
   return { weather, phrasebook };

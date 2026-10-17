@@ -494,7 +494,9 @@
     #dims-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
     #dims-body { flex: 1; overflow-y: auto; padding: 4px 16px max(16px, env(safe-area-inset-bottom)); }
     /* Fenêtre météo : ville en gras, trois colonnes (maintenant, + 4 h, demain) avec icône animée */
-    .wx-panel { background: linear-gradient(180deg, #13233a 0%, #0b1220 100%); }
+    .wx-panel { background: linear-gradient(180deg, #13233a 0%, #0b1220 100%); margin-bottom: 16px; }
+    /* Fenêtre météo centrée dans l'écran (les autres fenêtres partent du bas) */
+    #weather-sheet { align-items: center; }
     .wx-place { margin: 2px 0 14px; font-size: 1.25rem; text-align: center; color: #fff; }
     .wx-place strong { font-weight: 800; }
     .wx-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -505,8 +507,9 @@
     .wx-when { font-size: 0.78rem; color: #9fb0c6; }
     .wx-icon { width: 64px; height: 64px; margin: 4px 0; }
     .wx-temp { font-size: 1.9rem; font-weight: 800; line-height: 1.1; color: #fff; }
-    .wx-sky { min-height: 2.4em; font-size: 0.75rem; color: #c9d4e3; }
-    .wx-detail { display: flex; align-items: center; gap: 5px; font-size: 0.85rem; color: #e6edf6; }
+    /* Sous la température : ciel, vent et pluie alignés à gauche dans la colonne */
+    .wx-sky { align-self: stretch; min-height: 2.4em; margin-top: 4px; padding-left: 4px; font-size: 0.78rem; color: #c9d4e3; text-align: left; }
+    .wx-detail { align-self: stretch; display: flex; align-items: center; gap: 5px; padding-left: 4px; font-size: 0.85rem; color: #e6edf6; }
     .wx-empty { margin: 8px 0; color: #9aa6b5; text-align: center; font-style: italic; }
     .wx-spin { transform-box: fill-box; transform-origin: center; animation: wx-spin 14s linear infinite; }
     .wx-bob { animation: wx-bob 3.5s ease-in-out infinite; }
@@ -3470,10 +3473,10 @@
         if (place?.country) title.append(place.city ? `, ${place.country}` : place.country);
         items.push(title);
         const row = el("div", "wx-row");
-        for (const w of weather.points) {
+        const WHEN = ["Maintenant", "Dans 4h", "Dans 24h"];
+        for (const [i, w] of weather.points.entries()) {
           const col = el("div", "wx-col");
-          const hour = w.time ? w.time.slice(11, 16) : "";
-          const when = w.label === "Dans 24 h" ? `Demain · ${hour}` : w.label === "Maintenant" ? "Maintenant" : `${w.label} · ${hour}`;
+          const when = WHEN[i] || w.label;
           const icon = el("div", "wx-icon");
           icon.innerHTML = weatherIcon(w.code, w.is_day);
           icon.title = w.sky;
@@ -3481,7 +3484,7 @@
             el("div", "wx-when", when),
             icon,
             el("div", "wx-temp", `${w.temperature}°`),
-            el("div", "wx-sky", w.sky),
+            el("div", "wx-sky", w.sky[0].toUpperCase() + w.sky.slice(1)),
             wxDetail(WIND_SVG, `${w.wind_kmh} km/h`, w.wind_from ? `Vent du ${w.wind_from}` : "Vent"),
             wxDetail(DROP_SVG, `${w.rain_probability ?? 0} %`, "Probabilité de pluie"),
           );
