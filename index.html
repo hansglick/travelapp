@@ -42,6 +42,20 @@
     #voice-btn svg { width: 32px; height: 32px; }
     #voice-btn.connecting { animation: voice-glow-soft 2.4s ease-in-out infinite; }
     #voice-btn.active { animation: voice-glow 1.6s ease-out infinite; }
+    /* Micro coupé : la conversation reste ouverte, la lueur ne pulse plus */
+    #voice-btn.active.muted { animation: none; box-shadow: 0 0 10px 3px rgba(228, 87, 46, 0.35); }
+    /* Pastille centrée ; bouton micro à sa gauche, visible pendant une conversation */
+    .voice-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 22px; width: 100%; }
+    .voice-row #voice-btn { grid-column: 2; }
+    #mute-btn {
+      grid-column: 1; justify-self: end;
+      display: flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; padding: 0; border: 2px solid #555; border-radius: 50%;
+      background: #1a1a1a; color: #fff; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #mute-btn[hidden] { display: none; }
+    #mute-btn.muted { border-color: #c0392b; background: #c0392b; }
     @keyframes voice-glow {
       0% { box-shadow: 0 0 0 0 rgba(228, 87, 46, 0.75), 0 0 14px 2px rgba(228, 87, 46, 0.6); }
       70% { box-shadow: 0 0 0 22px rgba(228, 87, 46, 0), 0 0 26px 8px rgba(228, 87, 46, 0.3); }
@@ -612,6 +626,8 @@
     <div id="voice-status" role="status" aria-live="polite"></div>
     <div id="map"></div>
     <div id="list-handle">
+      <div class="voice-row">
+      <button id="mute-btn" type="button" aria-label="Couper le micro" aria-pressed="false" hidden></button>
       <button id="voice-btn" aria-label="Parler au guide" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M3 9v6h4l5 5V4L7 9z" fill="currentColor"/>
@@ -619,6 +635,7 @@
           <path d="M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
       </button>
+      </div>
       <div class="grip"></div>
     </div>
   </main>
@@ -2706,7 +2723,7 @@
     }
 
     // Sous la carte : glisser vers le haut (hors pastille du guide) ouvre la liste
-    onVerticalSwipe(document.getElementById("list-handle"), { up: openPoiList }, "#voice-btn");
+    onVerticalSwipe(document.getElementById("list-handle"), { up: openPoiList }, "#voice-btn, #mute-btn");
 
     // ---- Effacer tous les lieux (avec confirmation) ----
     const eraseBtn = document.getElementById("erase-btn");
@@ -3258,7 +3275,34 @@
       if (!sticky) statusTimer = setTimeout(() => voiceStatusEl.classList.remove("visible"), error ? 6000 : 2500);
     }
 
+    // Couper le micro sans terminer la conversation : le guide n'entend plus, mais peut encore
+    // annoncer les résultats. La fermeture après 3 min sans parole s'applique toujours.
+    const muteBtn = document.getElementById("mute-btn");
+    const MIC_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+    const MIC_OFF_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 4l16 16" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
+
+    function setMuted(muted) {
+      if (voice) {
+        voice.muted = muted;
+        voice.mic?.getAudioTracks().forEach((t) => { t.enabled = !muted; });
+      }
+      muteBtn.classList.toggle("muted", muted);
+      muteBtn.innerHTML = muted ? MIC_OFF_SVG : MIC_SVG;
+      muteBtn.setAttribute("aria-pressed", String(muted));
+      muteBtn.setAttribute("aria-label", muted ? "Réactiver le micro" : "Couper le micro");
+      voiceBtn.classList.toggle("muted", muted);
+    }
+
+    muteBtn.addEventListener("click", () => {
+      if (!voice) return;
+      setMuted(!voice.muted);
+      showVoiceStatus(voice.muted ? "Micro coupé : le guide ne vous entend plus" : "Micro réactivé");
+    });
+
     function setVoiceButton(state) {
+      // Bouton micro seulement pendant une conversation ; il repart ouvert à chaque conversation
+      muteBtn.hidden = state !== "active";
+      if (state !== "active") setMuted(false);
       voiceBtn.classList.toggle("connecting", state === "connecting");
       voiceBtn.classList.toggle("active", state === "active");
       if (state !== "active") voiceBtn.classList.remove("working");
