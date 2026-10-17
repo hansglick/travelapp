@@ -375,6 +375,7 @@ export async function reverseGeocode(apiKey, position) {
       neighborhood: pick("neighborhood") || pick("sublocality"),
       city: pick("locality"),
       country: pick("country"),
+      countryCode: components.find((c) => c.types.includes("country"))?.short_name || null, // « GR » (drapeau)
     };
   } catch {
     return null;

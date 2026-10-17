@@ -221,7 +221,7 @@ const routes = {
       console.warn("[infos pratiques] météo :", err.message);
       return null;
     });
-    ws.store.setPractical({ weather, place: place ? { city: place.city, country: place.country } : null, ...(phrasebook ? { phrasebook: { pending: true } } : {}) });
+    ws.store.setPractical({ weather, place: place ? { city: place.city || place.neighborhood, country: place.country, countryCode: place.countryCode } : null, ...(phrasebook ? { phrasebook: { pending: true } } : {}) });
     if (!phrasebook) return;
     const book = OPENAI_API_KEY && place?.country
       ? await practical.phrasebook(place.country).catch((err) => {

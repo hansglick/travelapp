@@ -493,39 +493,51 @@
     }
     #dims-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
     #dims-body { flex: 1; overflow-y: auto; padding: 4px 16px max(16px, env(safe-area-inset-bottom)); }
-    #dims-panel #dims-body { padding-bottom: 16px; }
-    #practical-handle {
-      flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px;
-      padding: 8px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid #333;
-      color: #a0a0a0; font-size: 0.85rem; touch-action: none; user-select: none; cursor: pointer;
+    /* Fenêtre météo : ville en gras, trois colonnes (maintenant, + 4 h, demain) avec icône animée */
+    .wx-panel { background: linear-gradient(180deg, #13233a 0%, #0b1220 100%); }
+    .wx-place { margin: 2px 0 14px; font-size: 1.25rem; text-align: center; color: #fff; }
+    .wx-place strong { font-weight: 800; }
+    .wx-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .wx-col {
+      display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 6px;
+      border-radius: 14px; background: rgba(255, 255, 255, 0.06); text-align: center;
+    }
+    .wx-when { font-size: 0.78rem; color: #9fb0c6; }
+    .wx-icon { width: 64px; height: 64px; margin: 4px 0; }
+    .wx-temp { font-size: 1.9rem; font-weight: 800; line-height: 1.1; color: #fff; }
+    .wx-sky { min-height: 2.4em; font-size: 0.75rem; color: #c9d4e3; }
+    .wx-detail { display: flex; align-items: center; gap: 5px; font-size: 0.85rem; color: #e6edf6; }
+    .wx-empty { margin: 8px 0; color: #9aa6b5; text-align: center; font-style: italic; }
+    .wx-spin { transform-box: fill-box; transform-origin: center; animation: wx-spin 14s linear infinite; }
+    .wx-bob { animation: wx-bob 3.5s ease-in-out infinite; }
+    .wx-drift { animation: wx-drift 4s ease-in-out infinite alternate; }
+    .wx-drift-slow { animation: wx-drift 6s ease-in-out infinite alternate-reverse; }
+    .wx-fall { animation: wx-fall 1s linear infinite; }
+    .wx-fall.wx-slow { animation-duration: 1.8s; }
+    .wx-flash { animation: wx-flash 2.6s linear infinite; }
+    .wx-slide { animation: wx-slide 3s ease-in-out infinite alternate; }
+    @keyframes wx-spin { to { transform: rotate(360deg); } }
+    @keyframes wx-bob { 50% { transform: translateY(-2px); } }
+    @keyframes wx-drift { from { transform: translateX(-2px); } to { transform: translateX(3px); } }
+    @keyframes wx-fall { 0% { transform: translateY(-5px); opacity: 0; } 25% { opacity: 1; } 100% { transform: translateY(9px); opacity: 0; } }
+    @keyframes wx-flash { 0%, 62%, 100% { opacity: 0; } 66%, 74% { opacity: 1; } 70% { opacity: 0.3; } }
+    @keyframes wx-slide { from { transform: translateX(-3px); } to { transform: translateX(3px); } }
+    @media (prefers-reduced-motion: reduce) {
+      .wx-spin, .wx-bob, .wx-drift, .wx-drift-slow, .wx-fall, .wx-flash, .wx-slide { animation: none; }
     }
 
-    /* Écran « Infos pratiques » : météo (maintenant, + 4 h, + 24 h) et guide de conversation */
-    #practical-panel {
-      position: fixed; inset: 0; z-index: 948;
-      display: flex; flex-direction: column; background: #000;
-      transform: translateY(100%); transition: transform 0.3s ease; visibility: hidden;
+    /* Guide de conversation : fond noir, titre gris moyen, français en gras, langue locale en italique */
+    .phrase-panel { background: #000; border: 1px solid #222; }
+    .phrase-title {
+      display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;
+      margin: 2px 0 10px; color: #8c8c8c; font-size: 1rem; font-weight: 600;
     }
-    #practical-panel.open { transform: none; visibility: visible; }
-    #practical-head {
-      flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px;
-      padding: max(10px, env(safe-area-inset-top)) 16px 14px; touch-action: none; user-select: none; cursor: pointer;
-    }
-    #practical-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
-    #practical-body { flex: 1; overflow-y: auto; padding: 4px 16px max(16px, env(safe-area-inset-bottom)); }
-    .practical-title { margin: 18px 0 10px; font-size: 1rem; font-weight: 600; color: #e4572e; }
-    .practical-title:first-child { margin-top: 4px; }
-    .practical-place { margin: -4px 0 10px; font-size: 0.85rem; color: #999; }
-    .weather-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    .weather-card { padding: 10px; border: 1px solid #333; border-radius: 12px; background: #111; text-align: center; }
-    .weather-when { font-size: 0.8rem; color: #aaa; }
-    .weather-temp { margin: 4px 0; font-size: 1.6rem; font-weight: 700; color: #fff; }
-    .weather-sky { font-size: 0.8rem; color: #ddd; }
-    .weather-line { margin-top: 6px; font-size: 0.78rem; color: #bbb; }
-    .phrase-row { display: flex; justify-content: space-between; gap: 14px; padding: 10px 0; border-bottom: 1px solid #222; }
-    .phrase-row:first-of-type { border-top: 1px solid #222; }
-    .phrase-fr { color: #aaa; font-size: 0.9rem; }
-    .phrase-local { color: #fff; font-size: 1rem; font-weight: 600; text-align: right; }
+    .flag { width: 24px; height: 18px; border-radius: 3px; object-fit: cover; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15); }
+    .phrase-table { background: #000; }
+    .phrase-line { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 11px 2px; }
+    .phrase-line + .phrase-line { border-top: 1px solid #2a2a2a; }
+    .phrase-fr { color: #fff; font-weight: 700; }
+    .phrase-local { color: #fff; font-style: italic; font-weight: 400; text-align: right; }
     .dim-row { display: flex; align-items: baseline; gap: 10px; padding: 8px 0 8px 22px; border-top: 1px solid #222; }
     .dim-row:first-of-type { margin-top: 8px; }
     .dim-name { flex: none; width: 34%; color: #fff; font-size: 0.9rem; }
@@ -824,18 +836,6 @@
       <h2>Caractéristiques</h2>
     </div>
     <div id="dims-body"></div>
-    <div id="practical-handle" role="button" aria-label="Voir les infos pratiques">
-      <div class="grip"></div>
-      Infos pratiques
-    </div>
-  </section>
-
-  <section id="practical-panel" aria-label="Infos pratiques">
-    <div id="practical-head" role="button" aria-label="Revenir aux caractéristiques">
-      <div class="grip"></div>
-      <h2>Infos pratiques</h2>
-    </div>
-    <div id="practical-body"></div>
   </section>
 
   <div id="confirm-erase" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-erase-title">
@@ -870,10 +870,28 @@
   </div>
 
   <!-- Menu ☰ -->
+  <!-- Météo du point de départ : maintenant, dans 4 h, dans 24 h -->
+  <div id="weather-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Météo">
+    <div class="sheet-panel wx-panel">
+      <div id="weather-body"></div>
+      <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
+    </div>
+  </div>
+
+  <!-- Guide de conversation : français → langue du pays -->
+  <div id="phrase-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Guide de conversation">
+    <div class="sheet-panel phrase-panel">
+      <div id="phrase-body"></div>
+      <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
+    </div>
+  </div>
+
   <div id="menu-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Menu">
     <div class="sheet-panel">
       <button type="button" id="menu-save" class="sheet-item" disabled>Enregistrer l'itinéraire</button>
       <button type="button" id="menu-open" class="sheet-item">Ouvrir un itinéraire</button>
+      <button type="button" id="menu-weather" class="sheet-item">Météo</button>
+      <button type="button" id="menu-phrases" class="sheet-item">Guide de conversation</button>
       <button type="button" id="menu-logout" class="sheet-item">Se déconnecter</button>
       <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
     </div>
@@ -3394,16 +3412,15 @@
     }
 
     function closeDims() {
-      closePractical();
       dimsPanelEl.classList.remove("open");
     }
 
-    // ---- Écran « Infos pratiques » : météo du point de départ et guide de conversation ----
-    const practicalPanelEl = document.getElementById("practical-panel");
-    const practicalBodyEl = document.getElementById("practical-body");
-    let practical = null;              // { weather, phrasebook, place } (serveur)
-    // Demande en cours (Let's Go ou départ choisi) : on attend une météo différente de la précédente
-    // (comparaison sur la météo reçue, pas sur l'heure : les horloges du téléphone et du serveur diffèrent)
+    // ---- Infos pratiques (menu ☰) : fenêtres « Météo » et « Guide de conversation » ----
+    // Préparées par le serveur au « Let's Go! » (météo Open-Meteo, guide par pays) et reçues avec
+    // l'état de la liste
+    let practical = null;              // { weather, phrasebook, place }
+    // Demande en cours : on attend une météo différente de la précédente (comparaison sur la météo
+    // reçue, pas sur l'heure : les horloges du téléphone et du serveur diffèrent)
     let practicalWaiting = false;
     let practicalBefore = null;
 
@@ -3411,65 +3428,150 @@
       practicalWaiting = true;
       practicalBefore = practical?.weather?.generatedAt ?? null;
       api("/api/practical", { position, phrasebook: withPhrasebook });
-      if (practicalPanelEl.classList.contains("open")) renderPractical();
+      renderPracticalSheets();
     }
 
     function onPractical(data) {
       practical = data || null;
       if (practicalWaiting && (practical?.weather?.generatedAt ?? null) !== practicalBefore) practicalWaiting = false;
-      if (practicalPanelEl.classList.contains("open")) renderPractical();
+      renderPracticalSheets();
     }
 
-    function renderPractical() {
-      const items = [];
-      const place = practical?.place;
+    function renderPracticalSheets() {
+      if (!weatherSheet.hidden) renderWeather();
+      if (!phraseSheet.hidden) renderPhrases();
+    }
+
+    const weatherSheet = document.getElementById("weather-sheet");
+    const weatherBody = document.getElementById("weather-body");
+    const phraseSheet = document.getElementById("phrase-sheet");
+    const phraseBody = document.getElementById("phrase-body");
+
+    // Drapeau d'un pays (code ISO « GR ») : image, les drapeaux emoji ne s'affichent pas sous Windows
+    function flagImg(code, label) {
+      const img = el("img", "flag");
+      img.src = `https://flagcdn.com/w40/${String(code).toLowerCase()}.png`;
+      img.alt = label || code;
+      img.width = 24;
+      img.height = 18;
+      return img;
+    }
+
+    // -- Météo --
+    function renderWeather() {
       const weather = practical?.weather;
-      items.push(el("p", "practical-title", "Météo"));
-      if (place?.city || place?.country) items.push(el("p", "practical-place", [place.city, place.country].filter(Boolean).join(", ")));
-      if (practicalWaiting || !weather) {
-        items.push(el("p", "pref-empty", practicalWaiting ? "Météo en cours de préparation…" : "Météo indisponible pour le moment."));
-      } else {
-        const cards = el("div", "weather-cards");
-        for (const w of weather.points) {
-          const card = el("div", "weather-card");
-          const hour = w.time ? w.time.slice(11, 16) : "";
-          card.append(
-            el("div", "weather-when", `${w.label}${hour ? ` · ${hour}` : ""}`),
-            el("div", "weather-temp", `${w.temperature}°`),
-            el("div", "weather-sky", w.sky),
-            el("div", "weather-line", `Pluie ${w.rain_probability ?? 0} % · ${w.rain_mm} mm`),
-            el("div", "weather-line", `Vent ${w.wind_kmh} km/h${w.wind_from ? ` du ${w.wind_from}` : ""}`),
-          );
-          cards.append(card);
-        }
-        items.push(cards);
-      }
-      const book = practical?.phrasebook;
-      items.push(el("p", "practical-title", book?.language ? `Guide de conversation · ${book.language}` : "Guide de conversation"));
-      if (book?.pending) items.push(el("p", "pref-empty", "Guide en cours de préparation…"));
-      else if (!book) items.push(el("p", "pref-empty", "Le guide se prépare au « Let's Go! »."));
-      else if (!book.language || !book.phrases?.length) items.push(el("p", "pref-empty", "Pas de guide : la langue locale est le français, ou elle n'a pas pu être déterminée."));
+      const place = practical?.place;
+      const items = [];
+      if (practicalWaiting) items.push(el("p", "wx-empty", "Météo en cours de préparation…"));
+      else if (!weather) items.push(el("p", "wx-empty", "Choisis d'abord ton point de départ (« Let's Go! »)."));
       else {
-        for (const ph of book.phrases) {
-          const row = el("div", "phrase-row");
-          row.append(el("span", "phrase-fr", ph.fr), el("span", "phrase-local", ph.local));
-          items.push(row);
+        const title = el("p", "wx-place");
+        if (place?.city) title.append(el("strong", null, place.city));
+        if (place?.country) title.append(place.city ? `, ${place.country}` : place.country);
+        items.push(title);
+        const row = el("div", "wx-row");
+        for (const w of weather.points) {
+          const col = el("div", "wx-col");
+          const hour = w.time ? w.time.slice(11, 16) : "";
+          const when = w.label === "Dans 24 h" ? `Demain · ${hour}` : w.label === "Maintenant" ? "Maintenant" : `${w.label} · ${hour}`;
+          const icon = el("div", "wx-icon");
+          icon.innerHTML = weatherIcon(w.code, w.is_day);
+          icon.title = w.sky;
+          col.append(
+            el("div", "wx-when", when),
+            icon,
+            el("div", "wx-temp", `${w.temperature}°`),
+            el("div", "wx-sky", w.sky),
+            wxDetail(WIND_SVG, `${w.wind_kmh} km/h`, w.wind_from ? `Vent du ${w.wind_from}` : "Vent"),
+            wxDetail(DROP_SVG, `${w.rain_probability ?? 0} %`, "Probabilité de pluie"),
+          );
+          row.append(col);
         }
+        items.push(row);
       }
-      practicalBodyEl.replaceChildren(...items);
+      weatherBody.replaceChildren(...items);
     }
 
-    function openPractical() {
-      renderPractical();
-      practicalPanelEl.classList.add("open");
+    // Vent et pluie : petites icônes dessinées (les emoji s'affichent mal sous Windows)
+    const WIND_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M3 9h11a3 3 0 1 0-3-3M3 13h15a3 3 0 1 1-3 3M3 17h7" fill="none" stroke="#cfe3ff" stroke-width="2" stroke-linecap="round"/></svg>';
+    const DROP_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M12 3c3 4.5 6 7.8 6 11a6 6 0 0 1-12 0c0-3.2 3-6.5 6-11z" fill="#5aa9ff"/></svg>';
+
+    function wxDetail(svg, text, title) {
+      const line = el("div", "wx-detail");
+      line.title = title;
+      line.innerHTML = svg;
+      line.append(text);
+      return line;
     }
 
-    function closePractical() {
-      practicalPanelEl.classList.remove("open");
+    // Icônes animées : soleil (rayons qui tournent), lune, nuages qui dérivent, gouttes et flocons qui
+    // tombent, éclair qui clignote, brouillard qui glisse
+    const CLOUD = "M17 46h30a9 9 0 0 0 1-18 13 13 0 0 0-25-4 10 10 0 0 0-6 22z";
+    const SUN = (cx, cy, r) => `<g class="wx-spin"><circle cx="${cx}" cy="${cy}" r="${r}" fill="#fdb813"/>${
+      [...Array(8)].map((_, i) => {
+        const a = (i * Math.PI) / 4;
+        const x1 = cx + Math.cos(a) * (r + 3), y1 = cy + Math.sin(a) * (r + 3);
+        const x2 = cx + Math.cos(a) * (r + 8), y2 = cy + Math.sin(a) * (r + 8);
+        return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#fdb813" stroke-width="3" stroke-linecap="round"/>`;
+      }).join("")}</g>`;
+    const MOON = (cx, cy) => `<g class="wx-bob"><path d="M${cx + 6} ${cy - 14}a15 15 0 1 0 10 22 12 12 0 0 1-10-22z" fill="#f4e7b2"/></g>`;
+    const cloud = (fill, cls = "wx-drift", dx = 0, dy = 0, scale = 1) =>
+      `<g class="${cls}"><path d="${CLOUD}" fill="${fill}" transform="translate(${dx} ${dy}) scale(${scale})"/></g>`;
+    const drops = (color, n = 3) => [...Array(n)].map((_, i) =>
+      `<line class="wx-fall" style="animation-delay:${(i * 0.33).toFixed(2)}s" x1="${24 + i * 9}" y1="49" x2="${21 + i * 9}" y2="56" stroke="${color}" stroke-width="2.6" stroke-linecap="round"/>`).join("");
+    const flakes = () => [...Array(3)].map((_, i) =>
+      `<circle class="wx-fall wx-slow" style="animation-delay:${(i * 0.5).toFixed(2)}s" cx="${24 + i * 9}" cy="52" r="2.4" fill="#fff"/>`).join("");
+
+    function weatherIcon(code, isDay = true) {
+      const light = "#eef2f7", grey = "#aab4c2", dark = "#6f7988";
+      let body;
+      if (code === 0) body = isDay ? SUN(32, 32, 11) : MOON(30, 30);
+      else if (code === 1) body = (isDay ? SUN(24, 24, 9) : MOON(22, 24)) + cloud(light, "wx-drift", 8, 6, 0.85);
+      else if (code === 2) body = (isDay ? SUN(22, 22, 8) : MOON(20, 22)) + cloud(light);
+      else if (code === 3) body = cloud(grey, "wx-drift-slow", -6, -6, 0.9) + cloud(dark);
+      else if (code === 45 || code === 48) body = cloud(grey, "wx-drift", 0, -6) +
+        [0, 1, 2].map((i) => `<line class="wx-slide" style="animation-delay:${i * 0.4}s" x1="14" y1="${48 + i * 5}" x2="50" y2="${48 + i * 5}" stroke="#cfd6df" stroke-width="2.5" stroke-linecap="round"/>`).join("");
+      else if ((code >= 51 && code <= 57)) body = cloud(grey, "wx-drift", 0, -6) + drops("#8ec5ff", 2);
+      else if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) body = cloud(dark, "wx-drift", 0, -6) + drops("#5aa9ff", code === 65 || code === 82 ? 4 : 3);
+      else if ((code >= 71 && code <= 77) || code === 85 || code === 86) body = cloud(grey, "wx-drift", 0, -6) + flakes();
+      else if (code >= 95) body = cloud(dark, "wx-drift", 0, -6) + `<path class="wx-flash" d="M33 44l-6 10h6l-3 9 9-12h-6l3-7z" fill="#ffd43b"/>`;
+      else body = cloud(grey);
+      return `<svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">${body}</svg>`;
     }
 
-    onVerticalSwipe(document.getElementById("practical-handle"), { up: openPractical, tap: openPractical });
-    onVerticalSwipe(document.getElementById("practical-head"), { down: closePractical, tap: closePractical });
+    // -- Guide de conversation --
+    function renderPhrases() {
+      const book = practical?.phrasebook;
+      const code = practical?.place?.countryCode;
+      const head = el("p", "phrase-title", "Guide de conversation ");
+      head.append(flagImg("fr", "France"));
+      if (code && book?.language) head.append(" – ", flagImg(code, practical.place.country));
+      const items = [head];
+      if (book?.pending) items.push(el("p", "wx-empty", "Guide en cours de préparation…"));
+      else if (!book) items.push(el("p", "wx-empty", "Le guide se prépare au « Let's Go! »."));
+      else if (!book.language || !book.phrases?.length) items.push(el("p", "wx-empty", "Pas de guide : la langue locale est le français, ou elle n'a pas pu être déterminée."));
+      else {
+        const table = el("div", "phrase-table");
+        for (const ph of book.phrases) {
+          const row = el("div", "phrase-line");
+          row.append(el("span", "phrase-fr", ph.fr), el("span", "phrase-local", ph.local));
+          table.append(row);
+        }
+        items.push(table);
+      }
+      phraseBody.replaceChildren(...items);
+    }
+
+    document.getElementById("menu-weather").addEventListener("click", () => {
+      closeSheet(menuSheet);
+      renderWeather();
+      openSheet(weatherSheet);
+    });
+    document.getElementById("menu-phrases").addEventListener("click", () => {
+      closeSheet(menuSheet);
+      renderPhrases();
+      openSheet(phraseSheet);
+    });
 
     onVerticalSwipe(document.getElementById("dims-handle"), { up: openDims, tap: openDims });
     onVerticalSwipe(document.getElementById("dims-head"), { down: closeDims, tap: closeDims });

@@ -53,8 +53,8 @@ export function createPractical({ apiKey, metrics, storage }) {
     const params = new URLSearchParams({
       latitude: position.lat.toFixed(3),
       longitude: position.lng.toFixed(3),
-      current: "temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m",
-      hourly: "temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_direction_10m",
+      current: "temperature_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m,is_day",
+      hourly: "temperature_2m,precipitation_probability,precipitation,weather_code,wind_speed_10m,wind_direction_10m,is_day",
       timezone: "auto",
       forecast_days: "3",
     });
@@ -82,6 +82,8 @@ export function createPractical({ apiKey, metrics, storage }) {
         wind_kmh: Math.round(offset ? hourly.wind_speed_10m[i] : current.wind_speed_10m),
         wind_from: windFrom(offset ? hourly.wind_direction_10m[i] : current.wind_direction_10m),
         sky: sky(offset ? hourly.weather_code[i] : current.weather_code),
+        code: offset ? hourly.weather_code[i] : current.weather_code, // icône animée de la fenêtre météo
+        is_day: Boolean(offset ? hourly.is_day[i] : current.is_day),
       };
     };
     return { generatedAt: Date.now(), timezone: data.timezone, points: [at(0, "Maintenant"), at(4, "Dans 4 h"), at(24, "Dans 24 h")] };
