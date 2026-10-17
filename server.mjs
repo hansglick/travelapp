@@ -12,7 +12,8 @@ import { createResolver, reverseGeocode } from "./agent/places.mjs";
 import { distanceM } from "./agent/live.mjs";
 import { createMetrics } from "./agent/metrics.mjs";
 import { createBriefing } from "./agent/briefing.mjs";
-import { openDatabase, createAccounts, createWorkspaceStorage, createTripStorage } from "./agent/db.mjs";
+import { openDatabase, createAccounts, createWorkspaceStorage, createTripStorage, createPhrasebookStorage } from "./agent/db.mjs";
+import { createPractical } from "./agent/practical.mjs";
 import { createNamer } from "./agent/naming.mjs";
 import { createWorkspaces } from "./agent/workspace.mjs";
 
@@ -70,6 +71,7 @@ const briefing = OPENAI_API_KEY ? createBriefing({ apiKey: OPENAI_API_KEY, metri
 const trips = createTripStorage(db);
 const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, briefing, storage: createWorkspaceStorage(db), trips });
 const suggestNames = OPENAI_API_KEY ? createNamer({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
+const practical = createPractical({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createPhrasebookStorage(db) });
 
 // ---- HTTP ----
 
@@ -203,6 +205,31 @@ const routes = {
       if (place) ws.store.setContext({ place });
     }
     ws.live.positionChanged();
+  },
+
+  // Infos pratiques du point de départ : météo (toujours) et guide de conversation (au « Let's Go! » ;
+  // à l'ouverture d'un itinéraire, celui de l'itinéraire est gardé). Réponse immédiate ; les infos
+  // arrivent ensuite avec l'état de la liste.
+  "POST /api/practical": async (req, res, ws) => {
+    const { position, phrasebook } = await readJson(req);
+    if (!validPosition(position)) return json(res, 400, { error: "Position invalide." });
+    json(res, 202, { ok: true });
+    const pos = { lat: position.lat, lng: position.lng };
+    const place = GOOGLE_API_KEY ? await reverseGeocode(GOOGLE_API_KEY, pos) : null;
+    if (place) sharedMetrics.count("google_geocode");
+    const weather = await practical.weather(pos).catch((err) => {
+      console.warn("[infos pratiques] météo :", err.message);
+      return null;
+    });
+    ws.store.setPractical({ weather, place: place ? { city: place.city, country: place.country } : null, ...(phrasebook ? { phrasebook: { pending: true } } : {}) });
+    if (!phrasebook) return;
+    const book = OPENAI_API_KEY && place?.country
+      ? await practical.phrasebook(place.country).catch((err) => {
+        console.warn("[infos pratiques] guide :", err.message);
+        return null;
+      })
+      : null;
+    ws.store.setPractical({ phrasebook: book });
   },
 
   // Action de l'utilisateur sur un lieu dans l'interface : décoché / recoché / visité

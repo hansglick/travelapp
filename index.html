@@ -493,6 +493,39 @@
     }
     #dims-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
     #dims-body { flex: 1; overflow-y: auto; padding: 4px 16px max(16px, env(safe-area-inset-bottom)); }
+    #dims-panel #dims-body { padding-bottom: 16px; }
+    #practical-handle {
+      flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px;
+      padding: 8px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid #333;
+      color: #a0a0a0; font-size: 0.85rem; touch-action: none; user-select: none; cursor: pointer;
+    }
+
+    /* Écran « Infos pratiques » : météo (maintenant, + 4 h, + 24 h) et guide de conversation */
+    #practical-panel {
+      position: fixed; inset: 0; z-index: 948;
+      display: flex; flex-direction: column; background: #000;
+      transform: translateY(100%); transition: transform 0.3s ease; visibility: hidden;
+    }
+    #practical-panel.open { transform: none; visibility: visible; }
+    #practical-head {
+      flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px;
+      padding: max(10px, env(safe-area-inset-top)) 16px 14px; touch-action: none; user-select: none; cursor: pointer;
+    }
+    #practical-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
+    #practical-body { flex: 1; overflow-y: auto; padding: 4px 16px max(16px, env(safe-area-inset-bottom)); }
+    .practical-title { margin: 18px 0 10px; font-size: 1rem; font-weight: 600; color: #e4572e; }
+    .practical-title:first-child { margin-top: 4px; }
+    .practical-place { margin: -4px 0 10px; font-size: 0.85rem; color: #999; }
+    .weather-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .weather-card { padding: 10px; border: 1px solid #333; border-radius: 12px; background: #111; text-align: center; }
+    .weather-when { font-size: 0.8rem; color: #aaa; }
+    .weather-temp { margin: 4px 0; font-size: 1.6rem; font-weight: 700; color: #fff; }
+    .weather-sky { font-size: 0.8rem; color: #ddd; }
+    .weather-line { margin-top: 6px; font-size: 0.78rem; color: #bbb; }
+    .phrase-row { display: flex; justify-content: space-between; gap: 14px; padding: 10px 0; border-bottom: 1px solid #222; }
+    .phrase-row:first-of-type { border-top: 1px solid #222; }
+    .phrase-fr { color: #aaa; font-size: 0.9rem; }
+    .phrase-local { color: #fff; font-size: 1rem; font-weight: 600; text-align: right; }
     .dim-row { display: flex; align-items: baseline; gap: 10px; padding: 8px 0 8px 22px; border-top: 1px solid #222; }
     .dim-row:first-of-type { margin-top: 8px; }
     .dim-name { flex: none; width: 34%; color: #fff; font-size: 0.9rem; }
@@ -791,6 +824,18 @@
       <h2>Caractéristiques</h2>
     </div>
     <div id="dims-body"></div>
+    <div id="practical-handle" role="button" aria-label="Voir les infos pratiques">
+      <div class="grip"></div>
+      Infos pratiques
+    </div>
+  </section>
+
+  <section id="practical-panel" aria-label="Infos pratiques">
+    <div id="practical-head" role="button" aria-label="Revenir aux caractéristiques">
+      <div class="grip"></div>
+      <h2>Infos pratiques</h2>
+    </div>
+    <div id="practical-body"></div>
   </section>
 
   <div id="confirm-erase" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-erase-title">
@@ -1534,6 +1579,7 @@
     let lastStateVersion = -1;
 
     function syncPois(state) {
+      onPractical(state.practical); // infos pratiques : mises à jour sans changer la version de la liste
       if (state.version <= lastStateVersion) return; // message plus ancien que l'état affiché
       lastStateVersion = state.version;
       // Renumérotation demandée (suppression, cadenas) : l'ordre affiché sera renvoyé au serveur
@@ -3348,8 +3394,82 @@
     }
 
     function closeDims() {
+      closePractical();
       dimsPanelEl.classList.remove("open");
     }
+
+    // ---- Écran « Infos pratiques » : météo du point de départ et guide de conversation ----
+    const practicalPanelEl = document.getElementById("practical-panel");
+    const practicalBodyEl = document.getElementById("practical-body");
+    let practical = null;              // { weather, phrasebook, place } (serveur)
+    // Demande en cours (Let's Go ou départ choisi) : on attend une météo différente de la précédente
+    // (comparaison sur la météo reçue, pas sur l'heure : les horloges du téléphone et du serveur diffèrent)
+    let practicalWaiting = false;
+    let practicalBefore = null;
+
+    function requestPractical(position, withPhrasebook) {
+      practicalWaiting = true;
+      practicalBefore = practical?.weather?.generatedAt ?? null;
+      api("/api/practical", { position, phrasebook: withPhrasebook });
+      if (practicalPanelEl.classList.contains("open")) renderPractical();
+    }
+
+    function onPractical(data) {
+      practical = data || null;
+      if (practicalWaiting && (practical?.weather?.generatedAt ?? null) !== practicalBefore) practicalWaiting = false;
+      if (practicalPanelEl.classList.contains("open")) renderPractical();
+    }
+
+    function renderPractical() {
+      const items = [];
+      const place = practical?.place;
+      const weather = practical?.weather;
+      items.push(el("p", "practical-title", "Météo"));
+      if (place?.city || place?.country) items.push(el("p", "practical-place", [place.city, place.country].filter(Boolean).join(", ")));
+      if (practicalWaiting || !weather) {
+        items.push(el("p", "pref-empty", practicalWaiting ? "Météo en cours de préparation…" : "Météo indisponible pour le moment."));
+      } else {
+        const cards = el("div", "weather-cards");
+        for (const w of weather.points) {
+          const card = el("div", "weather-card");
+          const hour = w.time ? w.time.slice(11, 16) : "";
+          card.append(
+            el("div", "weather-when", `${w.label}${hour ? ` · ${hour}` : ""}`),
+            el("div", "weather-temp", `${w.temperature}°`),
+            el("div", "weather-sky", w.sky),
+            el("div", "weather-line", `Pluie ${w.rain_probability ?? 0} % · ${w.rain_mm} mm`),
+            el("div", "weather-line", `Vent ${w.wind_kmh} km/h${w.wind_from ? ` du ${w.wind_from}` : ""}`),
+          );
+          cards.append(card);
+        }
+        items.push(cards);
+      }
+      const book = practical?.phrasebook;
+      items.push(el("p", "practical-title", book?.language ? `Guide de conversation · ${book.language}` : "Guide de conversation"));
+      if (book?.pending) items.push(el("p", "pref-empty", "Guide en cours de préparation…"));
+      else if (!book) items.push(el("p", "pref-empty", "Le guide se prépare au « Let's Go! »."));
+      else if (!book.language || !book.phrases?.length) items.push(el("p", "pref-empty", "Pas de guide : la langue locale est le français, ou elle n'a pas pu être déterminée."));
+      else {
+        for (const ph of book.phrases) {
+          const row = el("div", "phrase-row");
+          row.append(el("span", "phrase-fr", ph.fr), el("span", "phrase-local", ph.local));
+          items.push(row);
+        }
+      }
+      practicalBodyEl.replaceChildren(...items);
+    }
+
+    function openPractical() {
+      renderPractical();
+      practicalPanelEl.classList.add("open");
+    }
+
+    function closePractical() {
+      practicalPanelEl.classList.remove("open");
+    }
+
+    onVerticalSwipe(document.getElementById("practical-handle"), { up: openPractical, tap: openPractical });
+    onVerticalSwipe(document.getElementById("practical-head"), { down: closePractical, tap: closePractical });
 
     onVerticalSwipe(document.getElementById("dims-handle"), { up: openDims, tap: openDims });
     onVerticalSwipe(document.getElementById("dims-head"), { down: closeDims, tap: closeDims });
@@ -4087,7 +4207,7 @@
       // La carte vidée arrive par le flux du serveur : on l'attend avant de cadrer sur le départ
       for (let i = 0; i < 30 && (pois.length || unplacedPois.length); i++) await new Promise((r) => setTimeout(r, 100));
       leaveZeroScreen();
-      startAt(choice.position, choice.gps);
+      startAt(choice.position, choice.gps, true);
     });
 
     function leaveZeroScreen() {
@@ -4122,8 +4242,10 @@
     }
 
     // Départ choisi : le point bleu y est posé, fixe, ou suit le GPS
-    function startAt(position, gps) {
+    // withPhrasebook : au « Let's Go! », le guide de conversation est (re)fait ; sinon, seulement la météo
+    function startAt(position, gps, withPhrasebook = false) {
       stopGpsWatch();
+      requestPractical(position, withPhrasebook);
       startMode = gps ? "gps" : "fixed";
       startHintEl.hidden = true;
       setUserDotVisible(true);

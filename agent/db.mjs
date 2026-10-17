@@ -60,8 +60,26 @@ export function openDatabase(path) {
       updated_at INTEGER NOT NULL,
       UNIQUE (trip_id, name)
     );
+    CREATE TABLE IF NOT EXISTS phrasebooks (
+      country TEXT PRIMARY KEY COLLATE NOCASE,
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
   return db;
+}
+
+// Guides de conversation (écran « Infos pratiques »), communs à tous les comptes : un par pays
+export function createPhrasebookStorage(db) {
+  const get = db.prepare("SELECT data FROM phrasebooks WHERE country = ?");
+  const put = db.prepare("INSERT OR REPLACE INTO phrasebooks (country, data, created_at) VALUES (?, ?, ?)");
+  return {
+    get: (country) => {
+      const row = get.get(country);
+      return row ? JSON.parse(row.data) : null;
+    },
+    set: (country, data) => put.run(country, JSON.stringify(data), Date.now()),
+  };
 }
 
 // Pseudo : 2 à 30 caractères (lettres, chiffres, espace, tiret, point, souligné)

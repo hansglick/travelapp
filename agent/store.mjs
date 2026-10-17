@@ -73,6 +73,7 @@ export class PoiStore extends EventEmitter {
 
   reset() {
     this.version = 0;
+    this.practical = { weather: null, phrasebook: null, place: null }; // écran « Infos pratiques »
     this.renumberPending = false; // numéros absolus à recalculer (après une suppression ou un cadenas)
     this.pois = new Map();      // id → POI, dans l'ordre d'ajout
     this.nextId = 1;
@@ -100,6 +101,7 @@ export class PoiStore extends EventEmitter {
 
   toJSON() {
     return {
+      practical: this.practical, // météo (Open-Meteo) et guide de conversation : enregistrés avec l'itinéraire
       nextId: this.nextId,
       version: this.version,
       renumberPending: this.renumberPending,
@@ -129,6 +131,7 @@ export class PoiStore extends EventEmitter {
     this.version = Number.isInteger(data.version) ? data.version : 0;
     this.renumberPending = Boolean(data.renumberPending);
     if (data.preferences) this.preferences = { ...this.preferences, ...data.preferences };
+    if (data.practical) this.practical = { ...this.practical, ...data.practical };
     const stale = [];
     for (const p of data.pois || []) {
       if (p.special === "back" && p.ownLocation) {
@@ -184,6 +187,7 @@ export class PoiStore extends EventEmitter {
       version: this.version,
       pois: [...this.pois.values()].map((p) => this.poiView(p)),
       preferences: this.preferences,
+      practical: this.practical,
       // La page doit renvoyer son ordre pour renuméroter (demande en cours ou numéro manquant)
       renumber_pending: this.renumberPending ||
         [...this.pois.values()].some((p) => p.status === "resolved" && p.included && !p.visitedAt && !p.absIndex),
@@ -606,6 +610,12 @@ export class PoiStore extends EventEmitter {
     this.version++;
     this.emit("change", { added: [], removed: [], resolved: poi });
     return poi;
+  }
+
+  // Infos pratiques mises à jour : affichage seulement, la version de la liste ne change pas
+  setPractical(patch) {
+    this.practical = { ...this.practical, ...patch };
+    this.emit("change", { added: [], removed: [] });
   }
 
   // Point de retour « B » : un seul, à la position de l'utilisateur, dernière étape cadenassée ;
