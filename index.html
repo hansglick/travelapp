@@ -499,7 +499,9 @@
        « Fermer » : toucher à côté les ferme */
     #weather-sheet, #phrase-sheet, #facts-sheet { align-items: center; }
     /* Fun facts : titre gris, chaque fait en deux lignes (titre en gras, texte), traits discrets */
-    .fact { padding: 12px 2px; }
+    .fact { position: relative; padding: 12px 2px 12px 20px; }
+    /* Puce blanche devant chaque fait, alignée sur son titre (le texte reste en retrait) */
+    .fact::before { content: ""; position: absolute; left: 4px; top: 20px; width: 7px; height: 7px; border-radius: 50%; background: #fff; }
     .fact + .fact { border-top: 1px solid #2a2a2a; }
     .fact-title { margin: 0 0 4px; color: #fff; font-weight: 700; }
     .fact-text { margin: 0; color: #d6d6d6; font-size: 0.9rem; line-height: 1.45; }
