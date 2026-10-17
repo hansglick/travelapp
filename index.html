@@ -30,9 +30,14 @@
     /* Retour à l'écran zéro (flèche gris clair), à gauche ; le titre reste centré entre les deux */
     #back-btn {
       grid-column: 1; grid-row: 1; justify-self: start;
-      display: flex; align-items: center; justify-content: center;
-      width: 36px; height: 40px; padding: 0; border: 0; background: none; color: #c8c8c8; cursor: pointer;
+      display: flex; align-items: center; gap: 7px; min-height: 40px; max-width: 100%; padding: 0;
+      border: 0; background: none; color: #c8c8c8; cursor: pointer; text-align: left;
+      font: 600 0.8rem/1.15 system-ui, sans-serif;
     }
+    #back-btn svg { flex: none; }
+    #back-btn:hover { color: #fff; }
+    /* Téléphone : la mention passe sur deux lignes plutôt que de chevaucher le titre */
+    @media (max-width: 420px) { #back-btn span { max-width: 4.6em; font-size: 0.72rem; } }
     #menu-btn {
       grid-column: 3; justify-self: end;
       display: flex; align-items: center; justify-content: center;
@@ -778,9 +783,11 @@
   <main id="app">
     <header>
       <button id="back-btn" type="button" aria-label="Revenir au choix du point de départ" title="Choisir un autre point de départ">
-        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-          <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <svg viewBox="0 0 28 28" width="28" height="28" aria-hidden="true">
+          <circle cx="14" cy="14" r="12.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M19.5 14h-11M12.5 9.5L8 14l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
+        <span>Retour au Globe</span>
       </button>
       <h1>Que fait-on ?</h1>
       <button id="menu-btn" aria-label="Menu" aria-haspopup="true">
