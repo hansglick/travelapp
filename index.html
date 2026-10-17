@@ -44,11 +44,11 @@
     #voice-btn.active { animation: voice-glow 1.6s ease-out infinite; }
     /* Micro coupé : la conversation reste ouverte, la lueur ne pulse plus */
     #voice-btn.active.muted { animation: none; box-shadow: 0 0 10px 3px rgba(228, 87, 46, 0.35); }
-    /* Pastille centrée ; bouton micro à sa gauche, visible pendant une conversation */
+    /* Pastille centrée ; bouton micro à sa droite, visible pendant une conversation */
     .voice-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 22px; width: 100%; }
-    .voice-row #voice-btn { grid-column: 2; }
+    .voice-row #voice-btn { grid-column: 2; grid-row: 1; }
     #mute-btn {
-      grid-column: 1; justify-self: end;
+      grid-column: 3; grid-row: 1; justify-self: start;
       display: flex; align-items: center; justify-content: center;
       width: 40px; height: 40px; padding: 0; border: 2px solid #555; border-radius: 50%;
       background: #1a1a1a; color: #fff; cursor: pointer;
@@ -154,8 +154,8 @@
     .poi-title { grid-column: 2; margin: 0; font-size: 1rem; font-weight: normal; line-height: 1.3; text-align: center; }
     .poi-title .poi-name { color: #e4572e; }
     .poi-rating { margin-left: 6px; color: #fff; font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
-    .poi-card.place .poi-desc { margin: 8px 14px 0; max-height: 40vh; }
-    .poi-tools { display: flex; align-items: center; justify-content: center; gap: 22px; min-height: 22px; margin: 10px 14px 12px; }
+    .poi-card.place .poi-desc { margin: 8px 14px 0; min-height: 0; }
+    .poi-tools { flex: none; display: flex; align-items: center; justify-content: center; gap: 22px; min-height: 22px; margin: 10px 14px 12px; }
     .poi-tools a, .poi-tools button {
       display: flex; align-items: center; justify-content: center; padding: 0; border: 0;
       background: none; color: #fff; cursor: pointer;
@@ -1015,6 +1015,24 @@
       return { width: Math.round(width), height: Math.round(height) };
     }
 
+    // Taille de la bulle d'un lieu. Mobile : presque toute la largeur de la zone (12 px de marge de
+    // chaque côté). Ordinateur : assez large pour le nom et la note sur une ligne (320 px au moins,
+    // jamais plus que la zone). Hauteur selon le contenu, limitée à la zone moins « room » (pointe de
+    // la bulle et icône du lieu) ; au-delà, la description défile.
+    function placeCardSize(props, container, room) {
+      const maxWidth = Math.max(200, container.clientWidth - 24);
+      const mobile = matchMedia("(pointer: coarse)").matches || container.clientWidth < 600;
+      let width = maxWidth;
+      if (!mobile) {
+        const ctx = (placeCardSize.ctx ||= document.createElement("canvas").getContext("2d"));
+        ctx.font = `16px ${getComputedStyle(document.body).fontFamily}`;
+        // nom + note (★ 4,5) + colonnes du bouton × + marges et bordure
+        const needed = Math.ceil(ctx.measureText(props.name || "").width) + 64 + 60 + 26 + 8;
+        width = Math.min(maxWidth, Math.max(320, needed));
+      }
+      return { width: Math.round(width), maxHeight: Math.max(160, Math.round(container.clientHeight - room)) };
+    }
+
     // Contenu de la bulle : titre (nom), description, puis photo (ouvre le carrousel).
     // Les photos sont celles du lieu Google props.placeId, sauf si on les fournit déjà.
     // Bulle d'un lieu de la liste (props.placeId) ; photosReady : carte d'un repère du bouton Next,
@@ -1023,10 +1041,13 @@
       if (photosReady) return buildLandmarkCard(props, size, onClose, photosReady);
       const card = el("div", "poi-card place");
       card.style.width = `${size.width}px`;
+      if (size.maxHeight) card.style.maxHeight = `${size.maxHeight}px`;
       card.style.borderColor = props.color || TASK_COLORS[0];
       const head = el("div", "poi-head");
       const title = el("h3", "poi-title");
-      title.append(el("span", "poi-name", props.name));
+      const name = el("span", "poi-name", props.name);
+      name.style.color = props.color || TASK_COLORS[0]; // couleur du groupe
+      title.append(name);
       const close = el("button", "poi-close", "×");
       close.setAttribute("aria-label", "Fermer");
       close.addEventListener("click", onClose);
@@ -1329,7 +1350,7 @@
     // d'icône : la bulle s'ouvre alors à son emplacement.
     function openMapBubble(poi) {
       rememberViewBeforeBubble();
-      infoWindow.setContent(buildPoiCard(poi.props, poiCardSize()));
+      infoWindow.setContent(buildPoiCard(poi.props, placeCardSize(poi.props, document.getElementById("map"), 90)));
       if (poi.marker.getMap()) {
         infoWindow.open({ map, anchor: poi.marker });
       } else {
@@ -1653,19 +1674,30 @@
 
     // Temps de marche (s) entre le point bleu et chaque POI, et entre chaque paire de POI :
     // times[i][j] avec i = 0 pour le point bleu, i = k + 1 pour stops[k] ; j = index dans stops
+    // Google accepte au plus 625 éléments (origines × destinations) par requête : avec beaucoup de
+    // POI, les origines sont réparties sur plusieurs requêtes
     async function walkingTimes(origin, stops) {
-      const elements = await routesApi(
-        "distanceMatrix/v2:computeRouteMatrix",
-        "originIndex,destinationIndex,duration,condition",
-        {
-          origins: [origin, ...stops.map((p) => p.position)].map((p) => ({ waypoint: toWaypoint(p) })),
-          destinations: stops.map((p) => ({ waypoint: toWaypoint(p.position) })),
-          travelMode: "WALK",
-        }
-      );
+      const origins = [origin, ...stops.map((p) => p.position)];
+      const perRequest = Math.max(1, Math.floor(625 / stops.length));
+      const batches = [];
+      for (let start = 0; start < origins.length; start += perRequest) {
+        const chunk = origins.slice(start, start + perRequest);
+        batches.push(routesApi(
+          "distanceMatrix/v2:computeRouteMatrix",
+          "originIndex,destinationIndex,duration,condition",
+          {
+            origins: chunk.map((p) => ({ waypoint: toWaypoint(p) })),
+            destinations: stops.map((p) => ({ waypoint: toWaypoint(p.position) })),
+            travelMode: "WALK",
+          }
+        ).then((elements) => ({ start, elements })));
+      }
       const times = Array.from({ length: stops.length + 1 }, () => Array(stops.length).fill(Infinity));
-      for (const e of elements) {
-        if (e.condition === "ROUTE_EXISTS") times[e.originIndex][e.destinationIndex] = secondsOf(e.duration);
+      for (const { start, elements } of await Promise.all(batches)) {
+        for (const e of elements) {
+          // Index 0 parfois absent de la réponse
+          if (e.condition === "ROUTE_EXISTS") times[start + (e.originIndex ?? 0)][e.destinationIndex ?? 0] = secondsOf(e.duration);
+        }
       }
       return times;
     }
@@ -2398,7 +2430,7 @@
     const listBubbleEl = document.getElementById("list-bubble");
 
     function openListBubble(props) {
-      const size = poiCardSize(document.body);
+      const size = placeCardSize(props, document.body, 48);
       listBubbleEl.replaceChildren(buildPoiCard(props, size, closeListBubble));
       listBubbleEl.hidden = false;
     }
@@ -3302,7 +3334,7 @@
     function setVoiceButton(state) {
       // Bouton micro seulement pendant une conversation ; il repart ouvert à chaque conversation
       muteBtn.hidden = state !== "active";
-      if (state !== "active") setMuted(false);
+      if (state !== "active" || !muteBtn.innerHTML) setMuted(Boolean(voice?.muted) && state === "active");
       voiceBtn.classList.toggle("connecting", state === "connecting");
       voiceBtn.classList.toggle("active", state === "active");
       if (state !== "active") voiceBtn.classList.remove("working");
