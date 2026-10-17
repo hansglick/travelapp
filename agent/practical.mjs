@@ -1,8 +1,8 @@
 // Infos pratiques du point de départ (écran « Infos pratiques ») :
 // - météo maintenant, dans 4 h et dans 24 h (Open-Meteo : vraies prévisions, gratuites, sans clé) ;
 // - petit guide de conversation dans la langue principale du pays (petit modèle, sortie structurée),
-//   langue majoritaire de la région (mémorisée par région), puis guide mémorisé par langue dans la
-//   base. Pas de guide si la langue est le français ou si aucune n'est nettement majoritaire.
+//   langue majoritaire du pays du lieu (mémorisée par pays), puis guide mémorisé par langue dans la
+//   base. Pas de guide si cette langue est le français.
 
 import { EXTRACTOR_MODEL } from "./prompts.mjs";
 
@@ -20,16 +20,15 @@ const sky = (code) => WEATHER_WORDS.find(([codes]) => codes.includes(code))?.[1]
 const WIND_DIRECTIONS = ["nord", "nord-est", "est", "sud-est", "sud", "sud-ouest", "ouest", "nord-ouest"];
 const windFrom = (deg) => (Number.isFinite(deg) ? WIND_DIRECTIONS[Math.round(deg / 45) % 8] : null);
 
-// Étape 1 : langue majoritaire d'une région (appel rapide, mémorisé par région)
-const LANGUAGE_INSTRUCTIONS = `Donne la langue majoritairement parlée au quotidien par les habitants du lieu indiqué (ville, région, pays).
-Le lieu précis compte plus que le pays entier : à Vancouver, l'anglais ; à Montréal, le français ; à Barcelone, l'espagnol. Si la ville et la région sont inconnues, donne la langue majoritaire du pays (Grèce → grec, Israël → hébreu).
-language : le nom de la langue en français, en minuscules (« anglais », « grec », « hébreu »). null seulement dans le cas rare où aucune langue n'est clairement majoritaire à cet endroit.`;
+// Étape 1 : langue du lieu = langue majoritaire de son pays (appel rapide, mémorisé par pays)
+const LANGUAGE_INSTRUCTIONS = `Donne la langue majoritaire du pays indiqué, celle que parle la plus grande partie de ses habitants (Grèce → grec, Canada → anglais, Suisse → allemand, Israël → hébreu).
+language : le nom de la langue en français, en minuscules.`;
 
 const LANGUAGE_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["language"],
-  properties: { language: { type: ["string", "null"] } },
+  properties: { language: { type: "string" } },
 };
 
 // Étape 2 : guide de conversation dans une langue (mémorisé par langue)
@@ -129,18 +128,17 @@ export function createPractical({ apiKey, metrics, storage }) {
     return request;
   }
 
-  // Langue majoritaire d'un lieu (« Vancouver, Colombie-Britannique, Canada » → « anglais »),
-  // mémorisée par région (ou par pays si la région est inconnue). Une réponse « incertaine » n'est
-  // pas mémorisée : elle sera redemandée la prochaine fois.
-  function regionLanguage({ city, region, country }) {
-    const key = region ? `region:${region}, ${country}` : `country:${country}`;
+  // Langue d'un lieu : 1. son pays ; 2. la langue majoritaire de ce pays ; 3. c'est la langue
+  // locale. Mémorisée par pays ; une réponse vide n'est pas mémorisée (redemandée la fois suivante).
+  function countryLanguage(country) {
+    const key = `country:${country}`;
     const saved = storage.get(key);
     if (saved?.language) return Promise.resolve(saved.language);
     return once(key, async () => {
       const out = await ask({
         instructions: LANGUAGE_INSTRUCTIONS,
-        input: `Ville : ${city || "inconnue"}. Région : ${region || "inconnue"}. Pays : ${country}.`,
-        name: "region_language", schema: LANGUAGE_SCHEMA, effort: "none", timeout: 15000,
+        input: `Pays : ${country}.`,
+        name: "country_language", schema: LANGUAGE_SCHEMA, effort: "none", timeout: 15000,
       });
       const language = typeof out.language === "string" && out.language.trim() ? out.language.trim().toLowerCase().slice(0, 40) : null;
       if (language) storage.set(key, { language });
@@ -152,7 +150,7 @@ export function createPractical({ apiKey, metrics, storage }) {
   async function phrasebook({ city, region, country }) {
     if (!country) return null;
     const started = Date.now();
-    const language = await regionLanguage({ city, region, country });
+    const language = await countryLanguage(country);
     if (!language || language === "français") {
       console.log(`[infos pratiques] ${[city, region, country].filter(Boolean).join(", ")} : ${language || "langue incertaine"}, pas de guide`);
       return { language: null, phrases: [], generatedAt: Date.now() };
