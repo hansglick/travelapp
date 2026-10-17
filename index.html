@@ -431,6 +431,49 @@
     }
     .poi-row-leg { margin: 4px 0 0 36px; font-size: 0.8rem; color: #a0a0a0; }
     .poi-row-abs { margin: 2px 0 0 36px; font-size: 0.75rem; color: #777; }
+
+    /* Légende de la carte (contrôle Google en bas à gauche) */
+    .map-legend { margin: 0 0 8px 10px; font-family: system-ui, sans-serif; }
+    .map-legend[hidden] { display: none; }
+    .legend-toggle {
+      padding: 7px 12px; border: 0; border-radius: 999px; background: rgba(0, 0, 0, 0.8); color: #fff;
+      font: 600 0.8rem system-ui, sans-serif; cursor: pointer; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    }
+    .legend-panel {
+      display: flex; flex-direction: column; gap: 2px; margin-top: 6px; padding: 8px;
+      max-width: min(300px, 80vw); max-height: 45vh; overflow-y: auto;
+      border-radius: 12px; background: rgba(0, 0, 0, 0.88); color: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    }
+    .legend-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 0.85rem; cursor: pointer; }
+    .legend-row input { width: 18px; height: 18px; margin: 0; accent-color: #e4572e; }
+    .legend-dot { flex: none; width: 12px; height: 12px; border: 2px solid #fff; border-radius: 50%; }
+    .legend-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .legend-count { color: #a0a0a0; font-size: 0.8rem; }
+    .legend-only, .legend-all {
+      padding: 3px 8px; border: 1px solid #555; border-radius: 999px; background: none; color: #ddd;
+      font: 0.75rem system-ui, sans-serif; cursor: pointer;
+    }
+    .legend-all { margin-top: 4px; align-self: flex-end; }
+    .legend-all:disabled { opacity: 0.4; cursor: default; }
+
+    /* Liste des lieux : boutons « Regrouper » / « Ordonner » et groupes dépliables */
+    .list-modes { display: flex; gap: 8px; }
+    .list-modes button {
+      padding: 6px 14px; border: 1px solid #444; border-radius: 999px; background: none; color: #ccc;
+      font: 600 0.85rem system-ui, sans-serif; cursor: pointer;
+    }
+    .list-modes button.active { border-color: #e4572e; background: #e4572e; color: #fff; }
+    .group-row {
+      display: flex; align-items: center; gap: 10px; padding: 16px 0; border-bottom: 1px solid #555; cursor: pointer;
+    }
+    .section-title + .group-row, #poi-rows > .group-row:first-child { border-top: 1px solid #555; }
+    .group-dot { flex: none; width: 18px; height: 18px; border: 2px solid #fff; border-radius: 50%; }
+    .group-name { margin: 0; font-size: 1.2rem; color: #fff; }
+    .group-meta { margin: 4px 0 0; font-size: 0.8rem; color: #a0a0a0; }
+    .group-chevron { flex: none; color: #a0a0a0; transition: transform 0.2s; }
+    .group-row.open .group-chevron { transform: rotate(90deg); }
+    .group-items { margin: 0; padding: 0 0 0 14px; list-style: none; border-left: 3px solid #333; }
+    .group-items .poi-row-handle { visibility: hidden; } /* pas de glisser dans la vue groupée */
     .poi-row-desc { margin: 6px 0 0 36px; font-size: 0.9rem; font-style: italic; color: #fff; white-space: nowrap; overflow: hidden; }
     .poi-row-handle {
       flex: none; display: flex; align-items: center; justify-content: center;
@@ -565,6 +608,10 @@
       <div class="grip"></div>
       <h2>Les lieux</h2>
       <p id="itinerary-label" hidden></p>
+      <div class="list-modes" role="group" aria-label="Présentation de la liste">
+        <button type="button" id="group-btn">Regrouper les lieux</button>
+        <button type="button" id="order-btn" class="active">Ordonner les lieux</button>
+      </div>
       <button id="erase-btn" aria-label="Effacer tous les lieux et toutes les tâches">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4zm-3 6h12l-1 12H7z"/></svg>
         Effacer
@@ -1276,7 +1323,7 @@
           const color = taskColor(p.color_index);
           const marker = new MarkerClass({ map, position, title: props.name, icon: poiIcon(props.category, null, false, false, color) });
           poi = {
-            id: p.id, props, position, marker, included: true, pin: p.pin, visitedAt: null, color,
+            id: p.id, props, position, marker, included: true, pin: p.pin, visitedAt: null, color, colorIndex: p.color_index,
             get locked() { return Boolean(this.pin); }, // cadenas : étape figée (pin du serveur)
           };
           marker.addListener("click", () => openMapBubble(poi));
@@ -1289,7 +1336,7 @@
         // Décoché / recoché depuis l'écran, ou visité : le serveur fait foi
         if (poi.included !== p.included) {
           poi.included = p.included;
-          poi.marker.setMap(p.included ? map : null);
+          updateMarkerVisibility(poi);
           routeOrder = [...routeOrder.filter(isToVisit), ...routeOrder.filter((x) => !isToVisit(x))];
           changed = true;
         }
@@ -1323,6 +1370,85 @@
       requestAnimationFrame(() => api("/api/ui-ack", { version: state.version }));
     }
 
+    // ---- Groupes de lieux (une tâche = un groupe, d'une même couleur) ----
+
+    const groupKeyOf = (x) => {
+      const index = x.colorIndex ?? x.color_index;
+      return Number.isInteger(index) ? index : "autres";
+    };
+
+    // Titre d'un groupe : celui de sa tâche la plus récente (une tâche complétée garde la couleur)
+    function groupTitle(key) {
+      if (key === "autres") return "Autres lieux";
+      const same = agentTasks.filter((t) => t.colorIndex === key);
+      return (same.find((t) => !t.replacedBy) || same[0])?.title || "Lieux";
+    }
+
+    // Groupes présents, dans l'ordre de leur couleur (celui de leur création)
+    function groupsOf(list) {
+      const keys = [...new Set(list.map(groupKeyOf))];
+      return keys.sort((a, b) => (a === "autres") - (b === "autres") || a - b);
+    }
+
+    // ---- Légende de la carte : afficher ou masquer les lieux d'un groupe ----
+    // Affichage seulement : l'itinéraire, les numéros et le tracé ne changent pas. Rien n'est
+    // mémorisé : tous les groupes sont affichés à chaque ouverture de l'appli.
+    const hiddenGroups = new Set();
+    let legendEl = null;
+    let legendOpen = false;
+
+    function updateMarkerVisibility(poi) {
+      const show = poi.included && !hiddenGroups.has(groupKeyOf(poi));
+      if (Boolean(poi.marker.getMap()) !== show) poi.marker.setMap(show ? map : null);
+    }
+
+    function setGroupsHidden(update) {
+      update();
+      pois.forEach(updateMarkerVisibility);
+      renderLegend();
+    }
+
+    function renderLegend() {
+      if (!legendEl) return;
+      const placed = pois.filter((p) => p.included);
+      const keys = groupsOf(placed);
+      legendEl.hidden = !keys.length;
+      for (const key of [...hiddenGroups]) if (!keys.includes(key)) hiddenGroups.delete(key); // groupe disparu
+      const toggle = el("button", "legend-toggle", hiddenGroups.size ? `Légende (${keys.length - hiddenGroups.size}/${keys.length})` : "Légende");
+      toggle.type = "button";
+      toggle.addEventListener("click", () => { legendOpen = !legendOpen; renderLegend(); });
+      const children = [toggle];
+      if (legendOpen) {
+        const panel = el("div", "legend-panel");
+        for (const key of keys) {
+          const row = el("label", "legend-row");
+          const box = el("input");
+          box.type = "checkbox";
+          box.checked = !hiddenGroups.has(key);
+          box.addEventListener("change", () => setGroupsHidden(() => (box.checked ? hiddenGroups.delete(key) : hiddenGroups.add(key))));
+          const dot = el("span", "legend-dot");
+          dot.style.background = taskColor(key === "autres" ? null : key);
+          const count = placed.filter((p) => groupKeyOf(p) === key).length;
+          const only = el("button", "legend-only", "Seul");
+          only.type = "button";
+          only.title = "N'afficher que ce groupe";
+          only.addEventListener("click", (e) => {
+            e.preventDefault();
+            setGroupsHidden(() => { hiddenGroups.clear(); keys.filter((k) => k !== key).forEach((k) => hiddenGroups.add(k)); });
+          });
+          row.append(box, dot, el("span", "legend-name", groupTitle(key)), el("span", "legend-count", String(count)), only);
+          panel.append(row);
+        }
+        const all = el("button", "legend-all", "Tout afficher");
+        all.type = "button";
+        all.disabled = !hiddenGroups.size;
+        all.addEventListener("click", () => setGroupsHidden(() => hiddenGroups.clear()));
+        panel.append(all);
+        children.push(panel);
+      }
+      legendEl.replaceChildren(...children);
+    }
+
     // Position transmise au serveur (contexte du guide), regroupée sur 1 s
     let contextTimer = null;
     function sendContext() {
@@ -1342,6 +1468,8 @@
       routeOrder = [...arrangeByPins(includedPois()), ...routeOrder.filter((p) => !isToVisit(p))];
       includedPois().forEach((poi, i) => poi.marker.setIcon(poiIcon(poi.props.category, i + 1, poi.locked, false, poi.color)));
       visitedPois().forEach((poi) => poi.marker.setIcon(poiIcon(poi.props.category, null, false, true, poi.color)));
+      pois.forEach(updateMarkerVisibility);
+      renderLegend();
       renderPoiList();
       reportMapNumbers();
     }
@@ -1362,7 +1490,7 @@
       poi.included = included;
       if (!included) poi.pin = null; // exclu : plus de place dans l'itinéraire, donc plus de cadenas
       api("/api/pois/update", { id: poi.id, included }); // le guide en est informé
-      poi.marker.setMap(included ? map : null);
+      updateMarkerVisibility(poi);
       closeBubble();
       const others = routeOrder.filter((p) => p !== poi);
       const inc = others.filter(isToVisit);
@@ -2185,7 +2313,36 @@
     // Trois sections : « À visiter » (étapes numérotées + total), « Déjà visité » (du plus récent au plus
     // ancien, avec l'heure d'arrivée), « Exclus » (décochés). Les sections vides sont masquées, sauf
     // « À visiter ».
+    // Deux vues : « ordered » (itinéraire, par défaut) ou « grouped » (une ligne par groupe de tâche,
+    // dépliable). Non mémorisé : la liste s'ouvre en vue ordonnée à chaque lancement.
+    let listMode = "ordered";
+    const openGroups = new Set();
+    const groupBtn = document.getElementById("group-btn");
+    const orderBtn = document.getElementById("order-btn");
+
+    function setListMode(mode) {
+      listMode = mode;
+      groupBtn.classList.toggle("active", mode === "grouped");
+      orderBtn.classList.toggle("active", mode === "ordered");
+      groupBtn.setAttribute("aria-pressed", String(mode === "grouped"));
+      orderBtn.setAttribute("aria-pressed", String(mode === "ordered"));
+      renderPoiList();
+    }
+
+    groupBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setListMode("grouped");
+    });
+    // « Ordonner » : retour à l'ordre de l'itinéraire, réoptimisé (les numéros absolus ne bougent pas)
+    orderBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setListMode("ordered");
+      routeStale = true;
+      computeRoute();
+    });
+
     function renderPoiList() {
+      if (listMode === "grouped") return renderGroupedList();
       const toVisit = includedPois();
       const visited = visitedPois();
       const excluded = excludedPois();
@@ -2204,6 +2361,59 @@
       if (unplacedPois.length) items.push(el("li", "section-title", "Pas encore sur la carte"), ...unplacedPois.map(buildUnplacedRow));
       if (visited.length) items.push(el("li", "section-title", "Déjà visité"), ...visited.map((poi) => buildPoiRow(poi, "visited")));
       if (excluded.length) items.push(el("li", "section-title", "Exclus"), ...excluded.map((poi) => buildPoiRow(poi, "excluded")));
+      poiRowsEl.replaceChildren(...items);
+      updateEraseButton();
+      updateSaveButton();
+      if (poiListEl.classList.contains("open")) fitDescriptions();
+    }
+
+    // Vue groupée : une ligne par groupe (pastille de couleur, titre de la tâche, nombre de lieux) ;
+    // la toucher déplie ses lieux dans l'ordre de l'itinéraire : visités, à visiter (avec leur numéro
+    // d'étape restante), exclus, puis ceux pas encore sur la carte
+    function renderGroupedList() {
+      const toVisit = includedPois();
+      const visited = visitedPois().reverse(); // du plus ancien au plus récent
+      const excluded = excludedPois();
+      const keys = groupsOf([...pois, ...unplacedPois]);
+      for (const key of [...openGroups]) if (!keys.includes(key)) openGroups.delete(key);
+      const items = [];
+      if (!keys.length) {
+        items.push(el("li", "section-empty", "Aucun lieu pour l'instant : touchez le haut-parleur et dites au guide ce qui vous ferait envie."));
+      }
+      for (const key of keys) {
+        const inGroup = (p) => groupKeyOf(p) === key;
+        const members = [
+          ...visited.filter(inGroup).map((poi) => buildPoiRow(poi, "visited")),
+          ...toVisit.flatMap((poi, i) => (inGroup(poi) ? [buildPoiRow(poi, "todo", i + 1)] : [])),
+          ...excluded.filter(inGroup).map((poi) => buildPoiRow(poi, "excluded")),
+          ...unplacedPois.filter(inGroup).map(buildUnplacedRow),
+        ];
+        const visitedCount = visited.filter(inGroup).length;
+        const open = openGroups.has(key);
+        const head = el("li", open ? "group-row open" : "group-row");
+        head.setAttribute("role", "button");
+        head.setAttribute("aria-expanded", String(open));
+        const dot = el("span", "group-dot");
+        dot.style.background = taskColor(key === "autres" ? null : key);
+        const text = el("div", "poi-row-main");
+        const meta = `${members.length} lieu${members.length > 1 ? "x" : ""}` +
+          (visitedCount ? `, dont ${visitedCount} visité${visitedCount > 1 ? "s" : ""}` : "");
+        text.append(el("p", "group-name", groupTitle(key)), el("p", "group-meta", meta));
+        head.append(dot, text, el("span", "group-chevron", "›"));
+        head.addEventListener("click", () => {
+          if (openGroups.has(key)) openGroups.delete(key);
+          else openGroups.add(key);
+          renderGroupedList();
+        });
+        items.push(head);
+        if (open) {
+          const sub = el("li");
+          const list = el("ul", "group-items");
+          list.append(...members);
+          sub.append(list);
+          items.push(sub);
+        }
+      }
       poiRowsEl.replaceChildren(...items);
       updateEraseButton();
       updateSaveButton();
@@ -2763,6 +2973,8 @@
       agentTasks = tasks;
       updateEraseButton();
       if (tasksPanelEl.classList.contains("open")) renderTasks();
+      renderLegend(); // titres des groupes
+      if (listMode === "grouped" && poiListEl.classList.contains("open")) renderPoiList();
     }
 
     onVerticalSwipe(document.getElementById("tasks-handle"), { up: openTasks, tap: openTasks });
@@ -2772,7 +2984,7 @@
     const listHead = document.getElementById("poi-list-head");
     let headDrag = null;
     listHead.addEventListener("pointerdown", (e) => {
-      if (e.target.closest("#erase-btn")) return; // le bouton « Effacer » a son propre geste
+      if (e.target.closest("#erase-btn, .list-modes")) return; // ces boutons ont leur propre geste
       headDrag = { y: e.clientY, t: e.timeStamp };
       listHead.setPointerCapture(e.pointerId);
     });
@@ -3193,6 +3405,10 @@
 
       MarkerClass = Marker;
       infoWindow = new google.maps.InfoWindow({ headerDisabled: true });
+      // Légende des groupes, en bas à gauche de la carte (masquée tant qu'il n'y a aucun lieu)
+      legendEl = el("div", "map-legend");
+      legendEl.hidden = true;
+      map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(legendEl);
       setUserPosition(DEFAULT_POSITION);
       renderSteps();
       // Lieux, tâches et conversation du compte : une fois connecté

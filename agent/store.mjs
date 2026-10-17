@@ -168,7 +168,9 @@ export class PoiStore extends EventEmitter {
       version: this.version,
       pois: [...this.pois.values()].map((p) => this.poiView(p)),
       preferences: this.preferences,
-      renumber_pending: this.renumberPending, // la page doit renvoyer son ordre pour renuméroter
+      // La page doit renvoyer son ordre pour renuméroter (demande en cours ou numéro manquant)
+      renumber_pending: this.renumberPending ||
+        [...this.pois.values()].some((p) => p.status === "resolved" && p.included && !p.visitedAt && !p.absIndex),
     };
   }
 
@@ -452,12 +454,16 @@ export class PoiStore extends EventEmitter {
       const n = numbers[poi.id];
       poi.mapNumber = Number.isInteger(n) && n > 0 && n < 1000 ? n : null;
     }
-    if (!this.renumberPending) return;
+    const all = [...this.pois.values()];
+    const steps = all.filter((p) => p.status === "resolved" && p.included && !p.visitedAt);
+    // Un lieu sans numéro (état abîmé) est réparé de la même façon qu'une renumérotation demandée
+    if (!this.renumberPending && steps.every((p) => p.absIndex)) return;
+    // Ordre incomplet (page pas encore à jour, par exemple à son ouverture) : on attend le suivant
+    if (steps.some((p) => !p.mapNumber)) return;
     // Les visités gardent leur numéro ; les autres prennent les numéros libres, dans l'ordre affiché
     this.renumberPending = false;
-    const all = [...this.pois.values()];
     const taken = new Set(all.filter((p) => p.visitedAt && p.absIndex).map((p) => p.absIndex));
-    const toNumber = all.filter((p) => !p.visitedAt && p.included && p.mapNumber).sort((a, b) => a.mapNumber - b.mapNumber);
+    const toNumber = [...steps].sort((a, b) => a.mapNumber - b.mapNumber);
     for (const p of all) if (!p.visitedAt && !toNumber.includes(p)) p.absIndex = null;
     let next = 1;
     for (const p of toNumber) {
