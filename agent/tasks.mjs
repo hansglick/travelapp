@@ -2,6 +2,8 @@
 // des tâches à créer, préciser ou annuler. Chaque tâche est exécutée par le modèle de calcul (Responses
 // API, piloté ici), jusqu'à MAX_PARALLEL en même temps. Une tâche précisée pendant son exécution est
 // arrêtée puis relancée avec la demande mise à jour. Le tableau est affiché dans l'écran « Tâches ».
+// Une recherche commence « à préciser » : le guide pose d'abord, une à une, au plus MAX_QUESTIONS
+// questions sur les caractéristiques importantes qui manquent (budget, cuisine…), puis elle est lancée.
 
 import {
   BACKEND_MODEL, BACKEND_REASONING, BACKEND_INSTRUCTIONS, BACKEND_TOOLS,
@@ -18,12 +20,21 @@ const CALL_TIMEOUT_MS = 90000;
 const KEEP_TASKS = 40;             // tâches gardées dans le tableau
 const WAIT_FOR_MORE_MAX_MS = 8000; // phrase inachevée : on attend la suite au plus ce délai
 const EXTRACTOR_REASONING = process.env.EXTRACTOR_REASONING || "none"; // détection rapide
+const MAX_QUESTIONS = 3;           // questions d'affinage posées au plus avant une recherche
+const MAX_DIMENSIONS = 6;
+const QUESTION_GRACE_MS = 2000;    // une prise de parole finie avant ce délai ne répond pas à la question
+const ACTIVE = ["clarifying", "pending", "running"];
 
 // Noms des couleurs des groupes (même ordre que la palette de la page)
 const COLOR_NAMES = ["orange", "bleu", "vert", "magenta", "bleu-vert", "violet", "ambre", "rose"];
+// État d'une caractéristique, pour le détecteur
+const DIMENSION_WORDS = {
+  to_ask: "à demander", asked: "question posée, réponse attendue", skipped: "peu importe",
+  unanswered: "sans réponse", not_asked: "non demandée",
+};
 const colorName = (i) => (Number.isInteger(i) ? COLOR_NAMES[i] || `couleur n° ${i + 1}` : null);
 
-const STATUS_WORDS ={ pending: "en attente", running: "en cours", done: "terminée", failed: "échouée", cancelled: "annulée" };
+const STATUS_WORDS = { clarifying: "à préciser", pending: "en attente", running: "en cours", done: "terminée", failed: "échouée", cancelled: "annulée" };
 
 export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notify }) {
   const tasks = new Map();
@@ -46,6 +57,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       requestedCount: t.requestedCount, placedCount: placedCount(t), criteria: t.criteria, maxDistanceM: t.maxDistanceM,
       colorIndex: t.colorIndex, extends: t.extends,
       relatedIds: [...t.relatedIds].filter((id) => store.pois.has(id)), // lieux concernés par une question
+      dimensions: t.dimensions,
     };
   }
 
@@ -57,8 +69,10 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   function summary() {
     const running = list().filter((t) => t.status === "running");
     const pending = list().filter((t) => t.status === "pending");
-    if (!running.length && !pending.length) return "Plus aucune tâche en cours : tout ce qui a été demandé est fait.";
+    const clarifying = list().filter((t) => t.status === "clarifying");
+    if (!running.length && !pending.length && !clarifying.length) return "Plus aucune tâche en cours : tout ce qui a été demandé est fait.";
     const parts = [];
+    if (clarifying.length) parts.push(`à préciser avant la recherche : ${clarifying.map((t) => `« ${t.title} »`).join(", ")}`);
     if (running.length) parts.push(`en cours : ${running.map((t) => `« ${t.title} »`).join(", ")}`);
     if (pending.length) parts.push(`en attente : ${pending.map((t) => `« ${t.title} »`).join(", ")}`);
     return `Tâches ${parts.join(" ; ")}.`;
@@ -75,11 +89,12 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
 
   // Appelée à chaque fin de prise de parole ; les détections passent l'une après l'autre
   function handleUserTurn(text, conversation) {
-    extracting = extracting.then(() => detect(text, conversation)).catch((err) => console.warn("[tâches] détection", err.message));
+    const turnAt = Date.now();
+    extracting = extracting.then(() => detect(text, conversation, turnAt)).catch((err) => console.warn("[tâches] détection", err.message));
     return extracting;
   }
 
-  async function detect(text, conversation) {
+  async function detect(text, conversation, turnAt = Date.now()) {
     if (heldUtterance && Date.now() - heldUtterance.at < WAIT_FOR_MORE_MAX_MS) text = `${heldUtterance.text} ${text}`;
     heldUtterance = null;
     lastConversation = conversation.slice(-8);
@@ -94,12 +109,17 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         ...(t.replacedBy ? { replaced_by: t.replacedBy } : {}),
         ...(t.result ? { result: t.result } : {}),
         ...(t.candidates.length ? { candidates: t.candidates.slice(-6) } : {}),
+        ...(t.status === "clarifying" ? {
+          dimensions: t.dimensions.map((d) => `${d.name} : ${d.value ?? DIMENSION_WORDS[d.status]}`),
+          pending_question: t.dimensions.find((d) => d.status === "asked")?.question || null,
+        } : {}),
       };
     });
     const selection = store.selectionForModel().pois.map((p) => `${p.map_number ? `n°${p.map_number} ` : ""}${p.name} (${p.category})`);
     const input = [
       "Tableau des tâches :", JSON.stringify(board),
       "Lieux sur la carte :", selection.join(" ; ") || "aucun",
+      "Préférences enregistrées :", JSON.stringify(store.preferences || {}),
       "Fin de la conversation (transcription) :", conversation.slice(-10).join("\n") || "(début)",
       "Nouvelle prise de parole de l'utilisateur :", text,
     ].join("\n");
@@ -129,6 +149,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       return;
     }
     for (const id of out.cancel || []) cancel(id, "annulée par l'utilisateur");
+    for (const c of out.clarify || []) clarify(c, text);
     for (const r of out.refine || []) refine(r.task_id, r.request, text, r.count, r.criteria);
     for (const e of out.extend || []) extend(e.task_id, e.additional_count, e.request, e.criteria, text);
     for (const t of out.new_tasks || []) {
@@ -138,11 +159,88 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         extend(group.id, t.count || 1, t.request, t.criteria?.length ? t.criteria : null, text);
         continue;
       }
-      add({ title: t.title, request: t.request, kind: t.kind, utterance: text, count: t.count, criteria: t.criteria });
+      add({ title: t.title, request: t.request, kind: t.kind, utterance: text, count: t.count, criteria: t.criteria, dimensions: t.dimensions });
     }
-    if (out.new_tasks?.length || out.refine?.length || out.extend?.length || out.cancel?.length) {
+    if (out.new_tasks?.length || out.refine?.length || out.extend?.length || out.cancel?.length || out.clarify?.length) {
       console.log(`[tâches] « ${text.slice(0, 80)} » →`, JSON.stringify(out));
     }
+    // Question posée avant cette prise de parole et restée sans réponse : on passe à la suivante
+    for (const t of list().filter((x) => x.status === "clarifying")) {
+      for (const d of t.dimensions) {
+        if (d.status === "asked" && d.askedAt + QUESTION_GRACE_MS < turnAt) {
+          d.status = "unanswered";
+          log(t, `sans réponse : ${d.name}`);
+        }
+      }
+    }
+    askNext();
+  }
+
+  // ---- Questions d'affinage (tâches « à préciser ») ----
+
+  // Une seule question à la fois, toutes tâches confondues : celles de la plus ancienne tâche d'abord.
+  // Une tâche dont toutes les questions ont trouvé réponse est lancée.
+  function askNext() {
+    const waiting = list().filter((t) => t.status === "clarifying");
+    if (waiting.some((t) => t.dimensions.some((d) => d.status === "asked"))) return;
+    for (const t of waiting) {
+      const next = t.dimensions.find((d) => d.status === "to_ask");
+      if (!next) {
+        launch(t, "précisions reçues");
+        continue;
+      }
+      next.status = "asked";
+      next.askedAt = Date.now();
+      log(t, `question posée : ${next.question}`);
+      notify({ type: "question", task: t, question: next.question, summary: summary() });
+      return;
+    }
+  }
+
+  function launch(t, reason) {
+    t.status = "pending";
+    log(t, `recherche lancée (${reason})`);
+    schedule();
+  }
+
+  // Fin de la conversation vocale : plus personne pour répondre, les recherches partent avec ce qu'on sait
+  function launchClarifying(reason) {
+    for (const t of list().filter((x) => x.status === "clarifying")) {
+      for (const d of t.dimensions) {
+        if (d.status === "asked") d.status = "unanswered";
+        if (d.status === "to_ask") d.status = "not_asked";
+      }
+      launch(t, reason);
+    }
+  }
+
+  // Réponses aux questions d'une tâche « à préciser » (ou précision donnée avant qu'on la demande)
+  function clarify(c, utterance) {
+    const t = tasks.get(c.task_id);
+    if (!t) return null;
+    if (t.status !== "clarifying") {
+      // Déjà lancée : c'est une précision ordinaire
+      return ACTIVE.includes(t.status) ? refine(t.id, c.request, utterance, c.count, c.criteria) : null;
+    }
+    for (const a of c.answers || []) {
+      const name = String(a.dimension || "").slice(0, 40);
+      let d = t.dimensions.find((x) => normalize(x.name) === normalize(name));
+      if (!d) {
+        d = { name, value: null, question: null, status: "answered", askedAt: null };
+        t.dimensions.push(d);
+      }
+      d.value = a.value === null ? null : String(a.value).slice(0, 80);
+      d.status = a.value === null ? "skipped" : "answered";
+      log(t, d.value === null ? `peu importe : ${d.name}` : `réponse : ${d.name} = ${d.value}`);
+    }
+    if (c.request) t.request = String(c.request).slice(0, 600);
+    if (Number.isInteger(c.count) && c.count > 0 && c.count <= 15) t.requestedCount = c.count;
+    if (Array.isArray(c.criteria) && c.criteria.length) setCriteria(t, c.criteria);
+    if (c.launch_now) {
+      for (const d of t.dimensions) if (d.status === "to_ask" || d.status === "asked") d.status = "skipped";
+    }
+    changed();
+    return t;
   }
 
   // ---- Gestion du tableau ----
@@ -153,6 +251,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     t.nudges = 0;
     t.lastNudgeAt = 0;
     t.relatedIds = new Set(Array.isArray(t.relatedIds) ? t.relatedIds : []); // lieux consultés par la tâche
+    t.dimensions ||= [];
     t.log = (text) => log(t, text); // utilisé par les fonctions de l'appli (lieu retiré car trop loin…)
     t.ensureColor = () => {
       if (t.colorIndex === null) t.colorIndex = nextColor++;
@@ -172,7 +271,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         result: t.result, replaces: t.replaces, replacedBy: t.replacedBy, addedIds: t.addedIds,
         previousAddedIds: t.previousAddedIds, requestedCount: t.requestedCount, criteria: t.criteria,
         maxDistanceM: t.maxDistanceM, extends: t.extends, continuations: t.continuations, colorIndex: t.colorIndex,
-        relatedIds: [...t.relatedIds],
+        relatedIds: [...t.relatedIds], dimensions: t.dimensions,
       })),
     };
   }
@@ -184,7 +283,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     nextColor = Number.isInteger(data.nextColor) ? data.nextColor : 0;
     for (const saved of data.tasks || []) {
       const t = hydrate({ ...saved, candidates: [], conversation: [] });
-      if (["pending", "running"].includes(t.status)) {
+      if (ACTIVE.includes(t.status)) {
         t.status = "failed";
         t.result = "Tâche interrompue par un redémarrage du serveur.";
         t.endedAt = Date.now();
@@ -193,14 +292,29 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     }
   }
 
-  function add({ title, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, criteria = [], extends: extending = false }) {
-    const cleanCriteria = (Array.isArray(criteria) ? criteria : []).slice(0, 10).map((c) => ({
+  // Critères d'une tâche, et distance maximale contrôlée par l'application (80 m par minute de marche,
+  // à vol d'oiseau)
+  function setCriteria(t, criteria) {
+    t.criteria = (Array.isArray(criteria) ? criteria : []).slice(0, 10).map((c) => ({
       type: c.type, value: String(c.value || "").slice(0, 120), strict: Boolean(c.strict),
       maxWalkMinutes: Number.isInteger(c.max_walk_minutes) && c.max_walk_minutes > 0 ? c.max_walk_minutes : null,
     }));
-    // Distance maximale contrôlée par l'application : 80 m par minute de marche, à vol d'oiseau
-    const walkLimits = cleanCriteria.filter((c) => c.type === "distance" && c.strict && c.maxWalkMinutes).map((c) => c.maxWalkMinutes);
-    const maxDistanceM = walkLimits.length ? Math.min(...walkLimits) * WALK_M_PER_MIN : null;
+    const walkLimits = t.criteria.filter((c) => c.type === "distance" && c.strict && c.maxWalkMinutes).map((c) => c.maxWalkMinutes);
+    t.maxDistanceM = walkLimits.length ? Math.min(...walkLimits) * WALK_M_PER_MIN : null;
+  }
+
+  // Caractéristiques d'une nouvelle recherche : connues, à demander (les MAX_QUESTIONS premières qui
+  // manquent) ou non demandées
+  function initialDimensions(list) {
+    let toAsk = 0;
+    return (Array.isArray(list) ? list : []).slice(0, MAX_DIMENSIONS).map((d) => {
+      const known = typeof d.known_value === "string" && d.known_value.trim() ? d.known_value.trim().slice(0, 80) : null;
+      const status = known ? "known" : toAsk++ < MAX_QUESTIONS ? "to_ask" : "not_asked";
+      return { name: String(d.name || "").slice(0, 40), value: known, question: String(d.question || "").slice(0, 200), status, askedAt: null };
+    });
+  }
+
+  function add({ title, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, criteria = [], extends: extending = false, dimensions = [] }) {
     const t = {
       id: `t${nextId++}`, title: (title || "Tâche").slice(0, 60), request: (request || "").slice(0, 600),
       kind: ["search", "quick", "info"].includes(kind) ? kind : "search", utterance: (utterance || "").slice(0, 400),
@@ -208,20 +322,23 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       actions: [], result: null, replaces, replacedBy: null,
       addedIds: [], candidates: [], previousAddedIds,
       requestedCount: Number.isInteger(count) && count > 0 && count <= 15 ? count : null, // nombre de lieux exigé
-      criteria: cleanCriteria, maxDistanceM,
       extends: extending, // complète un groupe : ses lieux existants sont gardés tels quels
       continuations: 0, conversation: lastConversation,
     };
     // Couleur des lieux de la tâche : une tâche relancée garde celle de la tâche qu'elle remplace ;
     // une tâche qui doit ajouter des lieux la reçoit dès sa création (la 1re est orange) ; les autres
     // à leur premier ajout
+    setCriteria(t, criteria);
+    // Nouvelle recherche : « à préciser » tant qu'il reste des questions à poser
+    t.dimensions = t.kind === "search" && !replaces ? initialDimensions(dimensions) : [];
+    if (t.dimensions.some((d) => d.status === "to_ask")) t.status = "clarifying";
     t.colorIndex = replaces ? tasks.get(replaces)?.colorIndex ?? null : null;
     if (t.colorIndex === null && t.requestedCount) t.colorIndex = nextColor++;
     hydrate(t);
     tasks.set(t.id, t);
     while (tasks.size > KEEP_TASKS) {
       // Les questions (écran « Mes questions ») partent en dernier : elles restent jusqu'à « Effacer »
-      const finished = list().filter((x) => !["pending", "running"].includes(x.status));
+      const finished = list().filter((x) => !ACTIVE.includes(x.status));
       const oldest = finished.find((x) => x.kind !== "info") || finished[0];
       if (!oldest) break;
       tasks.delete(oldest.id);
@@ -234,13 +351,14 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
 
   function cancel(id, reason) {
     const t = tasks.get(id);
-    if (!t || !["pending", "running"].includes(t.status)) return null;
+    if (!t || !ACTIVE.includes(t.status)) return null;
     t.abort.abort();
     t.status = "cancelled";
     t.endedAt = Date.now();
     log(t, reason);
     notify({ type: "cancelled", task: t, summary: summary() });
     schedule();
+    askNext(); // une question en attente pour cette tâche : on passe à la suivante
     return t;
   }
 
@@ -249,6 +367,14 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   function refine(id, request, utterance, count = null, criteria = null) {
     const old = tasks.get(id);
     if (!old) return add({ title: "Précision", request, kind: "search", utterance, count, criteria: criteria || [] });
+    if (old.status === "clarifying") {
+      // Pas encore lancée : la demande est simplement mise à jour
+      if (request) old.request = String(request).slice(0, 600);
+      if (Number.isInteger(count) && count > 0 && count <= 15) old.requestedCount = count;
+      if (criteria?.length) setCriteria(old, criteria);
+      log(old, "demande précisée");
+      return old;
+    }
     const wasActive = ["pending", "running"].includes(old.status);
     if (wasActive) cancel(id, "arrêtée : demande précisée, relancée");
     const next = add({
@@ -285,8 +411,8 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     while (old?.replacedBy && tasks.get(old.replacedBy)) old = tasks.get(old.replacedBy); // version la plus récente
     if (!old) return add({ title: "Ajout", request, kind: "search", utterance, count: additional, criteria: criteria || [] });
     const more = Number.isInteger(additional) && additional > 0 ? Math.min(additional, 10) : 1;
-    if (["pending", "running"].includes(old.status)) {
-      // Groupe encore en cours de recherche : relancé avec un objectif plus grand
+    if (ACTIVE.includes(old.status)) {
+      // Groupe encore en cours de recherche (ou à préciser) : objectif plus grand
       return refine(old.id, request, utterance, (old.requestedCount || 0) + more, criteria);
     }
     const kept = groupPlaces(old).map((p) => p.id);
@@ -343,6 +469,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       `[APP] Tâche ${t.id} (${t.kind}).`,
       ...(t.criteria.length ? [`Critères : ${t.criteria.map((c) => `${c.value} (${c.type}, ${c.strict ? "strict" : "souple"})`).join(" ; ")}.`] : []),
       ...(t.requestedCount ? [`Nombre de lieux à trouver : ${t.requestedCount}.`] : []),
+      ...(t.dimensions.length ? [`Caractéristiques : ${t.dimensions.map((d) => `${d.name} = ${d.value ?? (d.status === "skipped" ? "peu importe pour l'utilisateur" : "non précisé")}`).join(" ; ")}.`] : []),
       ...(t.maxDistanceM ? [`Distance maximale à vol d'oiseau depuis l'utilisateur : ${t.maxDistanceM} m (contrôlée par l'application).`] : []),
       `État de la liste au lancement (version ${sel.version}) : ${JSON.stringify(sel.pois)}`,
       `Préférences : ${JSON.stringify(sel.preferences)}`,
@@ -488,7 +615,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   // Bouton « Effacer » : les tâches en cours sont arrêtées (leurs résultats tardifs sont ignorés) et
   // le tableau est vidé ; les couleurs repartent de l'orange
   function clearAll() {
-    const stopped = list().filter((t) => ["pending", "running"].includes(t.status));
+    const stopped = list().filter((t) => ACTIVE.includes(t.status));
     for (const t of stopped) {
       t.abort.abort();
       t.status = "cancelled";
@@ -501,7 +628,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     return stopped.length;
   }
 
-  return { handleUserTurn, add, cancel, snapshot, summary, searchRunning, clearAll, toJSON, load, tasks };
+  return { handleUserTurn, add, cancel, snapshot, summary, searchRunning, clearAll, launchClarifying, toJSON, load, tasks };
 }
 
 // Coupure réseau ou erreur passagère d'OpenAI (429, 5xx) : jusqu'à 2 nouveaux essais, espacés

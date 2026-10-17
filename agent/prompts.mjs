@@ -31,16 +31,22 @@ Do not delegate to the backend when:
 Do not guess the result while waiting.
 
 Les tâches :
-- Quand l'utilisateur demande quelque chose, confirme en quelques mots que c'est lancé (« je m'en occupe »). Ne dis jamais qu'un lieu est ajouté, retiré ou trouvé avant le message [APP] qui le confirme.
+- Quand l'utilisateur demande une recherche de lieux, réponds seulement en un mot (« d'accord ») : l'application va souvent te demander de lui poser d'abord quelques questions pour affiner. Pour une autre demande, confirme en quelques mots que c'est lancé (« je m'en occupe »). Ne dis jamais qu'un lieu est ajouté, retiré ou trouvé avant le message [APP] qui le confirme.
 - L'application t'envoie des messages [APP] : tâche lancée, tâche terminée avec son résultat, état du tableau (tâches en cours). Annonce chaque résultat dès qu'il arrive, avec tes mots.
 - « T'as fini ? », « tu en es où ? » : réponds d'après le dernier état [APP] des tâches. S'il n'y a plus aucune tâche en cours, dis que tout est fait ; ne dis jamais que tu « gardes un œil » ou « surveilles » quand rien n'est en cours.
 - Si l'utilisateur précise ou corrige une demande en cours, dis simplement que c'est noté : l'application relance la tâche avec la précision.
 - Une question sur les lieux de la liste ou l'itinéraire (distance entre deux lieux, le plus proche, la suite du parcours, horaires, téléphone…) : l'application la traite aussi en quelques secondes. Dis seulement « je regarde », puis donne la réponse [APP]. Ne réponds jamais de mémoire et n'estime aucune distance.
 
+Questions pour affiner une recherche :
+- L'application t'envoie une [APP] « Question d'affinage » avant de lancer une recherche : pose cette question tout de suite, avec tes mots, une seule à la fois, en gardant les exemples de réponse. Puis tais-toi et attends la réponse.
+- N'invente pas d'autres questions d'affinage : l'application choisit lesquelles poser, au plus trois par recherche.
+- L'utilisateur peut répondre « peu importe » ou demander de lancer la recherche tout de suite : c'est parfait, ne lui repose pas la question.
+- La recherche démarre quand les questions sont finies : l'application te dira « Tâche lancée ».
+
 Pendant qu'une tâche de recherche est en cours :
 - Si elle dure, profite de l'attente pour donner des idées à l'utilisateur, dans cet ordre : d'abord la météo des prochains jours, puis les événements prévus cette semaine (avec leur jour), et seulement ensuite la ville elle-même (quartiers et ambiances, histoire, incontournables, anecdotes). Rappelle de temps en temps, en quelques mots, que la recherche continue.
 - Pour la météo et les événements, utilise uniquement les informations [APP] reçues : n'en invente pas. Présente les événements comme « prévus ».
-- Ne pose aucune question pendant l'attente.
+- Une fois la recherche lancée, ne pose plus aucune question pendant l'attente.
 - Sur la ville, reste sur des faits connus et durables. Ne donne ni horaire ni prix de mémoire, et ne recommande pas d'établissement précis de mémoire.
 - Dès qu'un résultat arrive, termine ta phrase et donne-le.
 
@@ -73,6 +79,17 @@ Règles :
 - Les numéros (« supprime le point 6 », « montre le 3 ») désignent des lieux de la carte, jamais des tâches : crée une tâche quick, n'annule rien.
 - « Laisse tomber les pâtisseries » → cancel de la tâche concernée si elle n'est pas terminée ; si elle est terminée, crée plutôt une tâche quick pour retirer ses lieux.
 - Réponse à une question posée par une tâche terminée (« lequel ? » → « le premier ») → nouvelle tâche quick qui reprend le choix exact (nom et candidate_id cités dans le résultat de cette tâche).
+- Caractéristiques (dimensions) d'une nouvelle tâche search : imagine les 3 à 6 caractéristiques qui comptent le plus pour choisir ce type de lieu, la plus importante en premier, et adaptées à ce type :
+  restaurant → distance, budget, type de cuisine, ouvert maintenant, fréquentation ; musée → thème, durée de visite, prix, distance, fréquentation ; parking → distance de la destination, prix, gratuit ou payant…
+  known_value : la valeur déjà donnée dans la demande ou la conversation, ou déduite des préférences enregistrées ; sinon null. question : ce que le guide demandera à l'oral si la valeur manque.
+  Les tâches quick et info, et les ajouts à un groupe (extend), n'ont pas de caractéristiques.
+- Tâche « à préciser » (status clarifying) : le guide vient de poser la question pending_question, ou va la poser. Une réponse (« pas trop cher », « grec ») ou une précision sur cette tâche → clarify avec le task_id, jamais refine ni une nouvelle tâche :
+  answers = une réponse par caractéristique concernée, avec son nom exact (une réponse peut en couvrir plusieurs) ; value null si l'utilisateur dit que ça lui est égal ;
+  criteria = la liste complète mise à jour, avec un critère par réponse ; request = la demande complète mise à jour ;
+  launch_now true si l'utilisateur veut lancer sans répondre au reste (« lance », « vas-y », « cherche », « peu importe le reste »).
+  Une réponse peut porter sur une autre caractéristique que la question posée : « pas trop cher » répond à budget même si la question portait sur la distance ; rattache chaque information à la bonne caractéristique, et n'en oublie aucune.
+  « Peu importe » seul répond seulement à pending_question.
+- Une réponse courte (« pas trop cher », « grec », « non », « 10 minutes ») alors qu'une question d'affinage est en attente est complète : jamais wait_for_more.
 - Phrase visiblement inachevée (coupée au milieu d'une demande) → wait_for_more true, sans tâche.
 - Les transcriptions contiennent des erreurs (« gyrons » = gyros) : corrige le sens, pas les mots.`;
 
@@ -91,23 +108,37 @@ const criterionSchema = {
   },
 };
 
+// Caractéristique importante d'un type de lieu (restaurant : distance, budget, cuisine…) : connue
+// d'après la demande ou les préférences, sinon le guide pose la question avant de lancer la recherche
+const dimensionSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["name", "known_value", "question"],
+  properties: {
+    name: { type: "string", description: "La caractéristique en 1 à 3 mots (« budget », « type de cuisine », « durée de visite »)." },
+    known_value: { type: ["string", "null"], description: "La valeur déjà connue (demande, conversation ou préférences enregistrées), sinon null." },
+    question: { type: "string", description: "Question courte à poser à l'oral, avec 2 ou 3 exemples de réponse (« Plutôt petit prix, moyen ou chic ? »)." },
+  },
+};
+
 export const EXTRACTOR_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["new_tasks", "refine", "extend", "cancel", "wait_for_more"],
+  required: ["new_tasks", "refine", "extend", "clarify", "cancel", "wait_for_more"],
   properties: {
     new_tasks: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "request", "kind", "count", "criteria"],
+        required: ["title", "request", "kind", "count", "criteria", "dimensions"],
         properties: {
           title: { type: "string", description: "Titre court (3 à 6 mots) pour l'écran des tâches." },
           request: { type: "string", description: "Demande complète et autonome, avec tous les critères." },
           kind: { type: "string", enum: ["search", "quick", "info"] },
           count: { type: ["integer", "null"], description: "Nombre de lieux à ajouter demandé (« 4 gyros » → 4, « un parking » → 1, « des pâtisseries » → 3), sinon null." },
           criteria: { type: "array", items: criterionSchema, description: "Critères des lieux à trouver (tâche search) ; vide sinon." },
+          dimensions: { type: "array", items: dimensionSchema, description: "Tâche search : 3 à 6 caractéristiques importantes de ce type de lieu, la plus importante en premier. Vide sinon." },
         },
       },
     },
@@ -137,6 +168,34 @@ export const EXTRACTOR_SCHEMA = {
           additional_count: { type: "integer", description: "Nombre de lieux à ajouter en plus de ceux déjà présents." },
           request: { type: "string", description: "Demande complète : ce qu'il faut ajouter au groupe, avec ses critères." },
           criteria: { type: "array", items: criterionSchema, description: "Critères des nouveaux lieux : ceux du groupe, mis à jour si l'utilisateur en change un." },
+        },
+      },
+    },
+    clarify: {
+      type: "array",
+      description: "Réponses ou précisions pour une tâche « à préciser » (status clarifying), avant le lancement de sa recherche.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["task_id", "answers", "request", "count", "criteria", "launch_now"],
+        properties: {
+          task_id: { type: "string" },
+          answers: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["dimension", "value"],
+              properties: {
+                dimension: { type: "string", description: "Le nom exact de la caractéristique, tel qu'il figure dans le tableau." },
+                value: { type: ["string", "null"], description: "La réponse en quelques mots, ou null si l'utilisateur dit que ça lui est égal." },
+              },
+            },
+          },
+          request: { type: "string", description: "Demande complète mise à jour avec les réponses." },
+          count: { type: ["integer", "null"], description: "Nombre de lieux demandé, mis à jour, sinon null." },
+          criteria: { type: "array", items: criterionSchema, description: "Liste complète des critères mise à jour (anciens + réponses)." },
+          launch_now: { type: "boolean", description: "true si l'utilisateur veut lancer la recherche sans répondre aux autres questions (« lance », « vas-y », « peu importe le reste »)." },
         },
       },
     },
@@ -172,6 +231,7 @@ Ne propose pas un lieu déjà dans la liste, ni un lieu excluded_by_user ou visi
 - Interprète les critères avec bon sens, comme un habitant : un « gyros au poulet » peut être une pita gyros ou un souvlaki au poulet ; « pas cher » se compare aux prix locaux.
 - Le type de lieu : « des commerces qui vendent une pâtisserie à emporter » → pâtisseries ou boulangeries, jamais un restaurant.
 - La distance : un temps de marche maximal se convertit en distance à vol d'oiseau (environ 80 m par minute : 10 min ≈ 800 m, 15 min ≈ 1 200 m). Écarte tout lieu plus loin de l'utilisateur (distance_from_user_m de find_places_near, ou position dans get_selection).
+- La fréquentation (calme, animé, pas trop touristique) : aucune donnée exacte n'existe ; juge-la sur le nombre d'avis Google (rating_count) et sur ce qu'en disent les sources web, et présente-la comme une estimation.
 - Le budget, le régime (« pas de porc »), l'horaire : écarte ce qui contredit clairement un critère (prix trop élevés, seulement du porc…). Quand une source ne permet pas de confirmer un critère (prix exact, menu du jour), ajoute quand même le lieu s'il est plausible, et précise ce qui reste à vérifier.
 - Une tâche de recherche te donne un ensemble de critères, chacun strict ou souple, et un nombre de lieux à trouver.
 - Critères stricts : jamais contredits. Un lieu dont la spécialité contredit un critère de régime est exclu (« pas de porc » → pas d'enseigne spécialisée dans le porc). La distance maximale est contrôlée par l'application : un lieu trop loin de l'utilisateur est retiré automatiquement (removed_too_far).

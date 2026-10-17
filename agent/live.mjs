@@ -276,12 +276,18 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
 
   // ---- Avancement des tâches, transmis au guide ----
 
-  function onTaskEvent({ type, task, summary }) {
+  function onTaskEvent({ type, task, summary, question }) {
     const s = session;
     console.log(`[tâches] ${task.id} ${type} « ${task.title} »${type === "done" || type === "failed" ? ` : ${task.result}` : ""}`);
     broadcast({ type: "agent", state: board().searchRunning().length ? "searching" : summary.startsWith("Plus aucune") ? "idle" : "working" });
     if (!s || s.closing) return;
-    if (type === "started" && task.kind === "info") {
+    if (type === "question") {
+      // Question d'affinage avant une recherche : le guide la pose tout de suite
+      send(s, {
+        type: "session.commentary.append", event_id: `question_${task.id}_${Date.now()}`, delegation_id: null,
+        content: `[APP] Question d'affinage pour la recherche « ${task.title} », à poser maintenant avec tes mots, puis attends la réponse : « ${question} »`.slice(0, 1400),
+      });
+    } else if (type === "started" && task.kind === "info") {
       appNote(`Question en cours de vérification : « ${task.title} ». Réponse dans quelques secondes : dis seulement « je regarde », sans parler de météo ni d'événements.`);
     } else if (type === "started") {
       appNote(`Tâche lancée : « ${task.title} ». ${summary}`);
@@ -380,6 +386,8 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
       return;
     }
     session = null;
+    // Plus personne pour répondre aux questions d'affinage : les recherches partent avec ce qu'on sait
+    board().launchClarifying("fin de la conversation");
     console.log("[live] bilan de la session", JSON.stringify(metrics.summary()));
     broadcast({ type: "voice", state: "closed", reason });
   }
