@@ -77,6 +77,17 @@
       pointer-events: none; opacity: 0; transition: opacity 0.3s;
     }
     #voice-status.visible { opacity: 1; }
+    /* Messages discrets : fond transparent (alpha 20 %), texte lisible grâce à une ombre */
+    #voice-status { background: rgba(0, 0, 0, 0.2); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); }
+
+    /* États des recherches, en haut au centre de la carte : mêmes pastilles que l'écran Tâches,
+       un seul exemplaire par état ; « Terminé » s'estompe */
+    #search-states {
+      position: fixed; z-index: 710; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px; pointer-events: none; transition: opacity 0.8s;
+    }
+    #search-states.fading { opacity: 0; }
+    #search-states .task-status { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); }
     #voice-status.error { background: #8b1e1e; }
 
     /* Position de l'utilisateur : point bleu de 20 px + lueur qui pulse. L'élément fait 44 px pour
@@ -624,6 +635,7 @@
       </button>
     </header>
     <div id="voice-status" role="status" aria-live="polite"></div>
+    <div id="search-states" role="status" aria-live="polite"></div>
     <div id="map"></div>
     <div id="list-handle">
       <div class="voice-row">
@@ -1078,7 +1090,7 @@
             show.type = "button";
             show.innerHTML = PHOTOS_WHITE_SVG;
             show.setAttribute("aria-label", `Voir les photos de ${props.name}`);
-            show.addEventListener("click", () => openCarousel(photos));
+            show.addEventListener("click", () => openCarousel(photos, props.color));
             tools.append(show);
           }
           if (!tools.childElementCount) tools.remove();
@@ -1473,7 +1485,18 @@
     function groupTitle(key) {
       if (key === "autres") return "Autres lieux";
       const same = agentTasks.filter((t) => t.colorIndex === key);
-      return (same.find((t) => !t.replacedBy) || same[0])?.title || "Lieux";
+      const task = same.find((t) => !t.replacedBy) || same[0];
+      return task?.groupName || placesName(task?.title) || "Lieux";
+    }
+
+    // Groupe créé avant les noms de groupe : le titre de la tâche sans son verbe
+    // (« Trouver des gyros » → « Gyros »)
+    function placesName(title) {
+      const text = String(title || "")
+        .replace(/^(trouver|chercher|rechercher|ajouter|proposer|découvrir|trouve|cherche|ajoute)\s+/i, "")
+        .replace(/^(des|un|une|les|le|la|du|de la|de l'|d'|quelques|\d+)\s*/i, "")
+        .trim();
+      return text ? text[0].toUpperCase() + text.slice(1) : "";
     }
 
     // Groupes présents, dans l'ordre de leur couleur (celui de leur création)
@@ -2602,7 +2625,7 @@
       photosBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
         const photos = await getPhotos(props.placeId);
-        if (photos.length) openCarousel(photos);
+        if (photos.length) openCarousel(photos, poi.color);
       });
 
       const tools = el("div", "poi-row-tools");
@@ -3157,6 +3180,45 @@
     onVerticalSwipe(document.getElementById("dims-handle"), { up: openDims, tap: openDims });
     onVerticalSwipe(document.getElementById("dims-head"), { down: closeDims, tap: closeDims });
 
+    // États des recherches de lieux en haut de la carte : « Précision » (questions d'affinage),
+    // « Recherche en cours », puis « Terminé » quand plus aucune n'est active, qui s'estompe
+    const searchStatesEl = document.getElementById("search-states");
+    let searchesWereActive = false;
+    let statesTimer = null;
+
+    function showSearchStates(states) {
+      searchStatesEl.style.top = `${document.querySelector("header").getBoundingClientRect().bottom + 10}px`;
+      searchStatesEl.replaceChildren(...states.map(([status, text]) => el("span", `task-status ${status}`, text)));
+    }
+
+    function updateSearchStates() {
+      const searches = agentTasks.filter((t) => t.kind === "search");
+      const clarifying = searches.some((t) => t.status === "clarifying");
+      const running = searches.some((t) => t.status === "pending" || t.status === "running");
+      const active = clarifying || running;
+      if (active) {
+        clearTimeout(statesTimer);
+        searchStatesEl.classList.remove("fading");
+        showSearchStates([
+          ...(clarifying ? [["clarifying", "Précision"]] : []),
+          ...(running ? [["running", "Recherche en cours"]] : []),
+        ]);
+      } else if (!agentTasks.length) {
+        // « Effacer » : rien à annoncer
+        clearTimeout(statesTimer);
+        searchStatesEl.replaceChildren();
+      } else if (searchesWereActive) {
+        clearTimeout(statesTimer);
+        searchStatesEl.classList.remove("fading");
+        showSearchStates([["done", "Terminé"]]);
+        statesTimer = setTimeout(() => {
+          searchStatesEl.classList.add("fading");
+          statesTimer = setTimeout(() => searchStatesEl.replaceChildren(), 800);
+        }, 3000);
+      }
+      searchesWereActive = active;
+    }
+
     // « Effacer » utile dès qu'il y a des lieux ou des tâches (même en cours, sans lieu encore)
     function updateEraseButton() {
       eraseBtn.disabled = !pois.length && !unplacedPois.length && !agentTasks.length;
@@ -3169,6 +3231,7 @@
       if (dimsPanelEl.classList.contains("open")) renderDims();
       if (questionsPanelEl.classList.contains("open")) renderQuestions();
       renderLegend(); // titres des groupes
+      updateSearchStates();
       if (listMode === "grouped" && poiListEl.classList.contains("open")) renderPoiList();
     }
 
@@ -3247,8 +3310,10 @@
       }
     }
 
-    function openCarousel(photos) {
+    // color : couleur du groupe du lieu (bordure des photos) ; blanc pour un repère du bouton Next
+    function openCarousel(photos, color = null) {
       carouselPhotos = photos;
+      carouselImg.style.borderColor = color || "#fff";
       // Préchargement pour un défilement fluide (même mode CORS que la miniature, pour réutiliser le cache)
       photos.forEach((p) => {
         const img = new Image();
@@ -3300,7 +3365,8 @@
     function showVoiceStatus(text, { error = false, sticky = false } = {}) {
       clearTimeout(statusTimer);
       const header = document.querySelector("header").getBoundingClientRect();
-      voiceStatusEl.style.top = `${header.bottom + 10}px`;
+      // Sous les états des recherches quand ils sont affichés
+      voiceStatusEl.style.top = `${header.bottom + 10 + (searchStatesEl.childElementCount ? 32 : 0)}px`;
       voiceStatusEl.textContent = text;
       voiceStatusEl.classList.toggle("error", error);
       voiceStatusEl.classList.add("visible");

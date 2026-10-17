@@ -131,9 +131,10 @@ export const EXTRACTOR_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "request", "kind", "count", "criteria", "dimensions"],
+        required: ["title", "group_name", "request", "kind", "count", "criteria", "dimensions"],
         properties: {
           title: { type: "string", description: "Titre court (3 à 6 mots) pour l'écran des tâches." },
+          group_name: { type: "string", description: "Tâche search : nom des lieux trouvés, au pluriel et sans verbe, pour la légende de la carte (« Restaurants de poisson », « Musées d'histoire », « Pâtisseries »). Vide sinon." },
           request: { type: "string", description: "Demande complète et autonome, avec tous les critères." },
           kind: { type: "string", enum: ["search", "quick", "info"] },
           count: { type: ["integer", "null"], description: "Nombre de lieux à ajouter demandé (« 4 gyros » → 4, « un parking » → 1, « des pâtisseries » → 3), sinon null." },

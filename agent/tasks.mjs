@@ -57,7 +57,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       requestedCount: t.requestedCount, placedCount: placedCount(t), criteria: t.criteria, maxDistanceM: t.maxDistanceM,
       colorIndex: t.colorIndex, extends: t.extends,
       relatedIds: [...t.relatedIds].filter((id) => store.pois.has(id)), // lieux concernés par une question
-      dimensions: t.dimensions,
+      dimensions: t.dimensions, groupName: t.groupName,
     };
   }
 
@@ -159,7 +159,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         extend(group.id, t.count || 1, t.request, t.criteria?.length ? t.criteria : null, text);
         continue;
       }
-      add({ title: t.title, request: t.request, kind: t.kind, utterance: text, count: t.count, criteria: t.criteria, dimensions: t.dimensions });
+      add({ title: t.title, groupName: t.group_name, request: t.request, kind: t.kind, utterance: text, count: t.count, criteria: t.criteria, dimensions: t.dimensions });
     }
     if (out.new_tasks?.length || out.refine?.length || out.extend?.length || out.cancel?.length || out.clarify?.length) {
       console.log(`[tâches] « ${text.slice(0, 80)} » →`, JSON.stringify(out));
@@ -271,7 +271,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         result: t.result, replaces: t.replaces, replacedBy: t.replacedBy, addedIds: t.addedIds,
         previousAddedIds: t.previousAddedIds, requestedCount: t.requestedCount, criteria: t.criteria,
         maxDistanceM: t.maxDistanceM, extends: t.extends, continuations: t.continuations, colorIndex: t.colorIndex,
-        relatedIds: [...t.relatedIds], dimensions: t.dimensions,
+        relatedIds: [...t.relatedIds], dimensions: t.dimensions, groupName: t.groupName,
       })),
     };
   }
@@ -314,7 +314,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     });
   }
 
-  function add({ title, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, criteria = [], extends: extending = false, dimensions = [] }) {
+  function add({ title, groupName = null, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, criteria = [], extends: extending = false, dimensions = [] }) {
     const t = {
       id: `t${nextId++}`, title: (title || "Tâche").slice(0, 60), request: (request || "").slice(0, 600),
       kind: ["search", "quick", "info"].includes(kind) ? kind : "search", utterance: (utterance || "").slice(0, 400),
@@ -329,6 +329,9 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     // une tâche qui doit ajouter des lieux la reçoit dès sa création (la 1re est orange) ; les autres
     // à leur premier ajout
     setCriteria(t, criteria);
+    // Nom du groupe de lieux (légende) : une tâche relancée ou qui complète un groupe garde le sien
+    t.groupName = (typeof groupName === "string" && groupName.trim() ? groupName.trim().slice(0, 60) : null)
+      ?? (replaces ? tasks.get(replaces)?.groupName ?? null : null);
     // Nouvelle recherche : « à préciser » tant qu'il reste des questions à poser
     t.dimensions = t.kind === "search" && !replaces ? initialDimensions(dimensions) : [];
     if (t.dimensions.some((d) => d.status === "to_ask")) t.status = "clarifying";
