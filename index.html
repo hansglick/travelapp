@@ -494,9 +494,10 @@
     #dims-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
     #dims-body { flex: 1; overflow-y: auto; padding: 4px 16px max(16px, env(safe-area-inset-bottom)); }
     /* Fenêtre météo : ville en gras, trois colonnes (maintenant, + 4 h, demain) avec icône animée */
-    .wx-panel { background: linear-gradient(180deg, #13233a 0%, #0b1220 100%); margin-bottom: 16px; }
-    /* Fenêtre météo centrée dans l'écran (les autres fenêtres partent du bas) */
-    #weather-sheet { align-items: center; }
+    .wx-panel { background: linear-gradient(180deg, #13233a 0%, #0b1220 100%); margin-bottom: 16px; border: 1px solid #555; }
+    /* Fenêtres météo et guide centrées dans l'écran (les autres partent du bas), sans bouton
+       « Fermer » : toucher à côté les ferme */
+    #weather-sheet, #phrase-sheet { align-items: center; }
     .wx-place { margin: 2px 0 14px; font-size: 1.25rem; text-align: center; color: #fff; }
     .wx-place strong { font-weight: 800; }
     .wx-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -530,7 +531,7 @@
     }
 
     /* Guide de conversation : fond noir, titre gris moyen, français en gras, langue locale en italique */
-    .phrase-panel { background: #000; border: 1px solid #222; }
+    .phrase-panel { background: #000; border: 1px solid #555; margin-bottom: 16px; }
     .phrase-title {
       display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;
       margin: 2px 0 10px; color: #8c8c8c; font-size: 1rem; font-weight: 600;
@@ -877,7 +878,6 @@
   <div id="weather-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Météo">
     <div class="sheet-panel wx-panel">
       <div id="weather-body"></div>
-      <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
     </div>
   </div>
 
@@ -885,7 +885,6 @@
   <div id="phrase-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Guide de conversation">
     <div class="sheet-panel phrase-panel">
       <div id="phrase-body"></div>
-      <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
     </div>
   </div>
 
