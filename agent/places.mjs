@@ -301,9 +301,34 @@ export function createResolver({ apiKey, metrics }) {
     return value;
   }
 
+  // Distances et temps de marche réels (Routes API, matrice à pied) entre des points { lat, lng } :
+  // un élément par paire (origine, destination), ou null si Google ne trouve pas de chemin
+  async function walkMatrix(origins, destinations) {
+    const waypoint = (p) => ({ waypoint: { location: { latLng: { latitude: p.lat, longitude: p.lng } } } });
+    const response = await fetch("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json", "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": "originIndex,destinationIndex,distanceMeters,duration,condition",
+      },
+      body: JSON.stringify({ origins: origins.map(waypoint), destinations: destinations.map(waypoint), travelMode: "WALK" }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    metrics.count("google_route_matrix");
+    if (!response.ok) throw new Error(`Route Matrix ${response.status}`);
+    const elements = await response.json();
+    const grid = origins.map(() => destinations.map(() => null));
+    for (const e of Array.isArray(elements) ? elements : []) {
+      if (e.condition !== "ROUTE_EXISTS" || !Number.isInteger(e.originIndex ?? 0)) continue;
+      grid[e.originIndex ?? 0][e.destinationIndex ?? 0] = { meters: e.distanceMeters ?? 0, seconds: parseInt(e.duration, 10) || 0 };
+    }
+    return grid;
+  }
+
   resolve.searchNear = searchNear;
   resolve.locate = locate;
   resolve.getDetails = getDetails;
+  resolve.walkMatrix = walkMatrix;
   return resolve;
 }
 

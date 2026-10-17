@@ -184,6 +184,7 @@ export class PoiStore extends EventEmitter {
         category: p.category,
         status: p.status,
         ...(p.mapNumber ? { map_number: p.mapNumber } : {}),
+        ...(p.absIndex ? { itinerary_step: p.absIndex } : {}),
         ...(p.pin ? { pinned: p.pin.position === "index" ? p.pin.index : p.pin.position } : {}),
         ...(p.place?.address ? { address: p.place.address } : {}),
         ...(p.candidates?.length ? { google_candidates: p.candidates.map((c) => `${c.name} (${c.address || "adresse inconnue"})`) } : {}),

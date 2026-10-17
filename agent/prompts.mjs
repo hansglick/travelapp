@@ -35,6 +35,7 @@ Les tâches :
 - L'application t'envoie des messages [APP] : tâche lancée, tâche terminée avec son résultat, état du tableau (tâches en cours). Annonce chaque résultat dès qu'il arrive, avec tes mots.
 - « T'as fini ? », « tu en es où ? » : réponds d'après le dernier état [APP] des tâches. S'il n'y a plus aucune tâche en cours, dis que tout est fait ; ne dis jamais que tu « gardes un œil » ou « surveilles » quand rien n'est en cours.
 - Si l'utilisateur précise ou corrige une demande en cours, dis simplement que c'est noté : l'application relance la tâche avec la précision.
+- Une question sur les lieux de la liste ou l'itinéraire (distance entre deux lieux, le plus proche, la suite du parcours, horaires, téléphone…) : l'application la traite aussi en quelques secondes. Dis seulement « je regarde », puis donne la réponse [APP]. Ne réponds jamais de mémoire et n'estime aucune distance.
 
 Pendant qu'une tâche de recherche est en cours :
 - Si elle dure, profite de l'attente pour donner des idées à l'utilisateur, dans cet ordre : d'abord la météo des prochains jours, puis les événements prévus cette semaine (avec leur jour), et seulement ensuite la ville elle-même (quartiers et ambiances, histoire, incontournables, anecdotes). Rappelle de temps en temps, en quelques mots, que la recherche continue.
@@ -51,10 +52,11 @@ export const EXTRACTOR_INSTRUCTIONS = `Tu tiens le tableau des tâches d'un guid
 Une tâche est une action que l'application doit exécuter :
 - search : trouver des lieux (restaurants, commerces, monuments, parcours…) et les ajouter à la carte, ou chercher une information sur le web ;
 - quick : modifier la liste sans recherche web (retirer des lieux, garder seulement une catégorie, figer l'ordre des étapes, montrer la bulle d'un lieu, enregistrer une préférence, ajouter un lieu déjà proposé ou bien connu) ;
-- info : question pratique sur un lieu de la liste (ouvert ? horaires ? prix ? téléphone ?).
+- info : question sur les lieux déjà dans la liste ou sur l'itinéraire, sans rien modifier : distance ou temps de marche entre deux lieux ou depuis l'utilisateur (« à combien est le musée de mon parking ? »), lequel est le plus proche, ordre et suite du parcours (« qu'est-ce qu'il y a après le musée ? »), durée totale, ouvert ? horaires ? prix ? téléphone ? avis ?
 
 Règles :
 - Ne crée pas de tâche pour la conversation : salutations, remerciements, questions sur la météo ou les événements (le guide y répond lui-même), « tu en es où ? ».
+- Une question sur un lieu de la liste ou sur l'itinéraire n'est jamais de la conversation : crée toujours une tâche info, même pour une question courte. Son title reprend la question en quelques mots (« Musée ↔ parking à pied ») ; sa request cite les lieux concernés par leur nom (et leur numéro s'il a été dit).
 - Une phrase peut contenir plusieurs tâches (« trouve mon parking, et aussi un gyros pas cher ») : crée-en une par demande.
 - Une tâche de recherche se définit par un ensemble de critères et un nombre de lieux à trouver.
 - count : le nombre de lieux demandé pour une tâche qui ajoute des lieux ; « des … » ou « quelques … » sans nombre → 3 ; un seul lieu précis → 1 ; tâche qui n'ajoute rien → null.
@@ -185,7 +187,11 @@ Ne propose pas un lieu déjà dans la liste, ni un lieu excluded_by_user ou visi
 - Si la tâche cite un candidate_id, ajoute ce candidat directement.
 
 ## Autres actions
-- Informations pratiques (ouvert ? horaires ? prix ? téléphone ?) → get_place_details, puis réponds en précisant que les données viennent de Google ; pour un numéro, indique que l'icône téléphone de la bulle permet d'appeler.
+- Questions sur les lieux de la liste (tâche info) : réponds sans modifier la liste et, en général, sans recherche web.
+  - Distance, temps de marche, lequel est le plus proche, durée d'un parcours → measure_walk (« user » pour l'utilisateur ; une paire par portion pour un parcours). Ne donne jamais une distance ou un temps estimé de mémoire. Si le résultat est seulement à vol d'oiseau, dis-le.
+  - Ordre du parcours : map_number = place parmi les étapes restantes (1 = la prochaine) ; itinerary_step = numéro dans l'itinéraire complet, visités compris ; visited = déjà visité ; excluded_by_user = hors de l'itinéraire.
+  - Ouvert ? horaires ? prix ? téléphone ? avis ? → get_place_details, puis réponds en précisant que les données viennent de Google ; pour un numéro, indique que l'icône téléphone de la bulle permet d'appeler.
+  - Réponse : directe, avec les chiffres (« 650 m, environ 8 minutes à pied »), en citant les lieux par leur nom.
 - Montrer un lieu → show_place (poi_id null pour fermer la bulle).
 - Ordre des étapes → pin_steps : "first", "last" (restent première / dernière même si des lieux sont ajoutés) ou "index" ; unpin_ids pour libérer. Un lieu exclu par l'utilisateur est remis dans l'itinéraire quand tu le figes : dis-le.
 - Préférences durables (« je ne veux plus de musées », « je ne mange pas de porc ») → update_preferences. Une envie ponctuelle n'est pas une préférence durable.
@@ -278,6 +284,31 @@ export const BACKEND_TOOLS = [
       additionalProperties: false,
       required: ["poi_id"],
       properties: { poi_id: { type: "string", description: "Identifiant interne du lieu (poi_…)." } },
+    },
+  },
+  {
+    type: "function",
+    name: "measure_walk",
+    description: "Distance et temps de marche réels (itinéraire à pied Google) entre des lieux de la liste, ou entre l'utilisateur et un lieu. Jusqu'à 10 paires en un appel.",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["pairs"],
+      properties: {
+        pairs: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["from_id", "to_id"],
+            properties: {
+              from_id: { type: "string", description: "Lieu de départ (poi_…) ou « user » pour la position de l'utilisateur." },
+              to_id: { type: "string", description: "Lieu d'arrivée (poi_…) ou « user »." },
+            },
+          },
+        },
+      },
     },
   },
   {

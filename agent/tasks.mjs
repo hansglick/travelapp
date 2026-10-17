@@ -7,6 +7,7 @@ import {
   BACKEND_MODEL, BACKEND_REASONING, BACKEND_INSTRUCTIONS, BACKEND_TOOLS,
   EXTRACTOR_MODEL, EXTRACTOR_INSTRUCTIONS, EXTRACTOR_SCHEMA,
 } from "./prompts.mjs";
+import { normalize } from "./store.mjs";
 
 const API = "https://api.openai.com/v1/responses";
 const MAX_PARALLEL = 3;
@@ -44,6 +45,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       actions: t.actions.slice(-30), result: t.result, replaces: t.replaces, replacedBy: t.replacedBy,
       requestedCount: t.requestedCount, placedCount: placedCount(t), criteria: t.criteria, maxDistanceM: t.maxDistanceM,
       colorIndex: t.colorIndex, extends: t.extends,
+      relatedIds: [...t.relatedIds].filter((id) => store.pois.has(id)), // lieux concernés par une question
     };
   }
 
@@ -150,6 +152,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     t.abort = new AbortController();
     t.nudges = 0;
     t.lastNudgeAt = 0;
+    t.relatedIds = new Set(Array.isArray(t.relatedIds) ? t.relatedIds : []); // lieux consultés par la tâche
     t.log = (text) => log(t, text); // utilisé par les fonctions de l'appli (lieu retiré car trop loin…)
     t.ensureColor = () => {
       if (t.colorIndex === null) t.colorIndex = nextColor++;
@@ -169,6 +172,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         result: t.result, replaces: t.replaces, replacedBy: t.replacedBy, addedIds: t.addedIds,
         previousAddedIds: t.previousAddedIds, requestedCount: t.requestedCount, criteria: t.criteria,
         maxDistanceM: t.maxDistanceM, extends: t.extends, continuations: t.continuations, colorIndex: t.colorIndex,
+        relatedIds: [...t.relatedIds],
       })),
     };
   }
@@ -216,7 +220,9 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     hydrate(t);
     tasks.set(t.id, t);
     while (tasks.size > KEEP_TASKS) {
-      const oldest = list().find((x) => !["pending", "running"].includes(x.status));
+      // Les questions (écran « Mes questions ») partent en dernier : elles restent jusqu'à « Effacer »
+      const finished = list().filter((x) => !["pending", "running"].includes(x.status));
+      const oldest = finished.find((x) => x.kind !== "info") || finished[0];
       if (!oldest) break;
       tasks.delete(oldest.id);
     }
@@ -313,6 +319,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       if (t.abort.signal.aborted) return;
       t.result = result || "Tâche terminée.";
       t.status = "done";
+      if (t.kind === "info") noteMentionedPlaces(t);
       log(t, "terminée");
       metrics.time(`task_${t.kind}_ms`, Date.now() - t.startedAt);
       notify({ type: "done", task: t, summary: summary() });
@@ -414,6 +421,15 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     return finalText || "Tâche interrompue : trop d'étapes.";
   }
 
+  // Question : les lieux cités dans la réponse s'ajoutent à ceux consultés par les outils
+  function noteMentionedPlaces(t) {
+    const answer = ` ${normalize(t.result)} `;
+    for (const poi of store.pois.values()) {
+      const names = [poi.place?.name, poi.name].map(normalize).filter((n) => n.length >= 4);
+      if (names.some((n) => answer.includes(` ${n} `))) t.relatedIds.add(poi.id);
+    }
+  }
+
   // Lieux de cette tâche (ou de sa version précédente) encore sur la carte ou en cours de localisation
   function placedCount(t) {
     return [...new Set([...t.previousAddedIds, ...t.addedIds])]
@@ -460,6 +476,8 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       }
       case "find_places_near": return `recherche Google « ${args.what} » → ${(output.candidates || []).length} candidat(s)`;
       case "get_place_details": return `informations pratiques ${output.name || args.poi_id} → ${output.status}`;
+      case "measure_walk": return `marche : ${(output.results || []).map((r) => (r.status === "error" ? r.message
+        : `${r.from} → ${r.to} ${r.walk_m != null ? `${r.walk_m} m, ${r.walk_minutes} min` : `${r.straight_line_m} m à vol d'oiseau`}`)).join(" ; ") || output.status}`;
       case "show_place": return args.poi_id ? `bulle ouverte (${args.poi_id})` : "bulle fermée";
       case "pin_steps": return `étapes figées : ${(output.applied || []).map((a) => `${a.name} (${a.position})`).join(", ") || output.status}`;
       case "update_preferences": return `préférences : ${(output.changed || []).join(", ") || output.status}`;

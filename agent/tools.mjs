@@ -27,9 +27,13 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       case "find_places_near":
         return findPlacesNear(args, task);
 
+      case "measure_walk":
+        return measureWalk(args, task);
+
       case "get_place_details": {
         const poi = store.pois.get(args.poi_id);
         if (!poi) return { status: "error", message: "Identifiant inconnu : relis la sélection." };
+        task.relatedIds?.add(poi.id);
         if (!poi.place?.placeId) return { status: "error", message: "Ce lieu n'est pas encore localisé dans Google : pas d'informations pratiques." };
         try {
           const info = await resolvePoi.getDetails(poi.place.placeId);
@@ -48,6 +52,7 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
         const poi = store.pois.get(args.poi_id);
         if (!poi) return { status: "error", message: "Identifiant inconnu : relis la sélection." };
         if (poi.status !== "resolved") return { status: "error", message: "Ce lieu n'est pas encore placé sur la carte : pas de bulle ni de photos." };
+        task.relatedIds?.add(poi.id);
         broadcast({ type: "ui", action: "open_bubble", id: poi.id });
         return { status: "ok", message: `Bulle de « ${poi.place?.name || poi.name} » ouverte sur la carte (photos et description).` };
       }
@@ -126,6 +131,46 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       candidates,
       note: "Choisis le candidat qui correspond à la tâche et ajoute-le avec update_pois (candidate_id). Si plusieurs correspondent à une description précise, propose-les (nom, position, candidate_id) et demande lequel.",
     };
+  }
+
+  // Distance et temps de marche entre des lieux de la liste ou l'utilisateur (« user ») : trajet à
+  // pied réel de Google ; à défaut, distance à vol d'oiseau, signalée comme telle
+  async function measureWalk(args, task) {
+    const pairs = (Array.isArray(args.pairs) ? args.pairs : []).slice(0, 10);
+    if (!pairs.length) return { status: "error", message: "pairs vide." };
+    const point = (id) => {
+      if (id === "user") {
+        const position = store.context.position;
+        return position ? { key: "user", name: "l'utilisateur", location: position } : { error: "Position de l'utilisateur inconnue." };
+      }
+      const poi = store.pois.get(id);
+      if (!poi) return { error: `Identifiant inconnu : ${id}. Relis la sélection.` };
+      if (!poi.place?.location) return { error: `« ${poi.name} » n'est pas encore placé sur la carte.` };
+      task.relatedIds?.add(poi.id);
+      return { key: poi.id, name: poi.place.name || poi.name, location: poi.place.location };
+    };
+    const resolved = pairs.map((p) => ({ from: point(p.from_id), to: point(p.to_id) }));
+    const ok = resolved.filter((r) => !r.from.error && !r.to.error);
+    // Une seule matrice Google pour toutes les paires : origines et destinations dédoublonnées
+    const origins = [...new Map(ok.map((r) => [r.from.key, r.from])).values()];
+    const destinations = [...new Map(ok.map((r) => [r.to.key, r.to])).values()];
+    let grid = null;
+    if (ok.length) {
+      try {
+        grid = await resolvePoi.walkMatrix(origins.map((o) => o.location), destinations.map((d) => d.location));
+      } catch (err) {
+        console.warn("[routes] matrice à pied indisponible :", err.message);
+      }
+    }
+    const results = resolved.map(({ from, to }) => {
+      if (from.error || to.error) return { status: "error", message: from.error || to.error };
+      const walk = grid?.[origins.findIndex((o) => o.key === from.key)]?.[destinations.findIndex((d) => d.key === to.key)];
+      const straight = Math.round(distanceM(from.location, to.location));
+      return walk
+        ? { status: "ok", from: from.name, to: to.name, walk_m: walk.meters, walk_minutes: Math.max(1, Math.round(walk.seconds / 60)), straight_line_m: straight }
+        : { status: "estimate", from: from.name, to: to.name, straight_line_m: straight, note: "Trajet à pied indisponible : distance à vol d'oiseau seulement, le chemin réel est plus long." };
+    });
+    return { status: "ok", results, source: "Itinéraires à pied Google" };
   }
 
   function distanceFromUser(poi) {

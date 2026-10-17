@@ -281,7 +281,9 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
     console.log(`[tâches] ${task.id} ${type} « ${task.title} »${type === "done" || type === "failed" ? ` : ${task.result}` : ""}`);
     broadcast({ type: "agent", state: board().searchRunning().length ? "searching" : summary.startsWith("Plus aucune") ? "idle" : "working" });
     if (!s || s.closing) return;
-    if (type === "started") {
+    if (type === "started" && task.kind === "info") {
+      appNote(`Question en cours de vérification : « ${task.title} ». Réponse dans quelques secondes : dis seulement « je regarde », sans parler de météo ni d'événements.`);
+    } else if (type === "started") {
       appNote(`Tâche lancée : « ${task.title} ». ${summary}`);
     } else if (type === "done" || type === "failed") {
       // Résultat à annoncer : le guide le dit avec ses mots

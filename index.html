@@ -260,34 +260,45 @@
     #confirm-erase .cancel { background: #333; color: #fff; }
     #confirm-erase .confirm { background: #c0392b; color: #fff; }
 
-    /* Bas de la liste : glisser vers le haut ouvre l'écran « Mes préférences » */
-    #prefs-handle {
+    /* Bas de la liste : glisser vers le haut ouvre l'écran « Mes questions » */
+    #questions-handle {
       flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px;
       padding: 8px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid #333;
       color: #a0a0a0; font-size: 0.85rem; touch-action: none; user-select: none; cursor: pointer;
     }
 
-    /* Écran « Mes préférences » : troisième panneau, par-dessus la liste */
-    #prefs-panel {
+    /* Écran « Mes questions » : troisième panneau, par-dessus la liste */
+    #questions-panel {
       position: fixed; inset: 0; z-index: 930;
       display: flex; flex-direction: column; background: #000;
       transform: translateY(100%); transition: transform 0.3s ease; visibility: hidden;
     }
-    #prefs-panel.open { transform: none; visibility: visible; }
-    #prefs-head {
+    #questions-panel.open { transform: none; visibility: visible; }
+    #questions-head {
       flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px;
       padding: max(10px, env(safe-area-inset-top)) 16px 14px; touch-action: none; user-select: none; cursor: pointer;
     }
-    #prefs-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
-    #prefs-body { flex: 1; overflow-y: auto; padding: 4px 16px max(16px, env(safe-area-inset-bottom)); }
-    .pref-row { display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid #333; }
-    .pref-row:first-child { border-top: 1px solid #333; }
-    .pref-label { color: #a0a0a0; }
-    .pref-value { text-align: right; color: #fff; }
-    .pref-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-    .pref-chips span { padding: 3px 10px; border-radius: 999px; background: #e4572e; color: #fff; font-size: 0.85rem; }
+    #questions-head h2 { margin: 0 0 4px; font-size: 1.5rem; font-weight: normal; }
+    #questions-body { flex: 1; overflow-y: auto; padding: 4px 16px 16px; }
     .pref-empty { padding: 16px 0; color: #a0a0a0; font-style: italic; }
-    .pref-hint { margin-top: 18px; font-size: 0.85rem; color: #777; text-align: center; }
+    /* Une question : ce qui a été demandé, l'heure, la réponse, les lieux concernés */
+    .question { padding: 14px 0; border-bottom: 1px solid #333; }
+    .question:first-child { border-top: 1px solid #333; }
+    .question-top { display: flex; align-items: baseline; gap: 12px; }
+    .question-text { flex: 1; min-width: 0; color: #fff; font-size: 1.05rem; }
+    .question-time { flex: none; color: #888; font-size: 0.8rem; }
+    .question-answer { margin: 8px 0 0; color: #ccc; font-size: 0.95rem; line-height: 1.4; }
+    .question-answer.waiting { color: #1a73e8; animation: voice-blink 1.2s ease-in-out infinite; }
+    .question-places { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .question-place {
+      display: flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 12px 4px 4px;
+      border: 1px solid #444; border-radius: 999px; background: none; color: #ddd;
+      font: 0.85rem system-ui, sans-serif; cursor: pointer;
+    }
+    .question-place .poi-row-step { width: 24px; height: 24px; margin: 0; font-size: 0.8rem; }
+    .question-place.visited .poi-row-step { background: #3a3a3a; }
+    .question-place.excluded .poi-row-step { background: #777; border-color: #999; }
+    .question-place-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     /* Écran de connexion : pseudo + code PIN (inscription avec un code d'invitation) */
     #auth-screen {
@@ -364,8 +375,7 @@
     #itinerary-label { margin: -6px 0 0; font-size: 0.85rem; color: #a0a0a0; text-align: center; }
     #itinerary-label[hidden] { display: none; }
 
-    /* Bas de l'écran des préférences : glisser vers le haut ouvre l'écran « Tâches » (mode test) */
-    #prefs-panel #prefs-body { padding-bottom: 16px; }
+    /* Bas de l'écran des questions : glisser vers le haut ouvre l'écran « Tâches » (mode test) */
     #tasks-handle {
       flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px;
       padding: 8px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid #333;
@@ -618,18 +628,18 @@
       </button>
     </div>
     <ul id="poi-rows"></ul>
-    <div id="prefs-handle" role="button" aria-label="Voir mes préférences">
+    <div id="questions-handle" role="button" aria-label="Voir mes questions sur les lieux">
       <div class="grip"></div>
-      Mes préférences
+      Mes questions
     </div>
   </section>
 
-  <section id="prefs-panel" aria-label="Mes préférences">
-    <div id="prefs-head" role="button" aria-label="Revenir à la liste des lieux">
+  <section id="questions-panel" aria-label="Mes questions">
+    <div id="questions-head" role="button" aria-label="Revenir à la liste des lieux">
       <div class="grip"></div>
-      <h2>Mes préférences</h2>
+      <h2>Mes questions</h2>
     </div>
-    <div id="prefs-body"></div>
+    <div id="questions-body"></div>
     <div id="tasks-handle" role="button" aria-label="Voir les tâches de l'agent">
       <div class="grip"></div>
       Tâches de l'agent
@@ -637,7 +647,7 @@
   </section>
 
   <section id="tasks-panel" aria-label="Tâches de l'agent">
-    <div id="tasks-head" role="button" aria-label="Revenir aux préférences">
+    <div id="tasks-head" role="button" aria-label="Revenir à mes questions">
       <div class="grip"></div>
       <h2>Tâches de l'agent</h2>
     </div>
@@ -647,7 +657,7 @@
   <div id="confirm-erase" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-erase-title">
     <div class="sheet">
       <p id="confirm-erase-title">Tout effacer ?</p>
-      <small>Les lieux, toutes les tâches de l'agent (y compris celles en cours) et le fil de la conversation sont effacés. Seules tes préférences sont conservées.</small>
+      <small>Les lieux, tes questions, toutes les tâches de l'agent (y compris celles en cours) et le fil de la conversation sont effacés. Seules tes préférences sont conservées.</small>
       <div class="actions">
         <button class="cancel">Annuler</button>
         <button class="confirm">Effacer</button>
@@ -1354,8 +1364,6 @@
       }
 
       unplacedPois = state.pois.filter((p) => p.status !== "resolved");
-      preferences = state.preferences;
-      if (prefsPanelEl.classList.contains("open")) renderPrefs();
       renderSteps();
       if (changed || pinsChanged) {
         routeStale = true;
@@ -1471,6 +1479,7 @@
       pois.forEach(updateMarkerVisibility);
       renderLegend();
       renderPoiList();
+      if (questionsPanelEl.classList.contains("open")) renderQuestions(); // n° d'étape des lieux cités
       reportMapNumbers();
     }
 
@@ -2575,7 +2584,7 @@
     }
 
     function closePoiList() {
-      closePrefs();
+      closeQuestions();
       poiListEl.classList.remove("open");
       document.body.classList.remove("list-open");
       if (routeAnimPending && routeVisible) animateRoute();
@@ -2846,54 +2855,62 @@
       }
     }
 
-    // ---- Écran « Mes préférences » (glisser vers le haut depuis le bas de la liste) ----
-    const prefsPanelEl = document.getElementById("prefs-panel");
-    const prefsBodyEl = document.getElementById("prefs-body");
-    let preferences = null;
+    // ---- Écran « Mes questions » (glisser vers le haut depuis le bas de la liste) ----
+    // Les questions posées au guide sur les lieux enregistrés (tâches « info » du tableau), avec leur
+    // réponse et les lieux concernés. Gardées avec la carte, elles disparaissent avec « Effacer ».
+    const questionsPanelEl = document.getElementById("questions-panel");
+    const questionsBodyEl = document.getElementById("questions-body");
+    const hourMinute = (ts) => new Date(ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 
-    const CATEGORY_PLURALS = {
-      restaurant: "Restaurants", museum: "Musées", monument: "Monuments", garden: "Jardins",
-      viewpoint: "Points de vue", activity: "Activités", parking: "Parkings", other: "Autres lieux",
-    };
-
-    function renderPrefs() {
-      const p = preferences || {};
-      const rows = [];
-      const row = (label, value) => {
-        const r = el("div", "pref-row");
-        r.append(el("span", "pref-label", label));
-        if (typeof value === "string") r.append(el("span", "pref-value", value));
-        else r.append(value);
-        rows.push(r);
-      };
-      if (p.excluded_categories?.length) {
-        const chips = el("div", "pref-chips");
-        p.excluded_categories.forEach((c) => chips.append(el("span", null, CATEGORY_PLURALS[c] || c)));
-        row("Je ne veux plus", chips);
+    function renderQuestions() {
+      const questions = agentTasks.filter((t) => t.kind === "info" && !t.replacedBy); // plus récentes en premier
+      if (!questions.length) {
+        questionsBodyEl.replaceChildren(el("p", "pref-empty",
+          "Aucune question pour l'instant. Demande au guide, par exemple : « à combien de minutes à pied est le musée de mon parking ? »"));
+        return;
       }
-      if (p.budget) row("Budget", p.budget);
-      if (p.cuisine) row("Cuisine", p.cuisine);
-      if (p.max_walk_minutes) row("Marche maximale", `${p.max_walk_minutes} min`);
-      if (p.quietness) row("Ambiance", p.quietness);
-      if (p.time_constraints) row("Horaires", p.time_constraints);
-      if (p.transport && p.transport !== "à pied") row("Déplacement", p.transport);
-      (p.notes || []).forEach((note) => row("Note", note));
-      if (!rows.length) rows.push(el("p", "pref-empty", "Aucune préférence pour l'instant."));
-      prefsBodyEl.replaceChildren(...rows, el("p", "pref-hint", "Pour changer une préférence, dis-le au guide (« finalement, les restaurants c'est bon »)."));
+      const toVisit = includedPois();
+      questionsBodyEl.replaceChildren(...questions.map((t) => {
+        const item = el("div", "question");
+        const top = el("div", "question-top");
+        top.append(el("span", "question-text", t.utterance ? `« ${t.utterance} »` : t.title), el("span", "question-time", hourMinute(t.createdAt)));
+        item.append(top);
+        const waiting = t.status === "pending" || t.status === "running";
+        const answer = waiting ? "Je regarde…" : t.status === "cancelled" ? "Question annulée." : t.result || "Pas de réponse.";
+        item.append(el("p", waiting ? "question-answer waiting" : "question-answer", answer));
+        // Lieux concernés : pastille (couleur du groupe, n° d'étape, ✓ ou –) et nom ; toucher ouvre la bulle
+        const related = (t.relatedIds || []).map((id) => pois.find((p) => p.id === id)).filter(Boolean);
+        if (related.length) {
+          const places = el("div", "question-places");
+          for (const poi of related) {
+            const step = toVisit.indexOf(poi) + 1;
+            const kind = step ? "todo" : poi.visitedAt ? "visited" : "excluded";
+            const chip = el("button", `question-place ${kind}`);
+            chip.type = "button";
+            const bullet = el("span", "poi-row-step", step ? String(step) : kind === "visited" ? "✓" : "–");
+            if (step) bullet.style.background = poi.color;
+            chip.append(bullet, el("span", "question-place-name", poi.props.name));
+            chip.addEventListener("click", () => openListBubble(poi.props));
+            places.append(chip);
+          }
+          item.append(places);
+        }
+        return item;
+      }));
     }
 
-    function openPrefs() {
-      renderPrefs();
-      prefsPanelEl.classList.add("open");
+    function openQuestions() {
+      renderQuestions();
+      questionsPanelEl.classList.add("open");
     }
 
-    function closePrefs() {
+    function closeQuestions() {
       closeTasks();
-      prefsPanelEl.classList.remove("open");
+      questionsPanelEl.classList.remove("open");
     }
 
-    onVerticalSwipe(document.getElementById("prefs-handle"), { up: openPrefs, tap: openPrefs });
-    onVerticalSwipe(document.getElementById("prefs-head"), { down: closePrefs, tap: closePrefs });
+    onVerticalSwipe(document.getElementById("questions-handle"), { up: openQuestions, tap: openQuestions });
+    onVerticalSwipe(document.getElementById("questions-head"), { down: closeQuestions, tap: closeQuestions });
 
     // ---- Écran « Tâches de l'agent » (mode test) : tableau des tâches reçu du serveur ----
     const tasksPanelEl = document.getElementById("tasks-panel");
@@ -2973,6 +2990,7 @@
       agentTasks = tasks;
       updateEraseButton();
       if (tasksPanelEl.classList.contains("open")) renderTasks();
+      if (questionsPanelEl.classList.contains("open")) renderQuestions();
       renderLegend(); // titres des groupes
       if (listMode === "grouped" && poiListEl.classList.contains("open")) renderPoiList();
     }
