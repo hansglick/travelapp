@@ -304,17 +304,19 @@
     .question-place.excluded .poi-row-step { background: #777; border-color: #999; }
     .question-place-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-    /* Écran zéro : titre, recherche + « Autour de moi », globe avec cible au centre, « Let's Go! » */
+    /* Écran zéro : titre, recherche + « Ma position », globe avec cible au centre, « Let's Go! » */
     #zero-screen {
       position: fixed; inset: 0; z-index: 1200;
       display: flex; flex-direction: column; gap: 12px; background: #000; color: #fff;
       padding: max(14px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
     }
     #zero-screen[hidden] { display: none; }
-    .zero-head { display: grid; grid-template-columns: 36px 1fr 36px; align-items: center; gap: 6px; }
-    .zero-head h1 { grid-column: 2; margin: 0; font-size: clamp(1.25rem, 5.6vw, 2rem); text-align: center; }
+    /* Titre et recherche centrés ; la recherche est un peu plus large que le titre (marges du titre) */
+    .zero-top { align-self: center; display: flex; flex-direction: column; gap: 12px; width: fit-content; max-width: 100%; }
+    .zero-top h1 { margin: 0; padding: 0 40px; font-size: clamp(1.25rem, 5.6vw, 2rem); text-align: center; }
     #zero-menu-btn {
-      grid-column: 3; display: flex; align-items: center; justify-content: center;
+      position: absolute; top: max(14px, env(safe-area-inset-top)); right: 16px;
+      display: flex; align-items: center; justify-content: center;
       width: 36px; height: 40px; padding: 0; border: 0; background: none; color: #fff; cursor: pointer;
     }
     .zero-search {
@@ -325,10 +327,11 @@
       flex: 1; min-width: 0; padding: 8px 0; border: 0; outline: none; background: none;
       color: #fff; font: 1rem system-ui, sans-serif;
     }
+    /* « Ma position » : pastille orange, viseur blanc */
     #zero-gps {
-      flex: none; display: flex; align-items: center; gap: 6px; padding: 9px 14px;
-      border: 0; border-radius: 999px; background: #e4572e; color: #fff;
-      font: 600 0.85rem system-ui, sans-serif; white-space: nowrap; cursor: pointer;
+      flex: none; display: flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%;
+      background: #e4572e; color: #fff; cursor: pointer;
     }
     #zero-suggest {
       position: absolute; z-index: 5; top: calc(100% + 6px); left: 0; right: 0;
@@ -843,21 +846,20 @@
   </div>
 
   <section id="zero-screen" hidden aria-label="Choisir le point de départ">
-    <div class="zero-head">
-      <h1>Quel endroit veux-tu explorer ?</h1>
-      <button id="zero-menu-btn" type="button" aria-label="Menu" aria-haspopup="true">
-        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-          <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-        </svg>
-      </button>
-    </div>
+    <button id="zero-menu-btn" type="button" aria-label="Menu" aria-haspopup="true">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <div class="zero-top">
+    <h1>Quel endroit veux-tu explorer ?</h1>
     <div class="zero-search">
       <input id="zero-search" type="search" placeholder="Une adresse, un lieu, une ville…" autocomplete="off" aria-label="Rechercher un lieu">
-      <button id="zero-gps" type="button" aria-label="Autour de moi (position GPS)">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        Autour de moi
+      <button id="zero-gps" type="button" aria-label="Ma position" title="Ma position">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
       <ul id="zero-suggest" hidden></ul>
+    </div>
     </div>
     <div id="zero-globe-wrap">
       <div id="zero-globe"></div>
@@ -3811,13 +3813,14 @@
 
     // ---- Écran zéro : choisir le point de départ sur un globe (Mapbox) ----
     // Affiché à chaque ouverture de l'appli. Recherche d'une adresse ou d'un lieu (suggestions Google),
-    // « Autour de moi » (GPS), ou parcours du globe : le point de départ est sous la cible du centre.
+    // « Ma position » (GPS), ou parcours du globe : le point de départ est sous la cible du centre.
     // « Let's Go! » vide la carte et ouvre l'écran principal sur ce point. Ouvrir un itinéraire depuis
     // le menu ☰ fait voler le globe jusqu'à sa zone, puis ouvre l'écran principal, où l'on touche la
     // carte (ou « Ma position ») pour choisir le départ.
     const MAPBOX_VERSION = "3.9.4";
     const START_MIN_ZOOM = 13;   // à la main, assez près pour un point de départ précis
     const SPIN_DEG_PER_S = 3;    // rotation du globe au repos
+    const ORBIT_DEG_PER_S = 5;   // rotation lente de la caméra autour du lieu choisi
     const zeroScreen = document.getElementById("zero-screen");
     const zeroSearch = document.getElementById("zero-search");
     const zeroSuggest = document.getElementById("zero-suggest");
@@ -3854,11 +3857,11 @@
       zeroScreen.hidden = false;
       updateGoButton();
       if (globe) return;
-      if (!MAPBOX_TOKEN) return zeroMessage("Globe indisponible (jeton Mapbox absent) : cherche un lieu ou utilise « Autour de moi ».");
+      if (!MAPBOX_TOKEN) return zeroMessage("Globe indisponible (jeton Mapbox absent) : cherche un lieu ou utilise « Ma position ».");
       try {
         await loadMapbox();
       } catch {
-        return zeroMessage("Globe indisponible : cherche un lieu ou utilise « Autour de moi ».");
+        return zeroMessage("Globe indisponible : cherche un lieu ou utilise « Ma position ».");
       }
       mapboxgl.accessToken = MAPBOX_TOKEN;
       globe = new mapboxgl.Map({
@@ -3871,7 +3874,10 @@
       });
       globe.on("style.load", () => globe.setFog({})); // atmosphère et étoiles par défaut
       // Le globe tourne tant que personne n'y touche ; parcourir le globe à la main choisit le centre
-      const stopSpin = () => { spinning = false; };
+      const stopSpin = () => {
+        spinning = false;
+        stopOrbit(); // l'utilisateur reprend la main
+      };
       globe.on("mousedown", stopSpin);
       globe.on("touchstart", stopSpin);
       globe.on("wheel", stopSpin);
@@ -3894,9 +3900,30 @@
       globe.easeTo({ center, duration: 1000, easing: (n) => n });
     }
 
+    // Arrivée sur le lieu choisi : la caméra tourne lentement autour du point (sous la cible) jusqu'à
+    // ce que l'utilisateur touche le globe, choisisse un autre lieu ou quitte l'écran
+    let orbitFrame = null;
+
+    function startOrbit() {
+      stopOrbit();
+      let last = performance.now();
+      const step = (now) => {
+        globe.setBearing(globe.getBearing() + (ORBIT_DEG_PER_S * (now - last)) / 1000);
+        last = now;
+        orbitFrame = requestAnimationFrame(step);
+      };
+      orbitFrame = requestAnimationFrame(step);
+    }
+
+    function stopOrbit() {
+      cancelAnimationFrame(orbitFrame);
+      orbitFrame = null;
+    }
+
     // Vol du globe jusqu'à un point (ou une zone) ; la promesse se résout à l'arrivée
     function flyGlobe(options) {
       spinning = false;
+      stopOrbit();
       if (!globe) return Promise.resolve();
       return new Promise((resolve) => {
         globe.stop(); // la rotation en cours s'arrête (son « moveend » ne compte pas comme l'arrivée)
@@ -3909,7 +3936,7 @@
     function updateGoButton() {
       const precise = Boolean(startChoice) || (globe && globe.getZoom() >= START_MIN_ZOOM);
       zeroGo.disabled = !precise;
-      zeroMessage(precise ? "" : "Cherche un lieu, utilise « Autour de moi », ou zoome sur le globe jusqu'au quartier voulu.");
+      zeroMessage(precise ? "" : "Cherche un lieu, utilise « Ma position », ou zoome sur le globe jusqu'au quartier voulu.");
     }
 
     // -- Recherche : suggestions Google Places (Autocomplete) --
@@ -3972,6 +3999,7 @@
         startChoice = { position, gps: false };
         updateGoButton();
         await flyGlobe({ position });
+        if (startChoice?.position === position) startOrbit(); // toujours ce lieu-là à l'arrivée
       } catch {
         zeroMessage("Lieu introuvable : essaie une autre recherche.");
       }
@@ -3997,6 +4025,7 @@
         zeroSearch.value = "Ma position";
         updateGoButton();
         await flyGlobe({ position });
+        if (startChoice?.position === position) startOrbit();
       } catch {
         zeroMessage("Position indisponible : autorise la localisation dans le navigateur, ou cherche un lieu.");
       }
@@ -4017,6 +4046,7 @@
     function leaveZeroScreen() {
       zeroScreen.hidden = true;
       spinning = false;
+      stopOrbit();
     }
 
     // Itinéraire ouvert depuis l'écran zéro : le globe vole jusqu'à sa zone, tourne quelques secondes,
