@@ -150,6 +150,7 @@
 
     /* Nom des lieux sur la carte (case « Labels » de la légende) : couleur du groupe, contour blanc */
     .poi-map-label {
+      font-weight: 800 !important;
       text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 3px #fff;
     }
 
@@ -904,7 +905,7 @@
         url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
         scaledSize: new google.maps.Size(62, 54),
         anchor: new google.maps.Point(22, 32),
-        labelOrigin: new google.maps.Point(22, 64), // nom du lieu (« Labels »), sous l'icône
+        labelOrigin: new google.maps.Point(22, 66), // nom du lieu (« Labels »), sous l'icône
       };
     }
 
@@ -1468,7 +1469,7 @@
       const key = `${text}|${poi.color}`;
       if (poi.labelKey === key) return;
       poi.labelKey = key;
-      poi.marker.setLabel(text ? { text, color: poi.color, fontSize: "12px", fontWeight: "700", className: "poi-map-label" } : null);
+      poi.marker.setLabel(text ? { text, color: poi.color, fontSize: "16px", fontWeight: "800", className: "poi-map-label" } : null);
     }
 
     function setGroupsHidden(update) {
