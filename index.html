@@ -98,13 +98,6 @@
     }
     .user-dot.dragging { cursor: grabbing; }
 
-    /* Flèche verte « direction à prendre » (bouton Next) : élément de taille nulle posé sur le point
-       bleu, tourné selon le cap ; la flèche part juste au-dessus du point */
-    .direction-arrow { position: absolute; width: 0; height: 0; pointer-events: none; }
-    .direction-arrow svg {
-      position: absolute; left: -14px; bottom: 0;
-      filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.5));
-    }
     .user-dot::before, .user-dot::after { content: ""; position: absolute; inset: 12px; border-radius: 50%; }
     .user-dot::before {
       z-index: 1; background: #1a73e8; border: 3px solid #fff;
@@ -565,10 +558,26 @@
       100% { transform: translate(-50%, -50%) scale(1); }
     }
     #landmark-pop.fade-out { opacity: 0; }
-    #landmark-pop .poi-card {
-      background: #000; border: 1px solid #333; border-radius: 14px; overflow: hidden;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+    #landmark-pop .poi-card { border-radius: 14px; overflow: hidden; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6); }
+    /* Carte du repère : fond orange, consigne blanche, photo à bordure blanche */
+    .poi-card.landmark-card { background: #e4572e; color: #fff; padding-bottom: 10px; }
+    .landmark-head { display: grid; grid-template-columns: 24px 1fr 24px; align-items: start; gap: 6px; padding: 10px 10px 8px; }
+    .landmark-head h3 { grid-column: 2; margin: 0; font-size: 1.05rem; font-weight: 600; line-height: 1.3; text-align: center; color: #fff; }
+    .landmark-head .poi-close { grid-column: 3; width: 24px; height: 24px; margin: 0; background: rgba(0, 0, 0, 0.25); font-size: 16px; line-height: 24px; }
+    .landmark-photo {
+      position: relative; display: block; margin: 0 auto; padding: 0; overflow: hidden;
+      border: 3px solid #fff; border-radius: 10px; background: #b8431f; cursor: pointer;
+      box-sizing: content-box;
     }
+    .landmark-photo canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .landmark-credit {
+      position: absolute; z-index: 1; right: 6px; bottom: 4px; max-width: 90%;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: 0.65rem; color: #ffc49f; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    }
+    /* Bulle Google qui contient la carte du repère : fond et pointe orange */
+    .gm-style .gm-style-iw-c:has(.landmark-card) { background: #e4572e; }
+    .gm-style .gm-style-iw-t:has(.landmark-card) .gm-style-iw-tc::after { background: #e4572e; }
 
     /* Bulle d'un POI affichée par-dessus la liste (même contenu que sur la carte) */
     #list-bubble {
@@ -976,6 +985,8 @@
       return sorted.slice(0, Math.max(verticalCount, MIN_PHOTOS)).map((p) => ({
         url: photoUrl(p.name),
         author: p.authorAttributions?.[0]?.displayName,
+        width: p.widthPx,
+        height: p.heightPx,
       }));
     }
 
@@ -1102,34 +1113,32 @@
     // Logo « images » blanc de la bulle
     const PHOTOS_WHITE_SVG = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8.5" cy="9.5" r="1.8" fill="currentColor"/><path d="M4 18l5-5.5 3.5 3.5 3-3 4.5 5z" fill="currentColor"/></svg>';
 
-    // Carte d'un repère (bouton Next) : nom, description et grande photo qui ouvre le carrousel
+    // Carte d'un repère (bouton Next), épurée : fond orange, consigne en blanc, photo à bordure blanche
+    // (toucher ouvre le carrousel) ; crédit de l'auteur en orange clair pour les photos de lieux
     function buildLandmarkCard(props, size, onClose, photosReady) {
-      const card = el("div", "poi-card");
+      const card = el("div", "poi-card landmark-card");
       card.style.width = `${size.width}px`;
-      card.style.height = `${size.height}px`;
-      const head = el("div", "poi-head");
+      const head = el("div", "landmark-head");
       const close = el("button", "poi-close", "×");
       close.setAttribute("aria-label", "Fermer");
       close.addEventListener("click", onClose);
       head.append(el("h3", null, props.name), close);
       card.append(head);
-      if (props.description) card.append(el("p", "poi-desc", props.description));
-
-      const msg = el("p", "poi-photo-msg", "Chargement des photos…");
-      card.append(msg);
+      if (!size.photo) return card;
+      const photo = el("button", "landmark-photo");
+      photo.style.width = `${size.photo.width}px`;
+      photo.style.height = `${size.photo.height}px`;
+      photo.setAttribute("aria-label", "Voir les photos");
+      card.append(photo);
       photosReady.then((photos) => {
         if (!photos.length) {
-          msg.textContent = "Aucune photo disponible.";
+          photo.remove();
           return;
         }
-        const photo = el("button", "poi-photo");
-        photo.setAttribute("aria-label", "Voir les photos");
-        photo.append(el("span", "poi-photo-count", `1 / ${photos.length}`));
+        if (photos[0].author) photo.append(el("span", "landmark-credit", `© ${photos[0].author}`));
         photo.addEventListener("click", () => openCarousel(photos));
-        msg.replaceWith(photo);
-        // La zone photo n'a sa taille définitive qu'une fois insérée dans la bulle
         requestAnimationFrame(async () => {
-          const canvas = await bubbleThumbnail(photos[0].url, photo.clientWidth, photo.clientHeight);
+          const canvas = await bubbleThumbnail(photos[0].url, size.photo.width, size.photo.height);
           if (canvas) photo.prepend(canvas);
         });
       });
@@ -1878,6 +1887,8 @@
     const ROUTE_ANIM_MS = 4000 * ROUTE_TRACE_SLOWDOWN;   // durée totale du tracé (hors pauses)
     const ROUTE_LEG_MIN_MS = 350 * ROUTE_TRACE_SLOWDOWN; // durée minimale d'une portion très courte
     const ROUTE_POP_PAUSE_MS = 400 * ROUTE_SLOWDOWN; // pause à chaque étape, le temps du « pop »
+    const NEXT_ROUTE_MAX_MS = 4000;     // « Next » : tracé jusqu'à la prochaine étape en 4 s au plus
+    const NEXT_END_PAUSE_MS = 300;      // pause à l'arrivée, comprise dans ces 4 s
     const ROUTE_FOLLOW_ZOOM = 1;        // zoom supplémentaire pendant le suivi de la caméra
     const CAMERA_PAN_EVERY_MS = 120;    // fréquence de recentrage de la caméra
 
@@ -1916,7 +1927,8 @@
 
     // maxLegs : nombre de portions à animer (toutes par défaut ; 1 pour « Next », jusqu'à la prochaine
     // étape). onDone : appelé à la fin de l'animation si elle n'a pas été interrompue.
-    function animateRoute(maxLegs = Infinity, onDone = null) {
+    // maxMs : durée maximale de l'animation (tracé et pause finale), pour « Next »
+    function animateRoute(maxLegs = Infinity, onDone = null, maxMs = null) {
       hideRoute();
       if (!routePaths.length) return;
       const animId = routeAnimId;
@@ -1936,7 +1948,13 @@
       const allLengths = routePaths.map((path) => spherical.computeLength(path));
       const totalLength = allLengths.reduce((a, b) => a + b, 0) || 1;
       const lengths = allLengths.slice(0, paths.length);
-      const durations = lengths.map((len) => Math.max(ROUTE_LEG_MIN_MS, (ROUTE_ANIM_MS * len) / totalLength));
+      let durations = lengths.map((len) => Math.max(ROUTE_LEG_MIN_MS, (ROUTE_ANIM_MS * len) / totalLength));
+      const popPause = maxMs ? NEXT_END_PAUSE_MS : ROUTE_POP_PAUSE_MS;
+      if (maxMs) {
+        const room = maxMs - popPause * paths.length - 200; // 200 ms de marge (images, minuteries)
+        const sum = durations.reduce((a, b) => a + b, 0);
+        if (sum > room) durations = durations.map((d) => (d * room) / sum);
+      }
 
       // Caméra : un cran plus près pendant le tracé (zoom de référence gardé si une animation
       // en remplace une autre, pour ne pas zoomer de plus en plus)
@@ -1973,14 +1991,14 @@
             if (animId !== routeAnimId) return;
             endCameraFollow();
             onDone?.();
-          }, ROUTE_POP_PAUSE_MS);
+          }, popPause);
           return;
         }
         setTimeout(() => {
           if (animId !== routeAnimId) return;
           legStart = performance.now();
           requestAnimationFrame(frame);
-        }, ROUTE_POP_PAUSE_MS);
+        }, popPause);
       }
       requestAnimationFrame(frame);
     }
@@ -2152,13 +2170,12 @@
     const SNAP_GAP_M = 8;                // au-delà, le début du tracé est « loin » de la position
 
     let landmarkMarker = null;
-    let directionArrow = null;
+    let landmarkTimer = null;
 
     function clearLandmark() {
+      clearTimeout(landmarkTimer);
       landmarkMarker?.setMap(null);
       landmarkMarker = null;
-      directionArrow?.setMap(null);
-      directionArrow = null;
       // Séquence « Next » en cours annulée ; son tronçon disparaît (sauf itinéraire affiché par l'interrupteur)
       nextSequenceId++;
       document.getElementById("landmark-pop")?.remove();
@@ -2166,30 +2183,38 @@
       nextRouteShown = false;
     }
 
-    // Flèche verte partant du point bleu dans la direction de départ. Taille fixe à l'écran (lisible
-    // à tous les zooms), au-dessus des icônes, sans bloquer les touchers. La carte étant toujours
-    // orientée nord en haut, le cap se traduit directement en rotation.
-    const DIRECTION_ARROW_SVG = `<svg viewBox="0 0 28 84" width="28" height="84" aria-hidden="true">
-      <path d="M14 70V18" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
-      <path d="M14 70V18" stroke="#2e9e4f" stroke-width="6" stroke-linecap="round"/>
-      <path d="M14 2L26 22H2z" fill="#2e9e4f" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>`;
-
-    function showDirectionArrow(origin, step) {
-      const div = el("div", "direction-arrow");
-      div.innerHTML = DIRECTION_ARROW_SVG;
-      div.style.transform = `rotate(${step.heading}deg)`;
-      directionArrow = createHtmlOverlay(origin, div, "overlayMouseTarget");
-    }
-
+    // Pastille « R » du repère : verte, « R » blanc en gras, un peu plus petite que les icônes des lieux
     function landmarkIcon() {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
-        <circle cx="20" cy="20" r="17" fill="#2e9e4f" stroke="#fff" stroke-width="3"/>
-        <text x="20" y="26.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="19" font-weight="700" fill="#fff">R</text></svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30">
+        <circle cx="15" cy="15" r="13" fill="#2e9e4f" stroke="#fff" stroke-width="2.5"/>
+        <text x="15" y="20" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#fff">R</text></svg>`;
       return {
         url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
-        scaledSize: new google.maps.Size(40, 40),
-        anchor: new google.maps.Point(20, 20),
+        scaledSize: new google.maps.Size(30, 30),
+        anchor: new google.maps.Point(15, 15),
       };
+    }
+
+    // Le repère reste LANDMARK_SHOW_MS sur la carte puis s'estompe ; il revient au prochain « Next »
+    const LANDMARK_SHOW_MS = 25000;
+    const LANDMARK_FADE_MS = 1500;
+
+    function fadeLandmarkLater(marker) {
+      clearTimeout(landmarkTimer);
+      landmarkTimer = setTimeout(() => {
+        const start = performance.now();
+        const step = (now) => {
+          if (landmarkMarker !== marker) return;
+          const t = Math.min(1, (now - start) / LANDMARK_FADE_MS);
+          marker.setOpacity(1 - t);
+          if (t < 1) requestAnimationFrame(step);
+          else {
+            marker.setMap(null);
+            landmarkMarker = null;
+          }
+        };
+        requestAnimationFrame(step);
+      }, LANDMARK_SHOW_MS);
     }
 
     // Écart d'angle entre deux caps, de 0 à 180°
@@ -2261,17 +2286,8 @@
       const image = new URLSearchParams({
         size: "480x640", pano: meta.pano_id, heading: heading.toFixed(1), fov: 80, pitch: 0, key: GOOGLE_MAPS_API_KEY,
       });
-      return {
-        url: `https://maps.googleapis.com/maps/api/streetview?${image}`,
-        distance: spherical.computeDistanceBetween(new google.maps.LatLng(origin), pano),
-        date: meta.date, // « 2024-09 »
-      };
+      return { url: `https://maps.googleapis.com/maps/api/streetview?${image}`, width: 480, height: 640 };
     }
-
-    const formatPanoDate = (date) => {
-      const [y, m] = (date || "").split("-");
-      return y ? new Date(+y, (+m || 1) - 1).toLocaleDateString("fr-FR", { month: "long", year: "numeric" }) : "";
-    };
 
     async function nearbyPlaces(origin, radius) {
       const response = await fetch("https://places.googleapis.com/v1/places:searchNearby", {
@@ -2317,7 +2333,7 @@
       return null;
     }
 
-    // « Next » : repère + flèche, puis la photo du repère « pop » au centre de la carte, reste
+    // « Next » : repère, puis la photo du repère « pop » au centre de la carte, reste
     // NEXT_POP_MS et s'estompe ; ensuite seulement, le trajet s'anime jusqu'à la prochaine étape.
     const NEXT_POP_MS = 4000;
     const NEXT_POP_FADE_MS = 800;   // même valeur que la transition CSS de #landmark-pop
@@ -2346,7 +2362,6 @@
         if (!step) throw new Error("Pas de trajet");
         presentation = await departurePresentation(origin, step, target);
         if (sequenceId !== nextSequenceId) return; // l'utilisateur a bougé entre-temps
-        showDirectionArrow(origin, step);
       } catch (err) {
         console.warn("Repère indisponible", err);
         presentation = { text: { name: "Impossible de trouver un repère pour le moment." }, photos: [] };
@@ -2360,7 +2375,7 @@
       animateRoute(1, () => {
         // Itinéraire affiché par l'interrupteur : on le remet en entier ; sinon le tronçon reste
         if (routeVisible) drawRouteStatic();
-      });
+      }, NEXT_ROUTE_MAX_MS);
     }
 
     // Repère à montrer : vue Street View de préférence, sinon un lieu proche (pastille « R »),
@@ -2368,14 +2383,8 @@
     async function departurePresentation(origin, step, target) {
       const view = await streetViewLandmark(origin, step).catch(() => null);
       if (view) {
-        const when = formatPanoDate(view.date);
-        return {
-          text: {
-            name: "Aller dans cette direction",
-            description: `Vue Google Street View${when ? ` (${when})` : ""}, à ${Math.round(view.distance)} m de vous.`,
-          },
-          photos: [{ url: view.url, author: "Google Street View" }],
-        };
+        // Le logo Google est déjà dans l'image Street View : pas de crédit à ajouter
+        return { text: { name: "Aller dans cette direction" }, photos: [{ url: view.url, width: view.width, height: view.height }] };
       }
 
       let landmark = null;
@@ -2383,18 +2392,42 @@
         landmark = chooseLandmark(await nearbyPlaces(origin, radius), origin, step);
         if (landmark) break;
       }
-      if (!landmark) return { text: { name: step.instruction || `Partir vers ${target.props.name}` }, photos: [] };
+      if (!landmark) return { text: { name: `Dirigez-vous vers ${target.props.name}` }, photos: [] };
 
       const name = landmark.place.displayName?.text || "ce lieu";
-      const text = landmark.side === "ahead"
-        ? { name: `Aller dans la direction de ${name}`, description: `Il est devant vous, à ${Math.round(landmark.distance)} m.` }
-        : { name: `S'éloigner de ${name}`, description: `Gardez-le dans votre dos (à ${Math.round(landmark.distance)} m).` };
+      const text = { name: landmark.side === "ahead" ? `Dirigez-vous vers ${name}` : `Éloigne-toi de ${name}` };
       landmarkMarker = new google.maps.Marker({
         map, position: landmark.at, icon: landmarkIcon(), title: `Repère : ${name}`, zIndex: 1000,
       });
+      fadeLandmarkLater(landmarkMarker);
       // Toucher la pastille « R » rouvre la bulle du repère
       landmarkMarker.addListener("click", () => showLandmarkBubble(landmarkMarker, text, landmark.place.photos));
       return { text, photos: pickPhotos(landmark.place.photos) };
+    }
+
+    // Bulle du repère : aux proportions de la photo, la plus grande possible sans dépasser 70 % de la
+    // largeur ni 70 % de la hauteur de la carte (on voit toujours largement la carte). Sans photo :
+    // réduite au titre.
+    const LANDMARK_HEAD_PX = 64;  // titre (deux lignes au plus) et marges au-dessus de la photo
+    const LANDMARK_PAD_PX = 10;   // marge autour de la photo
+
+    function landmarkCardSize(photo) {
+      const rect = document.getElementById("map").getBoundingClientRect();
+      const maxWidth = rect.width * 0.7;
+      const maxHeight = rect.height * 0.7;
+      if (!photo) return { width: Math.round(Math.min(maxWidth, 320)), photo: null };
+      const ratio = photo.height && photo.width ? photo.height / photo.width : 4 / 3;
+      let photoWidth = maxWidth - 2 * LANDMARK_PAD_PX - 6;
+      let photoHeight = photoWidth * ratio;
+      const roomHeight = maxHeight - LANDMARK_HEAD_PX - LANDMARK_PAD_PX - 6; // 6 : bordure blanche
+      if (photoHeight > roomHeight) {
+        photoHeight = roomHeight;
+        photoWidth = photoHeight / ratio;
+      }
+      return {
+        width: Math.round(photoWidth + 2 * LANDMARK_PAD_PX + 6),
+        photo: { width: Math.round(photoWidth), height: Math.round(photoHeight) },
+      };
     }
 
     // Carte du repère qui « pop » au centre de la carte, puis s'estompe. Le × la ferme plus tôt.
@@ -2410,8 +2443,7 @@
           pop.classList.add("fade-out");
           setTimeout(() => { pop.remove(); resolve(); }, NEXT_POP_FADE_MS);
         };
-        const size = poiCardSize();
-        pop.append(buildPoiCard(text, photos.length ? size : { width: size.width, height: 150 }, dismiss, Promise.resolve(photos)));
+        pop.append(buildPoiCard(text, landmarkCardSize(photos[0]), dismiss, Promise.resolve(photos)));
         const rect = document.getElementById("map").getBoundingClientRect();
         pop.style.left = `${rect.left + rect.width / 2}px`;
         pop.style.top = `${rect.top + rect.height / 2}px`;
@@ -2425,9 +2457,8 @@
     // sans photo, elle est réduite à la consigne. photosReady : photos déjà prêtes (vue Street View).
     function showLandmarkBubble(anchor, text, photos = [], photosReady = false) {
       rememberViewBeforeBubble();
-      const size = poiCardSize();
       const list = photosReady ? photos : pickPhotos(photos);
-      const card = buildPoiCard(text, list.length ? size : { width: size.width, height: 150 }, closeBubble, Promise.resolve(list));
+      const card = buildPoiCard(text, landmarkCardSize(list[0]), closeBubble, Promise.resolve(list));
       infoWindow.setContent(card);
       if (anchor) infoWindow.open({ map, anchor });
       else {
