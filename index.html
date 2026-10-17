@@ -15,47 +15,41 @@
       background: #000;
       color: #fff;
     }
-    /* En-tête : disquette à gauche, titre centré sur la largeur de la page, haut-parleur et menu ☰ à droite */
+    /* En-tête : titre centré sur la largeur de la page, menu ☰ à droite */
     header {
       display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px;
       padding: 14px 16px 10px;
       padding-top: max(14px, env(safe-area-inset-top));
     }
-    /* Taille adaptée à la largeur de l'écran, pour que le titre reste centré à côté du bouton */
+    /* Taille adaptée à la largeur de l'écran, pour que le titre reste centré */
     h1 { grid-column: 2; margin: 0; font-size: clamp(1.3rem, 6.2vw, 2.2rem); text-align: center; white-space: nowrap; }
-    .header-right { grid-column: 3; grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; }
-    /* Disquette « Enregistrer » à gauche (noire sur fond orange), menu ☰ tout à droite */
-    #save-btn {
-      grid-column: 1; grid-row: 1; justify-self: start;
-      display: flex; align-items: center; justify-content: center;
-      width: 40px; height: 40px; padding: 0; border: 0; border-radius: 12px;
-      background: #e4572e; color: #000; cursor: pointer;
-    }
-    #save-btn:disabled { opacity: 0.35; cursor: default; }
     #menu-btn {
-      flex: none; display: flex; align-items: center; justify-content: center;
+      grid-column: 3; justify-self: end;
+      display: flex; align-items: center; justify-content: center;
       width: 36px; height: 40px; padding: 0; border: 0; border-radius: 12px;
       background: none; color: #fff; cursor: pointer;
     }
 
-    /* Haut-parleur orange à droite du titre : lance / arrête la conversation avec le guide vocal */
+    /* Pastille orange sous la carte : lance / arrête la conversation avec le guide vocal. Lueur faible
+       et lente pendant la connexion, puis lueur qui pulse tant que le micro est actif. */
     #voice-btn {
       flex: none; position: relative;
       display: flex; align-items: center; justify-content: center;
-      width: 40px; height: 40px; padding: 0; border: 2px solid #e4572e; border-radius: 50%;
-      background: transparent; color: #e4572e; cursor: pointer;
+      width: 64px; height: 64px; padding: 0; border: 0; border-radius: 50%;
+      background: #e4572e; color: #fff; cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
     }
-    #voice-btn svg { width: 24px; height: 24px; }
-    #voice-btn .wave { opacity: 0.35; }
-    #voice-btn.connecting { animation: voice-blink 1s ease-in-out infinite; }
-    #voice-btn.active { background: #e4572e; color: #fff; }
-    #voice-btn.active .wave { animation: voice-wave 1.2s ease-in-out infinite; }
-    #voice-btn.active .wave-2 { animation-delay: 0.3s; }
-    /* Le guide cherche : anneau qui tourne autour du bouton */
-    #voice-btn.working::after {
-      content: ""; position: absolute; inset: -6px; border-radius: 50%;
-      border: 2px solid transparent; border-top-color: #fff; border-right-color: #e4572e;
-      animation: voice-spin 0.9s linear infinite;
+    #voice-btn svg { width: 32px; height: 32px; }
+    #voice-btn.connecting { animation: voice-glow-soft 2.4s ease-in-out infinite; }
+    #voice-btn.active { animation: voice-glow 1.6s ease-out infinite; }
+    @keyframes voice-glow {
+      0% { box-shadow: 0 0 0 0 rgba(228, 87, 46, 0.75), 0 0 14px 2px rgba(228, 87, 46, 0.6); }
+      70% { box-shadow: 0 0 0 22px rgba(228, 87, 46, 0), 0 0 26px 8px rgba(228, 87, 46, 0.3); }
+      100% { box-shadow: 0 0 0 0 rgba(228, 87, 46, 0), 0 0 14px 2px rgba(228, 87, 46, 0.6); }
+    }
+    @keyframes voice-glow-soft {
+      0%, 100% { box-shadow: 0 0 6px 1px rgba(228, 87, 46, 0.25); }
+      50% { box-shadow: 0 0 16px 6px rgba(228, 87, 46, 0.45); }
     }
     @keyframes voice-blink { 50% { opacity: 0.4; } }
     @keyframes voice-wave { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
@@ -174,32 +168,13 @@
     #carousel-dots span { width: 8px; height: 8px; border-radius: 50%; background: #555; }
     #carousel-dots span.active { background: #fff; }
 
-    /* Barre sous la carte : glisser vers le haut ouvre la liste des lieux ; interrupteur
-       « Afficher l'itinéraire » et bouton « Next » (repère pour partir dans la bonne direction) */
+    /* Sous la carte : la pastille du guide vocal, puis la poignée ; glisser vers le haut (hors
+       pastille) ouvre la liste des lieux */
     #list-handle {
-      flex: none; display: flex; flex-direction: column; align-items: center; gap: 8px;
-      padding: 8px 16px max(12px, env(safe-area-inset-bottom));
+      flex: none; display: flex; flex-direction: column; align-items: center; gap: 12px;
+      padding: 14px 16px max(10px, env(safe-area-inset-bottom));
       touch-action: none; user-select: none;
     }
-    .bottom-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
-    #next-btn {
-      flex: none; padding: 8px 14px; border: 0; border-radius: 999px;
-      background: #e4572e; color: #fff; font: 600 0.9rem system-ui, sans-serif; cursor: pointer;
-    }
-    #next-btn:disabled { opacity: 0.5; cursor: wait; }
-    .route-toggle { display: flex; align-items: center; gap: 8px; color: #fff; font-size: 0.85rem; cursor: pointer; }
-    .route-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-    .switch {
-      position: relative; flex: none; width: 44px; height: 26px; border-radius: 13px;
-      background: #444; transition: background 0.2s;
-    }
-    .switch::after {
-      content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
-      background: #fff; transition: transform 0.2s;
-    }
-    .route-toggle input:checked + .switch { background: #e4572e; }
-    .route-toggle input:checked + .switch::after { transform: translateX(18px); }
-    .route-toggle input:focus-visible + .switch { outline: 2px solid #fff; outline-offset: 2px; }
     .grip { width: 44px; height: 5px; border-radius: 3px; background: #555; }
 
     /* Liste des lieux : panneau plein écran qui monte depuis le bas */
@@ -497,6 +472,12 @@
       font: 0.75rem system-ui, sans-serif; cursor: pointer;
     }
     .legend-all { margin-top: 4px; align-self: flex-end; }
+    .legend-sep { height: 1px; margin: 6px 0 2px; background: #444; }
+    #next-btn {
+      margin-top: 6px; padding: 8px 14px; border: 0; border-radius: 999px;
+      background: #e4572e; color: #fff; font: 600 0.85rem system-ui, sans-serif; cursor: pointer;
+    }
+    #next-btn:disabled { opacity: 0.5; cursor: wait; }
     .legend-all:disabled { opacity: 0.4; cursor: default; }
 
     /* Liste des lieux : boutons « Regrouper » / « Ordonner » et groupes dépliables */
@@ -611,38 +592,23 @@
   <main id="app">
     <header>
       <h1>Que fait-on ?</h1>
-      <button id="save-btn" aria-label="Enregistrer l'itinéraire" title="Enregistrer l'itinéraire" disabled>
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-          <path fill="currentColor" d="M4 3h13l4 4v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a1 1 0 0 1 1-2zm3 2v5h9V5zm5 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM13 6h2v3h-2z"/>
-        </svg>
-      </button>
-      <div class="header-right">
-      <button id="voice-btn" aria-label="Parler au guide" aria-pressed="false">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M3 9v6h4l5 5V4L7 9z" fill="currentColor"/>
-          <path class="wave" d="M15.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          <path class="wave wave-2" d="M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-      </button>
       <button id="menu-btn" aria-label="Menu" aria-haspopup="true">
         <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
           <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
         </svg>
       </button>
-      </div>
     </header>
     <div id="voice-status" role="status" aria-live="polite"></div>
     <div id="map"></div>
     <div id="list-handle">
+      <button id="voice-btn" aria-label="Parler au guide" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 9v6h4l5 5V4L7 9z" fill="currentColor"/>
+          <path d="M15.5 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
       <div class="grip"></div>
-      <div class="bottom-controls">
-        <label class="route-toggle">
-          <input type="checkbox" id="route-toggle">
-          <span class="switch"></span>
-          Afficher l'itinéraire
-        </label>
-        <button id="next-btn">Next</button>
-      </div>
     </div>
   </main>
 
@@ -733,6 +699,7 @@
   <!-- Menu ☰ -->
   <div id="menu-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Menu">
     <div class="sheet-panel">
+      <button type="button" id="menu-save" class="sheet-item" disabled>Enregistrer l'itinéraire</button>
       <button type="button" id="menu-open" class="sheet-item">Ouvrir un itinéraire</button>
       <button type="button" id="menu-logout" class="sheet-item">Se déconnecter</button>
       <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
@@ -1449,6 +1416,12 @@
     const hiddenGroups = new Set();
     let legendEl = null;
     let legendOpen = false;
+    // « Next » (repère pour partir dans la bonne direction) : un seul bouton, gardé d'un affichage à
+    // l'autre de la légende pour conserver son état (désactivé pendant la recherche du repère)
+    const nextBtn = el("button", null, "Next");
+    nextBtn.id = "next-btn";
+    nextBtn.type = "button";
+    nextBtn.addEventListener("click", () => showDepartureLandmark());
 
     function updateMarkerVisibility(poi) {
       const show = poi.included && !hiddenGroups.has(groupKeyOf(poi));
@@ -1497,6 +1470,14 @@
         all.disabled = !hiddenGroups.size;
         all.addEventListener("click", () => setGroupsHidden(() => hiddenGroups.clear()));
         panel.append(all);
+        // Tracé de l'itinéraire sur la carte, et « Next »
+        const routeRow = el("label", "legend-row");
+        const routeBox = el("input");
+        routeBox.type = "checkbox";
+        routeBox.checked = routeVisible;
+        routeBox.addEventListener("change", () => setRouteVisible(routeBox.checked));
+        routeRow.append(routeBox, el("span", "legend-name", "Tracé de l'itinéraire"));
+        panel.append(el("div", "legend-sep"), routeRow, nextBtn);
         children.push(panel);
       }
       legendEl.replaceChildren(...children);
@@ -2674,11 +2655,8 @@
       });
     }
 
-    // Barre sous la carte : glisser vers le haut (hors bouton et interrupteur) ouvre la liste
-    onVerticalSwipe(document.getElementById("list-handle"), { up: openPoiList }, ".bottom-controls button, .route-toggle");
-    const nextBtn = document.getElementById("next-btn");
-    nextBtn.addEventListener("click", showDepartureLandmark);
-    document.getElementById("route-toggle").addEventListener("change", (e) => setRouteVisible(e.target.checked));
+    // Sous la carte : glisser vers le haut (hors pastille du guide) ouvre la liste
+    onVerticalSwipe(document.getElementById("list-handle"), { up: openPoiList }, "#voice-btn");
 
     // ---- Effacer tous les lieux (avec confirmation) ----
     const eraseBtn = document.getElementById("erase-btn");
@@ -2726,7 +2704,7 @@
     });
 
     // -- Enregistrer --
-    const saveBtn = document.getElementById("save-btn");
+    const saveBtn = document.getElementById("menu-save"); // « Enregistrer l'itinéraire » dans le menu ☰
     const saveSheet = document.getElementById("save-sheet");
     const tripChoices = document.getElementById("trip-choices");
     const newTripForm = document.getElementById("new-trip-form");
@@ -2822,9 +2800,12 @@
       }
     });
 
-    saveBtn.addEventListener("click", openSaveSheet);
+    saveBtn.addEventListener("click", () => {
+      closeSheet(menuSheet);
+      openSaveSheet();
+    });
 
-    // Disquette utilisable dès qu'il y a au moins un lieu
+    // Enregistrement possible dès qu'il y a au moins un lieu
     function updateSaveButton() {
       saveBtn.disabled = !pois.length && !unplacedPois.length;
     }
