@@ -28,6 +28,7 @@ Node.js 24 (base SQLite intégrée). Le micro demande une page servie en `localh
 - `agent/metrics.mjs` : délais et coût estimé de chaque session.
 - `dev/` : tests sans micro, avec `QFO_DEV=1 npm start` (le mode test accepte l'invitation « DEV » ; le script utilise le compte « testeur », PIN 0000) :
   `node dev/tasks-test.mjs '[[0,"phrase 1"],[5,"phrase 2"]]' 200 reset` envoie des prises de parole tapées à des instants donnés et affiche l'évolution des tâches et de la carte.
+  `node --env-file=.env dev/practical-test.mjs "Grèce,Israël"` affiche la météo d'un point et les guides de conversation de ces pays (écran « Infos pratiques »).
 
 ## Clés et variables d'environnement
 
