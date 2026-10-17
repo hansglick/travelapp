@@ -96,6 +96,17 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
     }
   }
 
+  // Auto-localisation : le point de retour « B » à la position actuelle de l'utilisateur (sans modèle)
+  async function placeBackPoint() {
+    const position = store.context.position;
+    if (!position || !store.context.positionSource) {
+      return "Ta position n'est pas encore connue : choisis d'abord ton point de départ (touche la carte ou « Ma position »).";
+    }
+    const address = await resolvePoi.reverseAddress?.(position).catch(() => null);
+    const { moved } = store.placeBack({ position, address });
+    return `${moved ? "Point de retour déplacé" : "Point de retour placé"} à ta position actuelle${address ? ` (près de ${address})` : ""} : c'est la dernière étape de l'itinéraire.`;
+  }
+
   // Lieux autour d'un repère : un lieu de la liste, la position de l'utilisateur, ou un endroit nommé
   async function findPlacesNear(args, task) {
     const what = typeof args.what === "string" ? args.what.trim().slice(0, 120) : "";
@@ -222,5 +233,5 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
   // Lieu à relocaliser (coordonnées de plus de 30 jours après rechargement d'un compte)
   const relocate = (id) => resolveAndStore(id, null);
 
-  return { run, enforceDistance, relocate };
+  return { run, enforceDistance, relocate, placeBackPoint };
 }

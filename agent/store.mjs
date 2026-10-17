@@ -20,6 +20,8 @@ export function pinSlot(pin, n) {
 
 const describePin = (pin) => (pin.position === "first" ? "première étape" : pin.position === "last" ? "dernière étape" : `étape n° ${pin.index}`);
 
+export const BACK_NAME = "Point de retour";
+
 export const LIMITS = {
   addPerOperation: 10,
   selectionSize: 25,
@@ -103,9 +105,13 @@ export class PoiStore extends EventEmitter {
       renumberPending: this.renumberPending,
       preferences: this.preferences,
       pois: [...this.pois.values()].map((p) => ({
-        id: p.id, name: p.name, query: p.query, category: p.category, reason: p.reason, sources: p.sources,
+        id: p.id, name: p.name, query: p.query, category: p.category, sources: p.sources,
+        reason: p.special ? null : p.reason, // adresse du point de retour : donnée Google, non gardée
         area: p.area, status: p.status, included: p.included, visitedAt: p.visitedAt, pin: p.pin,
         createdAt: p.createdAt, taskId: p.taskId, colorIndex: p.colorIndex, absIndex: p.absIndex || null,
+        special: p.special || null,
+        // Point de retour : coordonnées prises sur le téléphone de l'utilisateur (pas chez Google)
+        ...(p.special ? { ownLocation: p.place?.location || null } : {}),
         place: p.place?.placeId ? {
           placeId: p.place.placeId,
           location: p.place.location,
@@ -125,6 +131,15 @@ export class PoiStore extends EventEmitter {
     if (data.preferences) this.preferences = { ...this.preferences, ...data.preferences };
     const stale = [];
     for (const p of data.pois || []) {
+      if (p.special === "back" && p.ownLocation) {
+        const { ownLocation, ...rest } = p;
+        this.pois.set(p.id, {
+          ...rest, candidates: null, mapNumber: null, status: "resolved",
+          reason: "Ta position au moment de la demande.",
+          place: { placeId: null, name: BACK_NAME, location: ownLocation, address: null, types: [], locationSavedAt: Date.now() },
+        });
+        continue;
+      }
       const old = p.place && Date.now() - (p.place.locationSavedAt || 0) > 30 * 86400000;
       const poi = {
         ...p,
@@ -159,6 +174,7 @@ export class PoiStore extends EventEmitter {
       candidates: poi.candidates,
       task_id: poi.taskId || null,
       color_index: Number.isInteger(poi.colorIndex) ? poi.colorIndex : null,
+      special: poi.special || null,
     };
   }
 
@@ -190,6 +206,7 @@ export class PoiStore extends EventEmitter {
         ...(p.candidates?.length ? { google_candidates: p.candidates.map((c) => `${c.name} (${c.address || "adresse inconnue"})`) } : {}),
         ...(p.included ? {} : { excluded_by_user: true }),
         ...(p.visitedAt ? { visited: true } : {}),
+        ...(p.special === "back" ? { special: "point de retour de l'utilisateur (B), dernière étape" } : {}),
       })),
       preferences: this.preferences,
       context: this.contextForModel(),
@@ -589,6 +606,35 @@ export class PoiStore extends EventEmitter {
     this.version++;
     this.emit("change", { added: [], removed: [], resolved: poi });
     return poi;
+  }
+
+  // Point de retour « B » : un seul, à la position de l'utilisateur, dernière étape cadenassée ;
+  // redemandé, il est déplacé
+  placeBack({ position, address }) {
+    let poi = [...this.pois.values()].find((p) => p.special === "back");
+    const moved = Boolean(poi);
+    const place = {
+      placeId: null, name: BACK_NAME, location: { lat: position.lat, lng: position.lng },
+      address: address || null, types: [], locationSavedAt: Date.now(),
+    };
+    const reason = address ? `Près de ${address}` : "Ta position au moment de la demande.";
+    if (poi) {
+      Object.assign(poi, { place, reason, included: true, visitedAt: null, pin: { position: "last" } });
+    } else {
+      poi = {
+        id: `poi_${this.nextId++}`, name: BACK_NAME, query: null, category: "other", reason, sources: [],
+        area: null, status: "resolved", included: true, visitedAt: null, pin: { position: "last" }, place,
+        candidates: null, createdAt: Date.now(), taskId: null, colorIndex: null, absIndex: null, special: "back",
+      };
+      this.pois.set(poi.id, poi);
+      this.#assignLast(poi);
+    }
+    // Une seule dernière étape : un autre lieu figé « en dernier » perd son cadenas
+    for (const other of this.pois.values()) if (other !== poi && other.pin?.position === "last") other.pin = null;
+    this.#needRenumber();
+    this.version++;
+    this.emit("change", { added: moved ? [] : [poi], removed: [] });
+    return { poi, moved };
   }
 
   // Lieu résolu sur le même établissement qu'un lieu déjà présent : on retire le doublon

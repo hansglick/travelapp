@@ -26,6 +26,10 @@ const COUNT_DIMENSION = "nombre de suggestions"; // toujours demandé, en dernie
 const DEFAULT_COUNT = 3;
 const QUESTION_GRACE_MS = 2000;    // une prise de parole finie avant ce délai ne répond pas à la question
 const ACTIVE = ["clarifying", "pending", "running"];
+// Types de tâches : recherche, localisation d'un lieu précis, auto-localisation (point de retour),
+// question sur les lieux (data), organisation de la liste
+const KINDS = ["search", "locate", "self", "info", "quick"];
+const LOCATE_GROUP = "Lieux placés"; // toutes les localisations partagent ce groupe (une couleur)
 
 // Noms des couleurs des groupes (même ordre que la palette de la page)
 const COLOR_NAMES = ["orange", "bleu", "vert", "magenta", "bleu-vert", "violet", "ambre", "rose"];
@@ -45,6 +49,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   let heldUtterance = null; // phrase inachevée en attente de la suite : { text, at }
   let lastConversation = []; // fin de la conversation, donnée en contexte aux nouvelles tâches
   let nextColor = 0;         // couleur de la prochaine tâche qui ajoute des lieux (0 = orange)
+  let locateColor = null;    // couleur du groupe « Lieux placés »
 
   const list = () => [...tasks.values()];
   const changed = () => onChange(snapshot());
@@ -146,6 +151,13 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     console.log(`[tâches] détection ${Date.now() - started} ms (contexte ${input.length} caractères, ${list().filter((t) => t.status === "running").length} tâche(s) en cours)`);
     metrics.backendUsage(data.usage);
     const out = JSON.parse(outputText(data) || "{}");
+    // Filet de sécurité : une question sur un lieu de la liste, oubliée par le détecteur, devient
+    // quand même une tâche data
+    const nothing = !out.new_tasks?.length && !out.refine?.length && !out.extend?.length && !out.clarify?.length && !out.cancel?.length;
+    if (nothing && !out.wait_for_more && isQuestionAboutPlaces(text)) {
+      console.log(`[tâches] question rattrapée : « ${text.slice(0, 80)} »`);
+      out.new_tasks = [{ title: text.replace(/\s*\?+\s*$/, "").slice(0, 60), request: `Répondre à la question de l'utilisateur sur ses lieux : « ${text} »`, kind: "info", count: null, criteria: [], dimensions: [] }];
+    }
     if (out.wait_for_more && !out.new_tasks?.length && !out.refine?.length) {
       heldUtterance = { text, at: Date.now() };
       return;
@@ -176,6 +188,16 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       }
     }
     askNext();
+  }
+
+  // Question (« ? » ou mot interrogatif) qui cite un lieu de la liste : nom, n° d'étape, point de retour
+  function isQuestionAboutPlaces(text) {
+    const lower = ` ${normalize(text)} `;
+    const question = /\?/.test(text) || /\b(combien|quel|quelle|quels|quelles|quand|ou est|est ce|a quelle heure|ferme|ouvre|ouvert|note|telephone|prix)\b/.test(lower);
+    if (!question) return false;
+    if (/\b(n|numero|point|etape)\s*\d+\b/.test(lower) || lower.includes(" point de retour ")) return true;
+    return [...store.pois.values()].some((poi) =>
+      [poi.place?.name, poi.name].map(normalize).some((n) => n.length >= 4 && lower.includes(` ${n} `)));
   }
 
   // ---- Questions d'affinage (tâches « à préciser ») ----
@@ -273,7 +295,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
 
   function toJSON() {
     return {
-      nextId, nextColor,
+      nextId, nextColor, locateColor,
       tasks: list().map((t) => ({
         id: t.id, title: t.title, request: t.request, kind: t.kind, utterance: t.utterance, status: t.status,
         createdAt: t.createdAt, startedAt: t.startedAt, endedAt: t.endedAt, actions: t.actions.slice(-30),
@@ -290,6 +312,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     if (!data) return;
     nextId = Number.isInteger(data.nextId) ? data.nextId : 1;
     nextColor = Number.isInteger(data.nextColor) ? data.nextColor : 0;
+    locateColor = Number.isInteger(data.locateColor) ? data.locateColor : null;
     for (const saved of data.tasks || []) {
       const t = hydrate({ ...saved, candidates: [], conversation: [] });
       if (ACTIVE.includes(t.status)) {
@@ -338,7 +361,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   function add({ title, groupName = null, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, countGiven = false, criteria = [], extends: extending = false, dimensions = [] }) {
     const t = {
       id: `t${nextId++}`, title: (title || "Tâche").slice(0, 60), request: (request || "").slice(0, 600),
-      kind: ["search", "quick", "info"].includes(kind) ? kind : "search", utterance: (utterance || "").slice(0, 400),
+      kind: KINDS.includes(kind) ? kind : "search", utterance: (utterance || "").slice(0, 400),
       status: "pending", createdAt: Date.now(), startedAt: null, endedAt: null,
       actions: [], result: null, replaces, replacedBy: null,
       addedIds: [], candidates: [], previousAddedIds,
@@ -357,7 +380,13 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     t.dimensions = t.kind === "search" && !replaces ? initialDimensions(dimensions, count, countGiven) : [];
     if (t.dimensions.some((d) => d.status === "to_ask")) t.status = "clarifying";
     t.colorIndex = replaces ? tasks.get(replaces)?.colorIndex ?? null : null;
-    if (t.colorIndex === null && t.requestedCount) t.colorIndex = nextColor++;
+    if (t.kind === "locate") {
+      // Les lieux localisés forment un seul groupe, d'une seule couleur
+      if (locateColor === null) locateColor = nextColor++;
+      t.colorIndex = locateColor;
+      t.groupName = LOCATE_GROUP;
+    }
+    if (t.colorIndex === null && t.requestedCount && t.kind === "search") t.colorIndex = nextColor++;
     hydrate(t);
     tasks.set(t.id, t);
     while (tasks.size > KEEP_TASKS) {
@@ -512,6 +541,12 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   }
 
   async function execute(t) {
+    // Auto-localisation : traitée directement par l'application, sans modèle
+    if (t.kind === "self") {
+      const result = await tools.placeBackPoint();
+      log(t, result);
+      return result;
+    }
     // Tâche précisée : les lieux de la version précédente devenus trop loin sont retirés d'emblée
     // (pas quand on complète un groupe : ses lieux existants restent tels quels)
     if (!t.extends) for (const id of t.previousAddedIds) tools.enforceDistance(t, id);
@@ -648,6 +683,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     heldUtterance = null;
     lastConversation = [];
     nextColor = 0;
+    locateColor = null;
     changed();
     return stopped.length;
   }

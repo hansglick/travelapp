@@ -329,6 +329,7 @@ export function createResolver({ apiKey, metrics }) {
   resolve.locate = locate;
   resolve.getDetails = getDetails;
   resolve.walkMatrix = walkMatrix;
+  resolve.reverseAddress = (position) => reverseAddress(apiKey, position);
   return resolve;
 }
 
@@ -340,6 +341,21 @@ function direction(from, to) {
   const x = Math.cos(rad(from.lat)) * Math.sin(rad(to.lat)) - Math.sin(rad(from.lat)) * Math.cos(rad(to.lat)) * Math.cos(rad(to.lng - from.lng));
   const bearing = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
   return DIRECTIONS[Math.round(bearing / 45) % 8];
+}
+
+// Adresse approximative d'une position (« 12 Kedem St, Tel Aviv »), pour le point de retour
+async function reverseAddress(apiKey, position) {
+  const params = new URLSearchParams({
+    latlng: `${position.lat},${position.lng}`, language: "fr", result_type: "street_address|premise|route", key: apiKey,
+  });
+  try {
+    const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const data = await response.json();
+    const address = data.results?.[0]?.formatted_address || null;
+    return address ? address.split(",").slice(0, 2).join(",").trim() : null; // rue et ville, sans le pays
+  } catch {
+    return null;
+  }
 }
 
 // Ville / quartier de l'utilisateur à partir de sa position (Geocoding inverse), pour le contexte

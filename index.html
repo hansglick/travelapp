@@ -1054,6 +1054,21 @@
       };
     }
 
+    // Point de retour « B » : pastille blanche, « B » noir en gras (toujours visible, hors légende)
+    const BACK_COLOR = "#ffffff";
+
+    function backIcon() {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="38" height="38" viewBox="0 0 38 38">
+        <circle cx="19" cy="19" r="16.5" fill="#fff" stroke="#111" stroke-width="2.5"/>
+        <text x="19" y="25.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="19" font-weight="700" fill="#000">B</text></svg>`;
+      return {
+        url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
+        scaledSize: new google.maps.Size(38, 38),
+        anchor: new google.maps.Point(19, 19),
+        labelOrigin: new google.maps.Point(19, 50),
+      };
+    }
+
     // Photos des POI : récupérées en direct chez Google Places (10 au maximum par lieu, limite Google).
     // On garde toutes les photos verticales, et au moins MIN_PHOTOS : s'il manque des verticales,
     // on complète avec les plus proches du format vertical (recadrées à l'affichage). Google interdit
@@ -1359,7 +1374,7 @@
 
     function checkArrivals() {
       const here = userMarker.getPosition();
-      const arrived = includedPois().filter((p) =>
+      const arrived = includedPois().filter((p) => p.special !== "back" && // le point de retour n'est jamais « visité »
         google.maps.geometry.spherical.computeDistanceBetween(here, new google.maps.LatLng(p.position)) <= ARRIVAL_RADIUS_M);
       for (const p of arrived) {
         p.visitedAt = new Date();
@@ -1509,7 +1524,8 @@
         category: p.category,
         description: p.reason,
         placeId: p.place?.placeId,
-        color: taskColor(p.color_index), // bordure de la bulle
+        special: p.special || null,
+        color: p.special === "back" ? BACK_COLOR : taskColor(p.color_index), // bordure de la bulle
       };
     }
 
@@ -1542,10 +1558,12 @@
         if (!poi) {
           const position = p.place.location;
           const props = poiProps(p);
-          const color = taskColor(p.color_index);
-          const marker = new MarkerClass({ map, position, title: props.name, icon: poiIcon(props.category, null, false, false, color) });
+          const color = props.color;
+          const icon = p.special === "back" ? backIcon() : poiIcon(props.category, null, false, false, color);
+          const marker = new MarkerClass({ map, position, title: props.name, icon, ...(p.special === "back" ? { zIndex: 900 } : {}) });
           poi = {
             id: p.id, props, position, marker, included: true, pin: p.pin, visitedAt: null, color, colorIndex: p.color_index,
+            special: p.special || null,
             get locked() { return Boolean(this.pin); }, // cadenas : étape figée (pin du serveur)
           };
           marker.addListener("click", () => openMapBubble(poi));
@@ -1553,6 +1571,13 @@
           // Nouvelle étape : à la suite des étapes restantes
           routeOrder = [...includedPois(), poi, ...routeOrder.filter((x) => !isToVisit(x))];
           added.push(poi);
+          changed = true;
+        }
+        // Point de retour redemandé ailleurs : il se déplace
+        if (poi.special === "back" && (poi.position.lat !== p.place.location.lat || poi.position.lng !== p.place.location.lng)) {
+          poi.position = p.place.location;
+          poi.marker.setPosition(poi.position);
+          poi.props = poiProps(p);
           changed = true;
         }
         // Décoché / recoché depuis l'écran, ou visité : le serveur fait foi
@@ -1638,7 +1663,7 @@
     const LABEL_MAX = 15;
 
     function updateMarkerVisibility(poi) {
-      const show = poi.included && !hiddenGroups.has(groupKeyOf(poi));
+      const show = poi.included && (poi.special === "back" || !hiddenGroups.has(groupKeyOf(poi)));
       if (Boolean(poi.marker.getMap()) !== show) poi.marker.setMap(show ? map : null);
       // Nom du lieu sous son icône, de la couleur de son groupe (15 caractères au plus)
       const name = poi.props.name || "";
@@ -1646,7 +1671,8 @@
       const key = `${text}|${poi.color}`;
       if (poi.labelKey === key) return;
       poi.labelKey = key;
-      poi.marker.setLabel(text ? { text, color: poi.color, fontSize: "16px", fontWeight: "800", className: "poi-map-label" } : null);
+      const labelColor = poi.special === "back" ? "#111" : poi.color; // blanc sur contour blanc : illisible
+      poi.marker.setLabel(text ? { text, color: labelColor, fontSize: "16px", fontWeight: "800", className: "poi-map-label" } : null);
     }
 
     function setGroupsHidden(update) {
@@ -1657,7 +1683,7 @@
 
     function renderLegend() {
       if (!legendEl) return;
-      const placed = pois.filter((p) => p.included);
+      const placed = pois.filter((p) => p.included && p.special !== "back"); // le point de retour n'a pas de groupe
       const keys = groupsOf(placed);
       legendEl.hidden = !keys.length;
       for (const key of [...hiddenGroups]) if (!keys.includes(key)) hiddenGroups.delete(key); // groupe disparu
@@ -1730,8 +1756,8 @@
     function renderSteps() {
       // Étapes figées toujours à leur place, quel que soit le changement (ajout, arrivée, lieu remis…)
       routeOrder = [...arrangeByPins(includedPois()), ...routeOrder.filter((p) => !isToVisit(p))];
-      includedPois().forEach((poi, i) => poi.marker.setIcon(poiIcon(poi.props.category, i + 1, poi.locked, false, poi.color)));
-      visitedPois().forEach((poi) => poi.marker.setIcon(poiIcon(poi.props.category, null, false, true, poi.color)));
+      includedPois().forEach((poi, i) => poi.marker.setIcon(poi.special === "back" ? backIcon() : poiIcon(poi.props.category, i + 1, poi.locked, false, poi.color)));
+      visitedPois().forEach((poi) => poi.marker.setIcon(poi.special === "back" ? backIcon() : poiIcon(poi.props.category, null, false, true, poi.color)));
       pois.forEach(updateMarkerVisibility);
       renderLegend();
       renderPoiList();
@@ -2734,9 +2760,10 @@
 
       const main = el("div", "poi-row-main");
       const name = el("p", "poi-row-name");
-      const badge = kind === "todo" ? String(step) : kind === "visited" ? "✓" : "–";
+      const badge = poi.special === "back" ? "B" : kind === "todo" ? String(step) : kind === "visited" ? "✓" : "–";
       const bullet = el("span", "poi-row-step", badge);
       if (kind === "todo") bullet.style.background = poi.color; // couleur de la tâche qui l'a proposé
+      if (poi.special === "back") Object.assign(bullet.style, { background: "#fff", color: "#000", borderColor: "#111" });
       name.append(bullet, el("span", null, props.name));
       main.append(name);
       // Numéro absolu dans l'itinéraire (le gros numéro est la place parmi les étapes restantes)
@@ -3181,8 +3208,9 @@
             const kind = step ? "todo" : poi.visitedAt ? "visited" : "excluded";
             const chip = el("button", `question-place ${kind}`);
             chip.type = "button";
-            const bullet = el("span", "poi-row-step", step ? String(step) : kind === "visited" ? "✓" : "–");
+            const bullet = el("span", "poi-row-step", poi.special === "back" ? "B" : step ? String(step) : kind === "visited" ? "✓" : "–");
             if (step) bullet.style.background = poi.color;
+            if (poi.special === "back") Object.assign(bullet.style, { background: "#fff", color: "#000", borderColor: "#111" });
             chip.append(bullet, el("span", "question-place-name", poi.props.name));
             chip.addEventListener("click", () => openListBubble(poi.props));
             places.append(chip);
@@ -3210,7 +3238,7 @@
     const tasksPanelEl = document.getElementById("tasks-panel");
     const tasksBodyEl = document.getElementById("tasks-body");
     const TASK_STATUS = { clarifying: "à préciser", pending: "en attente", running: "en cours", done: "terminée", failed: "échouée", cancelled: "annulée" };
-    const TASK_KIND = { search: "recherche", quick: "action rapide", info: "information" };
+    const TASK_KIND = { search: "recherche", locate: "localisation", self: "auto-localisation", info: "data", quick: "organisation" };
     let agentTasks = [];
     let tasksTick = null;
 
