@@ -4184,6 +4184,13 @@
         language: "fr",
       });
       globe.on("style.load", () => globe.setFog({})); // atmosphère et étoiles par défaut
+      // Boussole (en haut à droite) : l'aiguille montre le nord ; un toucher remet le nord en haut
+      // et la vue à plat, et arrête la rotation de la caméra
+      globe.addControl(new mapboxgl.NavigationControl({ showZoom: false, showCompass: true, visualizePitch: true }), "top-right");
+      globe.getContainer().querySelector(".mapboxgl-ctrl-compass")?.addEventListener("click", () => {
+        spinning = false;
+        stopOrbit();
+      });
       // Le globe tourne tant que personne n'y touche ; parcourir le globe à la main choisit le centre
       const stopSpin = () => {
         spinning = false;
