@@ -14,6 +14,13 @@ const practical = createPractical({ apiKey, storage: { get: (k) => mem.get(k), s
 const w = await practical.weather({ lat: 35.2386, lng: 25.1597 }).catch((err) => (console.log("météo :", err.message), null));
 if (w) console.log(w.timezone, w.points.map((p) => `${p.label} ${p.time.slice(11)} ${p.temperature}° ${p.sky}, pluie ${p.rain_probability}% ${p.rain_mm} mm, vent ${p.wind_kmh} km/h ${p.wind_from}`).join(" | "));
 // Lieux « région/pays » séparés par des virgules
+// Fun facts : FACTS="Jaffa/Tel-Aviv/Israël" node --env-file=.env dev/practical-test.mjs
+if (process.env.FACTS) {
+  const [neighborhood, city, country] = process.env.FACTS.split("/");
+  const f = await practical.funFacts({ neighborhood: neighborhood || null, city, country });
+  console.log(`Fun facts · ${f.place}\n` + f.facts.map((x) => `- ${x.title} : ${x.text}`).join("\n"));
+  process.exit(0);
+}
 // Lieux « ville/région/pays » séparés par des virgules (ville ou région peuvent être vides)
 const places = (process.argv[2] || "Archanes//Grèce,Vancouver/Colombie-Britannique/Canada,Montréal/Québec/Canada,Tel-Aviv//Israël").split(",");
 await Promise.all(places.map(async (c) => {

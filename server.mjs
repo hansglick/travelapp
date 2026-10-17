@@ -221,15 +221,24 @@ const routes = {
       console.warn("[infos pratiques] météo :", err.message);
       return null;
     });
-    ws.store.setPractical({ weather, place: place ? { city: place.city || place.neighborhood, region: place.region, country: place.country, countryCode: place.countryCode } : null, ...(phrasebook ? { phrasebook: { pending: true } } : {}) });
+    ws.store.setPractical({
+      weather,
+      place: place ? { city: place.city || place.neighborhood, neighborhood: place.neighborhood, region: place.region, country: place.country, countryCode: place.countryCode } : null,
+      ...(phrasebook ? { phrasebook: { pending: true }, facts: { pending: true } } : {}),
+    });
     if (!phrasebook) return;
-    const book = OPENAI_API_KEY && place?.country
-      ? await practical.phrasebook({ city: place.city || place.neighborhood, region: place.region, country: place.country }).catch((err) => {
-        console.warn("[infos pratiques] guide :", err.message);
-        return null;
-      })
-      : null;
-    ws.store.setPractical({ phrasebook: book });
+    // Guide de conversation et fun facts : en parallèle, en arrière-plan (indépendants des tâches
+    // du guide vocal) ; chacun s'affiche dès qu'il est prêt
+    const ready = (name) => (value) => ws.store.setPractical({ [name]: value });
+    const failed = (name, label) => (err) => {
+      console.warn(`[infos pratiques] ${label} :`, err.message);
+      ws.store.setPractical({ [name]: null });
+    };
+    if (!OPENAI_API_KEY || !place?.country) return ws.store.setPractical({ phrasebook: null, facts: null });
+    practical.phrasebook({ city: place.city || place.neighborhood, region: place.region, country: place.country })
+      .then(ready("phrasebook"), failed("phrasebook", "guide"));
+    practical.funFacts({ neighborhood: place.neighborhood, city: place.city, country: place.country })
+      .then(ready("facts"), failed("facts", "fun facts"));
   },
 
   // Action de l'utilisateur sur un lieu dans l'interface : décoché / recoché / visité

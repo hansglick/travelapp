@@ -497,7 +497,12 @@
     .wx-panel { background: linear-gradient(180deg, #13233a 0%, #0b1220 100%); margin-bottom: 16px; border: 1px solid #555; }
     /* Fenêtres météo et guide centrées dans l'écran (les autres partent du bas), sans bouton
        « Fermer » : toucher à côté les ferme */
-    #weather-sheet, #phrase-sheet { align-items: center; }
+    #weather-sheet, #phrase-sheet, #facts-sheet { align-items: center; }
+    /* Fun facts : titre gris, chaque fait en deux lignes (titre en gras, texte), traits discrets */
+    .fact { padding: 12px 2px; }
+    .fact + .fact { border-top: 1px solid #2a2a2a; }
+    .fact-title { margin: 0 0 4px; color: #fff; font-weight: 700; }
+    .fact-text { margin: 0; color: #d6d6d6; font-size: 0.9rem; line-height: 1.45; }
     .wx-place { margin: 2px 0 14px; font-size: 1.25rem; text-align: center; color: #fff; }
     .wx-place strong { font-weight: 800; }
     .wx-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -888,12 +893,20 @@
     </div>
   </div>
 
+  <!-- Fun facts : 5 faits ou anecdotes sur le quartier ou la ville du point de départ -->
+  <div id="facts-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Fun facts">
+    <div class="sheet-panel phrase-panel">
+      <div id="facts-body"></div>
+    </div>
+  </div>
+
   <div id="menu-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Menu">
     <div class="sheet-panel">
       <button type="button" id="menu-save" class="sheet-item" disabled>Enregistrer l'itinéraire</button>
       <button type="button" id="menu-open" class="sheet-item">Ouvrir un itinéraire</button>
       <button type="button" id="menu-weather" class="sheet-item">Météo</button>
       <button type="button" id="menu-phrases" class="sheet-item">Guide de conversation</button>
+      <button type="button" id="menu-facts" class="sheet-item">Fun facts</button>
       <button type="button" id="menu-logout" class="sheet-item">Se déconnecter</button>
       <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
     </div>
@@ -3442,12 +3455,15 @@
     function renderPracticalSheets() {
       if (!weatherSheet.hidden) renderWeather();
       if (!phraseSheet.hidden) renderPhrases();
+      if (!factsSheet.hidden) renderFacts();
     }
 
     const weatherSheet = document.getElementById("weather-sheet");
     const weatherBody = document.getElementById("weather-body");
     const phraseSheet = document.getElementById("phrase-sheet");
     const phraseBody = document.getElementById("phrase-body");
+    const factsSheet = document.getElementById("facts-sheet");
+    const factsBody = document.getElementById("facts-body");
 
     // Drapeau d'un pays (code ISO « GR ») : image, les drapeaux emoji ne s'affichent pas sous Windows
     function flagImg(code, label) {
@@ -3563,6 +3579,28 @@
       }
       phraseBody.replaceChildren(...items);
     }
+
+    // -- Fun facts --
+    function renderFacts() {
+      const facts = practical?.facts;
+      const items = [el("p", "phrase-title", facts?.place ? `Fun facts · ${facts.place}` : "Fun facts")];
+      if (facts?.pending) items.push(el("p", "wx-empty", "Fun facts en cours de recherche…"));
+      else if (!facts?.facts?.length) items.push(el("p", "wx-empty", "Les fun facts se préparent au « Let's Go! »."));
+      else {
+        for (const f of facts.facts) {
+          const item = el("div", "fact");
+          item.append(el("p", "fact-title", f.title), el("p", "fact-text", f.text));
+          items.push(item);
+        }
+      }
+      factsBody.replaceChildren(...items);
+    }
+
+    document.getElementById("menu-facts").addEventListener("click", () => {
+      closeSheet(menuSheet);
+      renderFacts();
+      openSheet(factsSheet);
+    });
 
     document.getElementById("menu-weather").addEventListener("click", () => {
       closeSheet(menuSheet);

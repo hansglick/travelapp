@@ -55,6 +55,31 @@ const SCHEMA = {
   },
 };
 
+// Fun facts : 5 faits ou anecdotes vérifiés sur le web, sur le quartier si on en trouve assez,
+// sinon sur la ville
+const FACTS_INSTRUCTIONS = `Tu prépares 5 « fun facts » pour un voyageur francophone qui arrive dans un lieu : des faits ou anecdotes surprenants, amusants ou marquants (histoire, personnages, records, traditions, curiosités, cinéma, gastronomie…).
+- Si un quartier est indiqué et que tu trouves au moins 5 faits intéressants et vérifiables sur ce quartier, parle du quartier ; sinon, parle de la ville. scope_name = le nom du lieu retenu.
+- Vérifie chaque fait par une recherche web ; n'invente rien. Préfère des faits précis (dates, chiffres, noms) aux généralités.
+- title : 3 à 7 mots, accrocheur. text : 1 ou 2 phrases courtes, en français, sans lien, sans source et sans markdown dans le texte.`;
+
+const FACTS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["scope_name", "facts"],
+  properties: {
+    scope_name: { type: "string" },
+    facts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "text"],
+        properties: { title: { type: "string" }, text: { type: "string" } },
+      },
+    },
+  },
+};
+
 export function createPractical({ apiKey, metrics, storage }) {
   // Météo à trois moments : maintenant, dans 4 h, dans 24 h
   async function weather(position) {
@@ -98,7 +123,7 @@ export function createPractical({ apiKey, metrics, storage }) {
   }
 
   // Appel structuré au petit modèle ; renvoie l'objet JSON produit
-  async function ask({ instructions, input, name, schema, effort, timeout }) {
+  async function ask({ instructions, input, name, schema, effort, timeout, tools = null }) {
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -107,6 +132,7 @@ export function createPractical({ apiKey, metrics, storage }) {
         reasoning: { effort },
         instructions,
         input,
+        ...(tools ? { tools } : {}),
         text: { format: { type: "json_schema", name, strict: true, schema } },
         store: false,
       }),
@@ -174,5 +200,30 @@ export function createPractical({ apiKey, metrics, storage }) {
     });
   }
 
-  return { weather, phrasebook };
+  // Fun facts du lieu (recherche web) : mémorisés par lieu (quartier ou ville), communs à tous
+  async function funFacts({ neighborhood, city, country }) {
+    if (!city && !neighborhood) return null;
+    const key = `facts:${[neighborhood, city, country].filter(Boolean).join(", ")}`;
+    const saved = storage.get(key);
+    if (saved) return saved;
+    return once(key, async () => {
+      const started = Date.now();
+      const out = await ask({
+        instructions: FACTS_INSTRUCTIONS,
+        input: `Quartier : ${neighborhood || "aucun"}. Ville : ${city || "inconnue"}. Pays : ${country || "inconnu"}.`,
+        name: "fun_facts", schema: FACTS_SCHEMA, effort: "low", timeout: 120000,
+        tools: [{ type: "web_search" }],
+      });
+      // Liens et citations retirés (y compris les parenthèses vides qu'ils laissent)
+      const clean = (t, max) => String(t || "").replace(/\[[^\]]*\]\([^)]*\)/g, "").replace(/\(\s*\)/g, "").replace(/\s+([.,;:!?])/g, "$1").replace(/\s+/g, " ").trim().slice(0, max);
+      const facts = (out.facts || []).slice(0, 5).map((f) => ({ title: clean(f.title, 80), text: clean(f.text, 400) })).filter((f) => f.title && f.text);
+      const result = { place: clean(out.scope_name, 80) || city || neighborhood, facts, generatedAt: Date.now() };
+      if (facts.length) storage.set(key, result);
+      metrics?.time("fun_facts_ms", Date.now() - started);
+      console.log(`[infos pratiques] fun facts « ${result.place} » : ${facts.length} en ${Date.now() - started} ms`);
+      return result;
+    });
+  }
+
+  return { weather, phrasebook, funFacts };
 }
