@@ -132,16 +132,26 @@
       border-radius: 999px; background: rgba(0, 0, 0, 0.7); color: #fff; font-size: 0.75rem;
     }
     .poi-photo-msg { margin: 0 16px 14px; font-size: 0.8rem; color: #888; }
-    /* Note moyenne et bouton d'appel, sous le nom du lieu */
-    .poi-meta { flex: none; display: flex; align-items: center; justify-content: center; gap: 14px; margin: 8px 16px 0; }
-    .poi-rating { color: #f5b301; font-size: 0.9rem; font-weight: 600; }
-    .poi-phone {
-      display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
-      border-radius: 50%; background: #e4572e; color: #fff;
+    /* Bulle d'un lieu de la liste : bordure de la couleur de son groupe, hauteur selon le contenu ;
+       nom centré en orange suivi de la note en blanc, description, puis téléphone, budget et photos */
+    .poi-card.place { border: 3px solid #e4572e; border-radius: 14px; }
+    .poi-card.place .poi-head { display: grid; grid-template-columns: 24px 1fr 24px; align-items: start; gap: 6px; padding: 12px 10px 0; }
+    .poi-card.place .poi-close { grid-column: 3; width: 24px; height: 24px; margin: 0; font-size: 16px; line-height: 24px; }
+    .poi-title { grid-column: 2; margin: 0; font-size: 1rem; font-weight: normal; line-height: 1.3; text-align: center; }
+    .poi-title .poi-name { color: #e4572e; }
+    .poi-rating { margin-left: 6px; color: #fff; font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+    .poi-card.place .poi-desc { margin: 8px 14px 0; max-height: 40vh; }
+    .poi-tools { display: flex; align-items: center; justify-content: center; gap: 22px; min-height: 22px; margin: 10px 14px 12px; }
+    .poi-tools a, .poi-tools button {
+      display: flex; align-items: center; justify-content: center; padding: 0; border: 0;
+      background: none; color: #fff; cursor: pointer;
     }
-    /* Sources web du lieu (recherche du guide), cliquables */
-    .poi-sources { flex: none; margin: -6px 16px 12px; font-size: 0.7rem; color: #999; text-align: center; }
-    .poi-sources a { color: #8ab4f8; margin: 0 4px; }
+    .poi-price { color: #fff; font-size: 0.95rem; font-weight: 700; letter-spacing: 1px; }
+
+    /* Nom des lieux sur la carte (case « Labels » de la légende) : couleur du groupe, contour blanc */
+    .poi-map-label {
+      text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 3px #fff;
+    }
 
     /* Carrousel plein écran */
     #carousel {
@@ -894,6 +904,7 @@
         url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
         scaledSize: new google.maps.Size(62, 54),
         anchor: new google.maps.Point(22, 32),
+        labelOrigin: new google.maps.Point(22, 64), // nom du lieu (« Labels »), sous l'icône
       };
     }
 
@@ -942,19 +953,26 @@
     // le temps de la visite
     function getPlaceInfo(placeId) {
       if (!photoCache.has(placeId)) {
-        const fields = "photos,rating,internationalPhoneNumber,nationalPhoneNumber";
+        const fields = "photos,rating,priceLevel,internationalPhoneNumber,nationalPhoneNumber";
         const request = fetch(`https://places.googleapis.com/v1/places/${placeId}?fields=${fields}&key=${GOOGLE_MAPS_API_KEY}`)
           .then((r) => (r.ok ? r.json() : {}))
           .then((p) => ({
             photos: pickPhotos(p.photos),
             rating: p.rating ?? null,
             phone: p.internationalPhoneNumber || p.nationalPhoneNumber || null,
+            price: PRICE_SYMBOLS[p.priceLevel] || null,
           }))
-          .catch(() => ({ photos: [], rating: null, phone: null }));
+          .catch(() => ({ photos: [], rating: null, phone: null, price: null }));
         photoCache.set(placeId, request);
       }
       return photoCache.get(placeId);
     }
+
+    // Niveau de prix Google : un « $ » par niveau, partout dans le monde
+    const PRICE_SYMBOLS = {
+      PRICE_LEVEL_FREE: "Gratuit", PRICE_LEVEL_INEXPENSIVE: "$", PRICE_LEVEL_MODERATE: "$$",
+      PRICE_LEVEL_EXPENSIVE: "$$$", PRICE_LEVEL_VERY_EXPENSIVE: "$$$$",
+    };
 
     const getPhotos = (placeId) => getPlaceInfo(placeId).then((info) => info.photos);
 
@@ -981,7 +999,60 @@
 
     // Contenu de la bulle : titre (nom), description, puis photo (ouvre le carrousel).
     // Les photos sont celles du lieu Google props.placeId, sauf si on les fournit déjà.
+    // Bulle d'un lieu de la liste (props.placeId) ; photosReady : carte d'un repère du bouton Next,
+    // avec sa photo en grand
     function buildPoiCard(props, size, onClose = closeBubble, photosReady = null) {
+      if (photosReady) return buildLandmarkCard(props, size, onClose, photosReady);
+      const card = el("div", "poi-card place");
+      card.style.width = `${size.width}px`;
+      card.style.borderColor = props.color || TASK_COLORS[0];
+      const head = el("div", "poi-head");
+      const title = el("h3", "poi-title");
+      title.append(el("span", "poi-name", props.name));
+      const close = el("button", "poi-close", "×");
+      close.setAttribute("aria-label", "Fermer");
+      close.addEventListener("click", onClose);
+      head.append(title, close);
+      card.append(head);
+      if (props.description) card.append(el("p", "poi-desc", props.description));
+      // Note, téléphone, budget et photos : données Google, chargées à l'ouverture
+      const tools = el("div", "poi-tools");
+      card.append(tools);
+      if (props.placeId) {
+        getPlaceInfo(props.placeId).then(({ rating, phone, price, photos }) => {
+          if (rating) title.append(el("span", "poi-rating", `★ ${rating.toLocaleString("fr-FR", { minimumFractionDigits: 1 })}`));
+          if (phone) {
+            const call = el("a", "poi-phone");
+            call.href = `tel:${phone.replace(/[^\d+]/g, "")}`;
+            call.innerHTML = PHONE_SVG;
+            call.title = phone;
+            call.setAttribute("aria-label", `Appeler ${props.name} : ${phone}`);
+            tools.append(call);
+          }
+          if (price) {
+            const tag = el("span", "poi-price", price);
+            tag.title = "Budget (Google)";
+            tools.append(tag);
+          }
+          if (photos.length) {
+            const show = el("button", "poi-photos");
+            show.type = "button";
+            show.innerHTML = PHOTOS_WHITE_SVG;
+            show.setAttribute("aria-label", `Voir les photos de ${props.name}`);
+            show.addEventListener("click", () => openCarousel(photos));
+            tools.append(show);
+          }
+          if (!tools.childElementCount) tools.remove();
+        });
+      }
+      return card;
+    }
+
+    // Logo « images » blanc de la bulle
+    const PHOTOS_WHITE_SVG = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8.5" cy="9.5" r="1.8" fill="currentColor"/><path d="M4 18l5-5.5 3.5 3.5 3-3 4.5 5z" fill="currentColor"/></svg>';
+
+    // Carte d'un repère (bouton Next) : nom, description et grande photo qui ouvre le carrousel
+    function buildLandmarkCard(props, size, onClose, photosReady) {
       const card = el("div", "poi-card");
       card.style.width = `${size.width}px`;
       card.style.height = `${size.height}px`;
@@ -991,30 +1062,11 @@
       close.addEventListener("click", onClose);
       head.append(el("h3", null, props.name), close);
       card.append(head);
-      // Note moyenne et téléphone (lieux Google seulement, pas les repères du bouton Next)
-      const info = !photosReady && props.placeId ? getPlaceInfo(props.placeId) : null;
-      if (info) {
-        const meta = el("div", "poi-meta");
-        card.append(meta);
-        info.then(({ rating, phone }) => {
-          if (rating) meta.append(el("span", "poi-rating", `★ ${rating.toLocaleString("fr-FR", { minimumFractionDigits: 1 })}`));
-          if (phone) {
-            const call = el("a", "poi-phone");
-            call.href = `tel:${phone.replace(/[^\d+]/g, "")}`;
-            call.innerHTML = PHONE_SVG;
-            call.title = phone;
-            call.setAttribute("aria-label", `Appeler ${props.name} : ${phone}`);
-            meta.append(call);
-          }
-          if (!meta.childElementCount) meta.remove();
-        });
-      }
       if (props.description) card.append(el("p", "poi-desc", props.description));
-      if (props.sources?.length) card.append(buildSources(props.sources));
 
       const msg = el("p", "poi-photo-msg", "Chargement des photos…");
       card.append(msg);
-      (photosReady || (info ? info.then((i) => i.photos) : Promise.resolve([]))).then((photos) => {
+      photosReady.then((photos) => {
         if (!photos.length) {
           msg.textContent = "Aucune photo disponible.";
           return;
@@ -1034,26 +1086,7 @@
     }
 
     // Icône téléphone de la bulle : un toucher ouvre le composeur avec le numéro du lieu
-    const PHONE_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>';
-
-    // Sources web sur lesquelles le guide s'est appuyé : liens visibles et cliquables (nom du site)
-    function buildSources(urls) {
-      const p = el("p", "poi-sources", "Sources :");
-      for (const url of urls) {
-        let host;
-        try {
-          host = new URL(url).hostname.replace(/^www\./, "");
-        } catch {
-          continue;
-        }
-        const a = el("a", null, host);
-        a.href = url;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        p.append(" ", a);
-      }
-      return p;
-    }
+    const PHONE_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>';
 
     // Miniature de la bulle : la photo est réduite proprement aux dimensions exactes de la zone
     // (pixels réels de l'écran), au lieu de laisser le navigateur la réduire d'un coup, ce qui crée
@@ -1309,7 +1342,7 @@
         category: p.category,
         description: p.reason,
         placeId: p.place?.placeId,
-        sources: p.sources,
+        color: taskColor(p.color_index), // bordure de la bulle
       };
     }
 
@@ -1423,9 +1456,19 @@
     nextBtn.type = "button";
     nextBtn.addEventListener("click", () => showDepartureLandmark());
 
+    let showLabels = false; // case « Labels » : nom des lieux sur la carte
+    const LABEL_MAX = 15;
+
     function updateMarkerVisibility(poi) {
       const show = poi.included && !hiddenGroups.has(groupKeyOf(poi));
       if (Boolean(poi.marker.getMap()) !== show) poi.marker.setMap(show ? map : null);
+      // Nom du lieu sous son icône, de la couleur de son groupe (15 caractères au plus)
+      const name = poi.props.name || "";
+      const text = showLabels ? (name.length > LABEL_MAX ? `${name.slice(0, LABEL_MAX).trimEnd()}…` : name) : "";
+      const key = `${text}|${poi.color}`;
+      if (poi.labelKey === key) return;
+      poi.labelKey = key;
+      poi.marker.setLabel(text ? { text, color: poi.color, fontSize: "12px", fontWeight: "700", className: "poi-map-label" } : null);
     }
 
     function setGroupsHidden(update) {
@@ -1477,7 +1520,13 @@
         routeBox.checked = routeVisible;
         routeBox.addEventListener("change", () => setRouteVisible(routeBox.checked));
         routeRow.append(routeBox, el("span", "legend-name", "Tracé de l'itinéraire"));
-        panel.append(el("div", "legend-sep"), routeRow, nextBtn);
+        const labelsRow = el("label", "legend-row");
+        const labelsBox = el("input");
+        labelsBox.type = "checkbox";
+        labelsBox.checked = showLabels;
+        labelsBox.addEventListener("change", () => setGroupsHidden(() => { showLabels = labelsBox.checked; }));
+        labelsRow.append(labelsBox, el("span", "legend-name", "Labels"));
+        panel.append(el("div", "legend-sep"), labelsRow, routeRow, nextBtn);
         children.push(panel);
       }
       legendEl.replaceChildren(...children);
