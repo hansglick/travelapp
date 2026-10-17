@@ -313,7 +313,12 @@
     #zero-screen[hidden] { display: none; }
     /* Titre et recherche centrés ; la recherche est un peu plus large que le titre (marges du titre) */
     .zero-top { align-self: center; display: flex; flex-direction: column; gap: 12px; width: fit-content; max-width: 100%; }
-    .zero-top h1 { margin: 0; padding: 0 40px; font-size: clamp(1.25rem, 5.6vw, 2rem); text-align: center; }
+    /* Marges de 44 px : place du menu ☰ (le titre ne passe jamais dessous) ; sur téléphone, la taille
+       s'ajuste pour tenir sur une ligne */
+    .zero-top h1 {
+      margin: 0; padding: 0 44px; font-size: clamp(1.05rem, 4.6vw, 2rem); line-height: 1.25; text-align: center;
+      white-space: normal; min-height: 40px; display: flex; align-items: center; justify-content: center;
+    }
     #zero-menu-btn {
       position: absolute; top: max(14px, env(safe-area-inset-top)); right: 16px;
       display: flex; align-items: center; justify-content: center;
