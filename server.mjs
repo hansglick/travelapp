@@ -140,7 +140,7 @@ const publicRoutes = {
   },
 
   // Clé Google pour la carte : lue dans .env, jamais écrite dans le code de la page (dépôt public)
-  "GET /api/config": (req, res) => json(res, 200, { googleMapsKey: GOOGLE_BROWSER_KEY || null }),
+  "GET /api/config": (req, res) => json(res, 200, { googleMapsKey: GOOGLE_BROWSER_KEY || null, mapboxToken: env("MAPBOX_TOKEN") || null }),
 };
 
 // Routes d'un compte connecté : ws = son espace

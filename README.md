@@ -40,6 +40,7 @@ En local, dans `.env` (non publié, voir `.env.example`) ; sur Render, dans Envi
 | `INVITE_CODES` | oui | Codes d'invitation à usage unique, séparés par des virgules |
 | `DB_PATH` | sur Render | Base des comptes : `/var/data/qfo.sqlite` sur le disque persistant (local : `data/qfo.sqlite`) |
 | `GOOGLE_MAPS_BROWSER_KEY` | non | Clé distincte pour la page (sinon `GOOGLE_MAPS_API_KEY`) |
+| `MAPBOX_TOKEN` | non | Jeton public Mapbox (`pk.…`, restreint aux adresses de l'appli) pour le globe de l'écran de départ |
 | `MAX_SESSIONS_PER_HOUR` | non | Conversations vocales par heure (30 par défaut) |
 
 Fournies par Render, à ne pas saisir : `PORT`, `RENDER`, `RENDER_EXTERNAL_URL`.

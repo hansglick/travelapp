@@ -304,6 +304,71 @@
     .question-place.excluded .poi-row-step { background: #777; border-color: #999; }
     .question-place-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+    /* Écran zéro : titre, recherche + « Autour de moi », globe avec cible au centre, « Let's Go! » */
+    #zero-screen {
+      position: fixed; inset: 0; z-index: 1200;
+      display: flex; flex-direction: column; gap: 12px; background: #000; color: #fff;
+      padding: max(14px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    }
+    #zero-screen[hidden] { display: none; }
+    .zero-head { display: grid; grid-template-columns: 36px 1fr 36px; align-items: center; gap: 6px; }
+    .zero-head h1 { grid-column: 2; margin: 0; font-size: clamp(1.25rem, 5.6vw, 2rem); text-align: center; }
+    #zero-menu-btn {
+      grid-column: 3; display: flex; align-items: center; justify-content: center;
+      width: 36px; height: 40px; padding: 0; border: 0; background: none; color: #fff; cursor: pointer;
+    }
+    .zero-search {
+      position: relative; display: flex; align-items: center; gap: 8px;
+      padding: 4px 4px 4px 16px; border: 1px solid #333; border-radius: 999px; background: #161616;
+    }
+    #zero-search {
+      flex: 1; min-width: 0; padding: 8px 0; border: 0; outline: none; background: none;
+      color: #fff; font: 1rem system-ui, sans-serif;
+    }
+    #zero-gps {
+      flex: none; display: flex; align-items: center; gap: 6px; padding: 9px 14px;
+      border: 0; border-radius: 999px; background: #e4572e; color: #fff;
+      font: 600 0.85rem system-ui, sans-serif; white-space: nowrap; cursor: pointer;
+    }
+    #zero-suggest {
+      position: absolute; z-index: 5; top: calc(100% + 6px); left: 0; right: 0;
+      margin: 0; padding: 6px; list-style: none;
+      border: 1px solid #333; border-radius: 14px; background: #121212; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    }
+    #zero-suggest[hidden] { display: none; }
+    #zero-suggest button {
+      display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+      padding: 10px 12px; border: 0; border-radius: 10px; background: none; color: #fff; text-align: left; cursor: pointer;
+    }
+    #zero-suggest button:hover, #zero-suggest button:focus-visible { background: #222; outline: none; }
+    .suggest-main { font-size: 0.95rem; }
+    .suggest-secondary { font-size: 0.8rem; color: #999; }
+    #zero-globe-wrap { position: relative; flex: 1; min-height: 220px; overflow: hidden; border-radius: 18px; background: #000; }
+    #zero-globe { position: absolute; inset: 0; }
+    .zero-target {
+      position: absolute; left: 50%; top: 50%; width: 40px; height: 40px;
+      transform: translate(-50%, -50%); pointer-events: none;
+      filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
+    }
+    #zero-hint { min-height: 1.2em; margin: 0; color: #999; font-size: 0.85rem; text-align: center; }
+    #zero-go {
+      align-self: center; padding: 14px 44px; border: 0; border-radius: 999px;
+      background: #e4572e; color: #fff; font: 700 1.15rem system-ui, sans-serif; cursor: pointer;
+    }
+    #zero-go:disabled { opacity: 0.4; cursor: default; }
+
+    /* Écran principal : bouton « Ma position » et consigne pour choisir le départ */
+    .map-gps-btn {
+      display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; margin: 10px;
+      padding: 0; border: 0; border-radius: 50%; background: #fff; color: #1a73e8; cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    }
+    .start-hint {
+      margin: 0 12px 14px; padding: 8px 14px; border-radius: 999px; background: rgba(0, 0, 0, 0.8);
+      color: #fff; font: 0.85rem system-ui, sans-serif; text-align: center;
+    }
+    .start-hint[hidden] { display: none; }
+
     /* Écran de connexion : pseudo + code PIN (inscription avec un code d'invitation) */
     #auth-screen {
       position: fixed; inset: 0; z-index: 2000;
@@ -359,7 +424,7 @@
     .sheet-item.add { justify-content: center; border-style: dashed; color: #e4572e; font-weight: 600; }
     .sheet-empty { margin: 0; font-size: 0.9rem; font-style: italic; color: #a0a0a0; }
     .sheet-row { display: flex; gap: 8px; }
-    .sheet-row[hidden] { display: none; }
+    .sheet-row[hidden], .sheet-item[hidden] { display: none; }
     .sheet-panel input {
       flex: 1; min-width: 0; padding: 12px 14px; border: 1px solid #444; border-radius: 12px;
       background: #111; color: #fff; font-size: 1rem;
@@ -776,6 +841,35 @@
       </div>
     </div>
   </div>
+
+  <section id="zero-screen" hidden aria-label="Choisir le point de départ">
+    <div class="zero-head">
+      <h1>Quel endroit veux-tu explorer ?</h1>
+      <button id="zero-menu-btn" type="button" aria-label="Menu" aria-haspopup="true">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+    <div class="zero-search">
+      <input id="zero-search" type="search" placeholder="Une adresse, un lieu, une ville…" autocomplete="off" aria-label="Rechercher un lieu">
+      <button id="zero-gps" type="button" aria-label="Autour de moi (position GPS)">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Autour de moi
+      </button>
+      <ul id="zero-suggest" hidden></ul>
+    </div>
+    <div id="zero-globe-wrap">
+      <div id="zero-globe"></div>
+      <svg class="zero-target" viewBox="0 0 40 40" aria-hidden="true">
+        <circle cx="20" cy="20" r="11" fill="none" stroke="#fff" stroke-width="5"/>
+        <circle cx="20" cy="20" r="11" fill="none" stroke="#e4572e" stroke-width="3"/>
+        <circle cx="20" cy="20" r="2.5" fill="#e4572e" stroke="#fff" stroke-width="1"/>
+      </svg>
+    </div>
+    <p id="zero-hint" role="status"></p>
+    <button id="zero-go" type="button" disabled>Let's Go!</button>
+  </section>
 
   <section id="auth-screen" hidden aria-label="Connexion">
     <h1>Que fait-on ?</h1>
@@ -1610,7 +1704,7 @@
       contextTimer = setTimeout(() => {
         api("/api/context", {
           position: userMarker.getPosition().toJSON(),
-          source: "app", // point bleu de l'appli (déplaçable pour les tests)
+          source: startMode === "gps" ? "gps" : "app", // GPS du téléphone, ou point de départ choisi
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         });
       }, 1000);
@@ -2965,10 +3059,13 @@
 
     // -- Menu ☰ --
     const menuSheet = document.getElementById("menu-sheet");
-    document.getElementById("menu-btn").addEventListener("click", () => {
+    function openMenu() {
       document.getElementById("menu-logout").textContent = `Se déconnecter${currentPseudo ? ` (${currentPseudo})` : ""}`;
+      saveBtn.hidden = !zeroScreen.hidden; // sur l'écran zéro, rien à enregistrer
       openSheet(menuSheet);
-    });
+    }
+    document.getElementById("menu-btn").addEventListener("click", openMenu);
+    document.getElementById("zero-menu-btn").addEventListener("click", openMenu);
     document.getElementById("menu-logout").addEventListener("click", logout);
     document.getElementById("menu-open").addEventListener("click", () => {
       closeSheet(menuSheet);
@@ -3013,7 +3110,8 @@
     // Carte actuelle avec des lieux mais non enregistrée : confirmation avant de la remplacer
     function requestOpen(id) {
       pendingOpenId = id;
-      const unsaved = (pois.length || unplacedPois.length) && !currentItinerary;
+      // Depuis l'écran zéro, la carte précédente est de toute façon abandonnée
+      const unsaved = zeroScreen.hidden && (pois.length || unplacedPois.length) && !currentItinerary;
       if (unsaved) openSheet(replaceSheet);
       else doOpen();
     }
@@ -3028,6 +3126,7 @@
         const { itinerary } = await postJson("/api/itineraries/open", { id: pendingOpenId });
         closeSheet(openSheetEl);
         if (poiListEl.classList.contains("open")) closePoiList();
+        if (!zeroScreen.hidden) await openItineraryFromZero();
         showVoiceStatus(`Itinéraire « ${itinerary.name} » ouvert`);
       } catch (err) {
         openError.textContent = err.message;
@@ -3658,38 +3757,12 @@
       return overlay;
     }
 
-    // Point bleu « vous êtes ici » avec une lueur qui pulse. Pour tester, on peut le faire glisser
-    // au doigt où l'on veut, y compris sur l'icône d'un POI ; au relâchement, c'est la nouvelle
-    // position de l'utilisateur (arrivées, itinéraire et cadrage mis à jour).
+    // Point bleu « vous êtes ici » avec une lueur qui pulse : fixe au point de départ choisi, ou
+    // déplacé par le GPS (il ne se déplace plus à la main)
     function createUserDot(position) {
       const div = el("div", "user-dot");
-      div.title = "Vous (faire glisser pour vous déplacer)";
-      const dot = createHtmlOverlay(position, div, "overlayMouseTarget");
-      google.maps.OverlayView.preventMapHitsAndGesturesFrom(div); // le glisser ne déplace pas la carte
-
-      let dragging = false;
-      const latLngAt = (e) => {
-        const rect = map.getDiv().getBoundingClientRect();
-        return dot.getProjection().fromContainerPixelToLatLng(new google.maps.Point(e.clientX - rect.left, e.clientY - rect.top));
-      };
-      div.addEventListener("pointerdown", (e) => {
-        dragging = true;
-        div.classList.add("dragging");
-        div.setPointerCapture(e.pointerId);
-        closeBubble();
-      });
-      div.addEventListener("pointermove", (e) => {
-        if (dragging) dot.setPosition(latLngAt(e));
-      });
-      const drop = (e) => {
-        if (!dragging) return;
-        dragging = false;
-        div.classList.remove("dragging");
-        setUserPosition(latLngAt(e).toJSON());
-      };
-      div.addEventListener("pointerup", drop);
-      div.addEventListener("pointercancel", drop);
-      return dot;
+      div.title = "Vous";
+      return createHtmlOverlay(position, div, "overlayMouseTarget");
     }
 
     async function initMap() {
@@ -3713,13 +3786,13 @@
       // Glisser la carte pendant qu'une bulle est ouverte : on ne reviendra pas à la vue d'avant
       map.addListener("dragstart", () => { if (infoWindow?.isOpen) mapMovedByUser = true; });
 
-      // Toucher la carte ferme la bulle ouverte, sinon déplace l'utilisateur
+      // Toucher la carte ferme la bulle ouverte ; en attente du départ, il le choisit
       map.addListener("click", (e) => {
         if (infoWindow?.isOpen) {
           closeBubble();
           return;
         }
-        setUserPosition(e.latLng.toJSON());
+        if (startMode === "awaiting") startAt(e.latLng.toJSON(), false);
       });
 
       MarkerClass = Marker;
@@ -3728,19 +3801,327 @@
       legendEl = el("div", "map-legend");
       legendEl.hidden = true;
       map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(legendEl);
+      createStartControls();
       setUserPosition(DEFAULT_POSITION);
       renderSteps();
       // Lieux, tâches et conversation du compte : une fois connecté
       authenticated.then(listenToServer);
+      resolveMapReady();
     }
+
+    // ---- Écran zéro : choisir le point de départ sur un globe (Mapbox) ----
+    // Affiché à chaque ouverture de l'appli. Recherche d'une adresse ou d'un lieu (suggestions Google),
+    // « Autour de moi » (GPS), ou parcours du globe : le point de départ est sous la cible du centre.
+    // « Let's Go! » vide la carte et ouvre l'écran principal sur ce point. Ouvrir un itinéraire depuis
+    // le menu ☰ fait voler le globe jusqu'à sa zone, puis ouvre l'écran principal, où l'on touche la
+    // carte (ou « Ma position ») pour choisir le départ.
+    const MAPBOX_VERSION = "3.9.4";
+    const START_MIN_ZOOM = 13;   // à la main, assez près pour un point de départ précis
+    const SPIN_DEG_PER_S = 3;    // rotation du globe au repos
+    const zeroScreen = document.getElementById("zero-screen");
+    const zeroSearch = document.getElementById("zero-search");
+    const zeroSuggest = document.getElementById("zero-suggest");
+    const zeroGo = document.getElementById("zero-go");
+    const zeroHint = document.getElementById("zero-hint");
+    let MAPBOX_TOKEN = "";
+    let globe = null;
+    let spinning = true;
+    let startChoice = null;      // { position, gps } : lieu choisi ou position GPS ; null : centre du globe
+    let startMode = "zero";
+    let resolveMapReady;
+    const mapReady = new Promise((resolve) => { resolveMapReady = resolve; }); // carte Google prête      // "zero", "awaiting" (itinéraire ouvert, départ à choisir), "fixed", "gps"
+
+    function loadMapbox() {
+      if (window.mapboxgl) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const css = document.createElement("link");
+        css.rel = "stylesheet";
+        css.href = `https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_VERSION}/mapbox-gl.css`;
+        document.head.append(css);
+        const script = document.createElement("script");
+        script.src = `https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_VERSION}/mapbox-gl.js`;
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.append(script);
+      });
+    }
+
+    function zeroMessage(text) {
+      zeroHint.textContent = text;
+    }
+
+    async function showZeroScreen() {
+      zeroScreen.hidden = false;
+      updateGoButton();
+      if (globe) return;
+      if (!MAPBOX_TOKEN) return zeroMessage("Globe indisponible (jeton Mapbox absent) : cherche un lieu ou utilise « Autour de moi ».");
+      try {
+        await loadMapbox();
+      } catch {
+        return zeroMessage("Globe indisponible : cherche un lieu ou utilise « Autour de moi ».");
+      }
+      mapboxgl.accessToken = MAPBOX_TOKEN;
+      globe = new mapboxgl.Map({
+        container: "zero-globe",
+        style: "mapbox://styles/mapbox/standard",
+        projection: "globe",
+        center: [DEFAULT_POSITION.lng, 25],
+        zoom: 1.4,
+        language: "fr",
+      });
+      globe.on("style.load", () => globe.setFog({})); // atmosphère et étoiles par défaut
+      // Le globe tourne tant que personne n'y touche ; parcourir le globe à la main choisit le centre
+      const stopSpin = () => { spinning = false; };
+      globe.on("mousedown", stopSpin);
+      globe.on("touchstart", stopSpin);
+      globe.on("wheel", stopSpin);
+      globe.on("dragstart", () => {
+        stopSpin();
+        startChoice = null;
+        zeroSearch.value = "";
+      });
+      globe.on("moveend", () => {
+        updateGoButton();
+        spinGlobe();
+      });
+      globe.on("load", spinGlobe);
+    }
+
+    function spinGlobe() {
+      if (!spinning || !globe || zeroScreen.hidden || globe.getZoom() > 5) return;
+      const center = globe.getCenter();
+      center.lng -= SPIN_DEG_PER_S;
+      globe.easeTo({ center, duration: 1000, easing: (n) => n });
+    }
+
+    // Vol du globe jusqu'à un point (ou une zone) ; la promesse se résout à l'arrivée
+    function flyGlobe(options) {
+      spinning = false;
+      if (!globe) return Promise.resolve();
+      return new Promise((resolve) => {
+        globe.stop(); // la rotation en cours s'arrête (son « moveend » ne compte pas comme l'arrivée)
+        if (options.bounds) globe.fitBounds(options.bounds, { padding: 60, maxZoom: 15, pitch: 45, duration: 3500, essential: true });
+        else globe.flyTo({ center: [options.position.lng, options.position.lat], zoom: 15.5, pitch: 45, duration: 3500, essential: true });
+        globe.once("moveend", resolve);
+      });
+    }
+
+    function updateGoButton() {
+      const precise = Boolean(startChoice) || (globe && globe.getZoom() >= START_MIN_ZOOM);
+      zeroGo.disabled = !precise;
+      zeroMessage(precise ? "" : "Cherche un lieu, utilise « Autour de moi », ou zoome sur le globe jusqu'au quartier voulu.");
+    }
+
+    // -- Recherche : suggestions Google Places (Autocomplete) --
+    let suggestTimer = null;
+    let placesSession = crypto.randomUUID(); // une session par recherche (facturation Google)
+
+    zeroSearch.addEventListener("input", () => {
+      clearTimeout(suggestTimer);
+      if (zeroSearch.value.trim().length < 2) {
+        zeroSuggest.hidden = true;
+        return;
+      }
+      suggestTimer = setTimeout(fetchSuggestions, 250);
+    });
+    zeroSearch.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") zeroSuggest.querySelector("button")?.click();
+      if (e.key === "Escape") zeroSuggest.hidden = true;
+    });
+
+    async function fetchSuggestions() {
+      const input = zeroSearch.value.trim();
+      let data = {};
+      try {
+        const response = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY },
+          body: JSON.stringify({ input, sessionToken: placesSession, languageCode: "fr" }),
+        });
+        data = response.ok ? await response.json() : {};
+      } catch { /* réseau : pas de suggestions */ }
+      if (input !== zeroSearch.value.trim()) return; // l'utilisateur a continué de taper
+      const items = (data.suggestions || []).map((s) => s.placePrediction).filter(Boolean).slice(0, 5);
+      zeroSuggest.replaceChildren(...items.map((p) => {
+        const li = el("li");
+        const button = el("button");
+        button.type = "button";
+        const main = p.structuredFormat?.mainText?.text || p.text?.text || "";
+        const secondary = p.structuredFormat?.secondaryText?.text || "";
+        button.append(el("span", "suggest-main", main), el("span", "suggest-secondary", secondary));
+        button.addEventListener("click", () => pickPlace(p.placeId, main));
+        li.append(button);
+        return li;
+      }));
+      zeroSuggest.hidden = !items.length;
+    }
+
+    async function pickPlace(placeId, label) {
+      zeroSuggest.hidden = true;
+      zeroSearch.value = label;
+      zeroSearch.blur();
+      try {
+        const response = await fetch(
+          `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?sessionToken=${placesSession}`,
+          { headers: { "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY, "X-Goog-FieldMask": "location,viewport" } }
+        );
+        placesSession = crypto.randomUUID();
+        const p = await response.json();
+        if (!p.location) throw new Error("lieu sans position");
+        const position = { lat: p.location.latitude, lng: p.location.longitude };
+        startChoice = { position, gps: false };
+        updateGoButton();
+        await flyGlobe({ position });
+      } catch {
+        zeroMessage("Lieu introuvable : essaie une autre recherche.");
+      }
+    }
+
+    // -- Position GPS (mobile ou navigateur d'ordinateur) --
+    function locate() {
+      return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) return reject(new Error("géolocalisation indisponible"));
+        navigator.geolocation.getCurrentPosition(
+          (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+          reject,
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+        );
+      });
+    }
+
+    document.getElementById("zero-gps").addEventListener("click", async () => {
+      zeroMessage("Recherche de ta position…");
+      try {
+        const position = await locate();
+        startChoice = { position, gps: true };
+        zeroSearch.value = "Ma position";
+        updateGoButton();
+        await flyGlobe({ position });
+      } catch {
+        zeroMessage("Position indisponible : autorise la localisation dans le navigateur, ou cherche un lieu.");
+      }
+    });
+
+    // -- « Let's Go! » : carte vide, écran principal centré sur le point de départ --
+    zeroGo.addEventListener("click", async () => {
+      const choice = startChoice || { position: { lat: globe.getCenter().lat, lng: globe.getCenter().lng }, gps: false };
+      zeroGo.disabled = true;
+      await api("/api/pois/clear", {}); // à chaque ouverture, on repart d'une carte vide
+      await mapReady;
+      // La carte vidée arrive par le flux du serveur : on l'attend avant de cadrer sur le départ
+      for (let i = 0; i < 30 && (pois.length || unplacedPois.length); i++) await new Promise((r) => setTimeout(r, 100));
+      leaveZeroScreen();
+      startAt(choice.position, choice.gps);
+    });
+
+    function leaveZeroScreen() {
+      zeroScreen.hidden = true;
+      spinning = false;
+    }
+
+    // Itinéraire ouvert depuis l'écran zéro : le globe vole jusqu'à sa zone, tourne quelques secondes,
+    // puis l'écran principal s'ouvre ; le départ se choisit en touchant la carte ou avec « Ma position »
+    async function openItineraryFromZero() {
+      // Les lieux de l'itinéraire arrivent par le flux du serveur
+      for (let i = 0; i < 30 && !pois.length; i++) await new Promise((r) => setTimeout(r, 100));
+      if (globe && pois.length) {
+        const bounds = new mapboxgl.LngLatBounds();
+        pois.forEach((p) => bounds.extend([p.position.lng, p.position.lat]));
+        await flyGlobe({ bounds });
+        await new Promise((resolve) => {
+          globe.easeTo({ bearing: globe.getBearing() + 120, duration: 3500, easing: (n) => n });
+          globe.once("moveend", resolve);
+        });
+      }
+      await mapReady;
+      leaveZeroScreen();
+      awaitStart();
+    }
+
+    // ---- Point de départ sur l'écran principal ----
+
+    function setUserDotVisible(visible) {
+      userMarker.div.style.display = visible ? "" : "none";
+    }
+
+    // Départ choisi : le point bleu y est posé, fixe, ou suit le GPS
+    function startAt(position, gps) {
+      stopGpsWatch();
+      startMode = gps ? "gps" : "fixed";
+      startHintEl.hidden = true;
+      setUserDotVisible(true);
+      map.setCenter(position);
+      map.setZoom(16);
+      setUserPosition(position);
+      if (gps) watchGps();
+    }
+
+    // En attente du départ (itinéraire ouvert) : pas de point bleu ; la carte montre l'itinéraire
+    function awaitStart() {
+      stopGpsWatch();
+      startMode = "awaiting";
+      setUserDotVisible(false);
+      startHintEl.hidden = false;
+      if (includedPois().length) {
+        const bounds = new google.maps.LatLngBounds();
+        includedPois().forEach((p) => bounds.extend(p.position));
+        map.fitBounds(bounds, MAP_PADDING);
+      }
+    }
+
+    let gpsWatchId = null;
+
+    function watchGps() {
+      if (!navigator.geolocation) return;
+      gpsWatchId = navigator.geolocation.watchPosition(
+        (p) => {
+          const position = { lat: p.coords.latitude, lng: p.coords.longitude };
+          const moved = google.maps.geometry.spherical.computeDistanceBetween(userMarker.getPosition(), new google.maps.LatLng(position));
+          if (moved > 5) setUserPosition(position); // petits sauts du GPS ignorés
+        },
+        () => showVoiceStatus("Position GPS indisponible pour le moment.", { error: true }),
+        { enableHighAccuracy: true, maximumAge: 5000 }
+      );
+    }
+
+    function stopGpsWatch() {
+      if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+      gpsWatchId = null;
+    }
+
+    // Bouton « Ma position » de la carte (en haut à droite)
+    let startHintEl = null;
+
+    function createStartControls() {
+      const gpsBtn = el("button", "map-gps-btn");
+      gpsBtn.type = "button";
+      gpsBtn.title = "Ma position";
+      gpsBtn.setAttribute("aria-label", "Ma position");
+      gpsBtn.innerHTML = GPS_SVG;
+      gpsBtn.addEventListener("click", async () => {
+        try {
+          startAt(await locate(), true);
+        } catch {
+          showVoiceStatus("Position indisponible : autorise la localisation dans le navigateur.", { error: true });
+        }
+      });
+      map.controls[google.maps.ControlPosition.RIGHT_TOP].push(gpsBtn);
+      startHintEl = el("div", "start-hint", "Touche la carte pour choisir ton point de départ, ou « Ma position »");
+      startHintEl.hidden = true;
+      map.controls[google.maps.ControlPosition.BOTTOM_CENTER].push(startHintEl);
+    }
+
+    const GPS_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 
     const mapError = () => { document.getElementById("map").textContent = "Impossible de charger Google Maps."; };
 
     fetch("/api/config")
       .then((r) => r.json())
-      .then(({ googleMapsKey }) => {
+      .then(({ googleMapsKey, mapboxToken }) => {
         if (!googleMapsKey) throw new Error("Clé Google absente du serveur");
         GOOGLE_MAPS_API_KEY = googleMapsKey;
+        MAPBOX_TOKEN = mapboxToken || "";
+        authenticated.then(showZeroScreen); // à chaque ouverture de l'appli
         const script = document.createElement("script");
         script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&loading=async&callback=initMap&v=weekly`;
         script.async = true;

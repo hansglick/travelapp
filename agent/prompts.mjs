@@ -83,6 +83,7 @@ Règles :
   restaurant → distance, budget, type de cuisine, ouvert maintenant, fréquentation ; musée → thème, durée de visite, prix, distance, fréquentation ; parking → distance de la destination, prix, gratuit ou payant…
   known_value : la valeur déjà donnée dans la demande ou la conversation, ou déduite des préférences enregistrées ; sinon null. question : ce que le guide demandera à l'oral si la valeur manque.
   Les tâches quick et info, et les ajouts à un groupe (extend), n'ont pas de caractéristiques.
+  Un lieu précis désigné par son nom (« la forteresse Fortezza », « le phare du port », « le restaurant Avli ») n'a rien à affiner : dimensions vide.
 - Tâche « à préciser » (status clarifying) : le guide vient de poser la question pending_question, ou va la poser. Une réponse (« pas trop cher », « grec ») ou une précision sur cette tâche → clarify avec le task_id, jamais refine ni une nouvelle tâche :
   answers = une réponse par caractéristique concernée, avec son nom exact (une réponse peut en couvrir plusieurs) ; value null si l'utilisateur dit que ça lui est égal ;
   criteria = la liste complète mise à jour, avec un critère par réponse ; request = la demande complète mise à jour ;
