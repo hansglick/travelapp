@@ -27,6 +27,12 @@
     }
     /* Taille adaptée à la largeur de l'écran, pour que le titre reste centré */
     h1 { grid-column: 2; margin: 0; font-size: clamp(1.3rem, 6.2vw, 2.2rem); text-align: center; white-space: nowrap; }
+    /* Retour à l'écran zéro (flèche gris clair), à gauche ; le titre reste centré entre les deux */
+    #back-btn {
+      grid-column: 1; grid-row: 1; justify-self: start;
+      display: flex; align-items: center; justify-content: center;
+      width: 36px; height: 40px; padding: 0; border: 0; background: none; color: #c8c8c8; cursor: pointer;
+    }
     #menu-btn {
       grid-column: 3; justify-self: end;
       display: flex; align-items: center; justify-content: center;
@@ -771,6 +777,11 @@
 <body>
   <main id="app">
     <header>
+      <button id="back-btn" type="button" aria-label="Revenir au choix du point de départ" title="Choisir un autre point de départ">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+          <path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
       <h1>Que fait-on ?</h1>
       <button id="menu-btn" aria-label="Menu" aria-haspopup="true">
         <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
@@ -4167,7 +4178,10 @@
     async function showZeroScreen() {
       zeroScreen.hidden = false;
       updateGoButton();
-      if (globe) return;
+      if (globe) {
+        globe.resize(); // le globe était caché : il reprend la taille de son cadre
+        return;
+      }
       if (!MAPBOX_TOKEN) return zeroMessage("Globe indisponible (jeton Mapbox absent) : cherche un lieu ou utilise « Ma position ».");
       try {
         await loadMapbox();
@@ -4359,6 +4373,17 @@
       for (let i = 0; i < 30 && (pois.length || unplacedPois.length); i++) await new Promise((r) => setTimeout(r, 100));
       leaveZeroScreen();
       startAt(choice.position, choice.gps, true);
+    });
+
+    // Flèche de l'écran principal : retour au choix du point de départ. La carte reste telle quelle
+    // jusqu'au « Let's Go! » (qui la vide) ; plus de position envoyée au guide d'ici là.
+    document.getElementById("back-btn").addEventListener("click", () => {
+      closeBubble();
+      if (poiListEl.classList.contains("open")) closePoiList();
+      stopGpsWatch();
+      startMode = "zero";
+      startHintEl.hidden = true;
+      showZeroScreen();
     });
 
     function leaveZeroScreen() {
