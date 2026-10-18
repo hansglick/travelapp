@@ -75,6 +75,7 @@ export class PoiStore extends EventEmitter {
     this.version = 0;
     this.practical = { weather: null, phrasebook: null, facts: null, news: null, place: null }; // menu ☰ et icône « i »
     this.trash = [];            // lieux supprimés récemment (20 au plus) : restaurables sans nouvelle recherche
+    this.streets = null;        // « Découverte de la ville » : { taskId, colorIndex, items: [{ name, why, paths }] }
     this.renumberPending = false; // numéros absolus à recalculer (après une suppression ou un cadenas)
     this.pois = new Map();      // id → POI, dans l'ordre d'ajout
     this.nextId = 1;
@@ -103,6 +104,7 @@ export class PoiStore extends EventEmitter {
   toJSON() {
     return {
       practical: this.practical, // météo (Open-Meteo) et guide de conversation : enregistrés avec l'itinéraire
+      streets: this.streets,     // tracés OpenStreetMap (données libres) : enregistrés avec l'itinéraire
       nextId: this.nextId,
       version: this.version,
       renumberPending: this.renumberPending,
@@ -133,6 +135,7 @@ export class PoiStore extends EventEmitter {
     this.renumberPending = Boolean(data.renumberPending);
     if (data.preferences) this.preferences = { ...this.preferences, ...data.preferences };
     if (data.practical) this.practical = { ...this.practical, ...data.practical };
+    this.streets = data.streets || null;
     const stale = [];
     for (const p of data.pois || []) {
       if (p.special === "back" && p.ownLocation) {
@@ -189,6 +192,7 @@ export class PoiStore extends EventEmitter {
       pois: [...this.pois.values()].map((p) => this.poiView(p)),
       preferences: this.preferences,
       practical: this.practical,
+      streets: this.streets,
       // La page doit renvoyer son ordre pour renuméroter (demande en cours ou numéro manquant)
       renumber_pending: this.renumberPending ||
         [...this.pois.values()].some((p) => p.status === "resolved" && p.included && !p.visitedAt && !p.absIndex),
@@ -529,6 +533,7 @@ export class PoiStore extends EventEmitter {
   clearPois() {
     this.candidates.clear(); // candidats proposés lors des recherches effacées
     this.trash = [];
+    this.streets = null;
     const removed = [...this.pois.values()];
     this.renumberPending = false;
     if (!removed.length) return 0;
@@ -667,6 +672,13 @@ export class PoiStore extends EventEmitter {
       this.emit("change", { added: restored.map((r) => this.pois.get(r.id)), removed: [] });
     }
     return { status: restored.length ? "applied" : "rejected", restored, rejected, version: this.version, selection: this.selectionForModel() };
+  }
+
+  // Rues colorées de la « Découverte de la ville »
+  setStreets(streets) {
+    this.streets = streets;
+    this.version++;
+    this.emit("change", { added: [], removed: [] });
   }
 
   // Note, avis, prix, horaires redemandés à Google après un rechargement (mémoire seulement)

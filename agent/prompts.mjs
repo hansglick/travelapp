@@ -54,9 +54,10 @@ Les messages qui commencent par [APP] viennent de l'application : tiens-en compt
 
 export const EXTRACTOR_INSTRUCTIONS = `Tu tiens le tableau des tâches d'un guide touristique vocal. À chaque prise de parole de l'utilisateur, tu décides quelles tâches créer, corriger ou annuler. Tu ne réponds jamais à l'utilisateur.
 
-Une tâche est une action que l'application doit exécuter. Cinq types :
+Une tâche est une action que l'application doit exécuter. Six types :
 - search (recherche) : trouver des lieux selon des critères, sans savoir lesquels à l'avance (« je cherche une boulangerie à 5 min à pied », « des restaurants de poisson »), ou chercher une information sur le web ;
 - locate (localisation) : placer sur la carte un ou plusieurs lieux précis que l'utilisateur désigne par leur nom (« place le Nike Store sur la carte », « place l'hôtel King Salomon près de la plage », « ajoute la forteresse Fortezza »). count = le nombre de lieux nommés ; criteria et dimensions vides ; request cite chaque nom avec ses repères (« près de la plage ») ;
+- discover (découverte de la ville) : faire découvrir la ville ou le quartier dans son ensemble (« fais-moi découvrir la ville », « montre-moi l'essentiel de Quiberon », « les coins sympas et les incontournables ») : lieux emblématiques et rues colorées, déjà préparés ; count, criteria et dimensions vides ;
 - self (auto-localisation) : placer un point à la position actuelle de l'utilisateur (« place un point à ma position », « marque l'endroit où je suis », « retiens ma position pour revenir ») : count, criteria et dimensions vides ;
 - quick (organisation) : modifier la liste sans recherche web (retirer des lieux, remettre un lieu supprimé récemment, garder seulement une catégorie, figer l'ordre des étapes, montrer la bulle d'un lieu, enregistrer une préférence, ajouter un candidat déjà proposé) ;
 - info (data) : question sur les lieux déjà dans la liste ou sur l'itinéraire, sans rien modifier (« à quelle heure ferme le n° 4 ? », « à quelle heure ferme Mona Lisa ? », « c'est ouvert le dimanche ? ») : distance ou temps de marche entre deux lieux ou depuis l'utilisateur (« à combien est le musée de mon parking ? »), lequel est le plus proche, ordre et suite du parcours (« qu'est-ce qu'il y a après le musée ? »), durée totale, ouvert ? horaires ? prix ? téléphone ? avis ?
@@ -141,7 +142,7 @@ export const EXTRACTOR_SCHEMA = {
           title: { type: "string", description: "Titre court (3 à 6 mots) pour l'écran des tâches." },
           group_name: { type: "string", description: "Tâche search : nom des lieux trouvés, au pluriel et sans verbe, pour la légende de la carte (« Restaurants de poisson », « Musées d'histoire », « Pâtisseries »). Vide sinon." },
           request: { type: "string", description: "Demande complète et autonome, avec tous les critères." },
-          kind: { type: "string", enum: ["search", "locate", "self", "info", "quick"] },
+          kind: { type: "string", enum: ["search", "locate", "self", "info", "quick", "discover"] },
           count: { type: ["integer", "null"], description: "Nombre de lieux à ajouter demandé (« 4 gyros » → 4, « un parking » → 1, « des pâtisseries » → 3), sinon null." },
           count_given: { type: "boolean", description: "true seulement si l'utilisateur a dit un nombre explicite (« 4 gyros », « deux musées », « un seul », « trois ou quatre ») ; false pour « un restaurant », « des pâtisseries », « quelques bars »." },
           criteria: { type: "array", items: criterionSchema, description: "Critères des lieux à trouver (tâche search) ; vide sinon." },

@@ -172,6 +172,10 @@
     .poi-title .poi-name { color: #e4572e; }
     .poi-rating { margin-left: 6px; color: #fff; font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
     .poi-card.place .poi-desc { margin: 8px 14px 0; min-height: 0; }
+    /* Bulle d'une rue coloriée (Découverte de la ville) */
+    .street-card { max-width: 260px; padding: 10px 14px 12px; border: 3px solid #e4572e; border-radius: 14px; background: #000; color: #fff; }
+    .street-name { margin: 0 0 4px; font-weight: 700; }
+    .street-why { margin: 0; color: #d6d6d6; font-size: 0.85rem; line-height: 1.4; }
     .poi-tools { position: relative; flex: none; display: flex; align-items: center; justify-content: center; gap: 22px; min-height: 22px; margin: 10px 14px 12px; }
     /* Poubelle : grise, tout à droite de la ligne d'icônes */
     .poi-tools .poi-trash { position: absolute; right: 0; top: 50%; transform: translateY(-50%); color: #8a8a8a; }
@@ -1816,6 +1820,7 @@
       }
 
       unplacedPois = state.pois.filter((p) => p.status !== "resolved");
+      renderStreets(state.streets);
       renderSteps();
       if (changed || pinsChanged) {
         routeStale = true;
@@ -1893,13 +1898,61 @@
     function setGroupsHidden(update) {
       update();
       pois.forEach(updateMarkerVisibility);
+      updateStreetsVisibility();
       renderLegend();
+    }
+
+    // ---- Rues coloriées de la « Découverte de la ville » ----
+    // Tracés fournis par le serveur (Google), à la couleur du groupe ; la case du groupe dans la
+    // légende les affiche ou les masque avec ses lieux. Toucher une rue ouvre une petite bulle.
+    let streetLines = [];
+    let streetsKey = "";
+    let streetGroup = null;
+
+    function renderStreets(streets) {
+      const key = streets ? `${streets.taskId}:${streets.colorIndex}:${streets.items.length}:${streets.items.map((i) => i.name).join("|")}` : "";
+      if (key === streetsKey) return;
+      streetsKey = key;
+      streetLines.forEach((line) => line.setMap(null));
+      streetLines = [];
+      streetGroup = streets && Number.isInteger(streets.colorIndex) ? streets.colorIndex : null;
+      if (!streets) return;
+      const color = taskColor(streets.colorIndex);
+      for (const street of streets.items) {
+        for (const path of street.paths) {
+          const line = new google.maps.Polyline({
+            path: path.map(([lat, lng]) => ({ lat, lng })),
+            strokeColor: color, strokeOpacity: 0.6, strokeWeight: 9, zIndex: 2, clickable: true,
+          });
+          line.addListener("click", (e) => openStreetBubble(street, e.latLng));
+          streetLines.push(line);
+        }
+      }
+      updateStreetsVisibility();
+      renderLegend();
+    }
+
+    function updateStreetsVisibility() {
+      const show = streetGroup === null || !hiddenGroups.has(streetGroup);
+      streetLines.forEach((line) => line.setMap(show ? map : null));
+    }
+
+    function openStreetBubble(street, at) {
+      rememberViewBeforeBubble();
+      const card = el("div", "street-card");
+      card.style.borderColor = taskColor(streetGroup);
+      card.append(el("p", "street-name", street.name), el("p", "street-why", street.why || ""));
+      infoWindow.setContent(card);
+      infoWindow.setPosition(at);
+      infoWindow.open({ map });
     }
 
     function renderLegend() {
       if (!legendEl) return;
       const placed = pois.filter((p) => p.included && p.special !== "back"); // le point de retour n'a pas de groupe
+      // Groupes des lieux, plus celui des rues coloriées (même s'il ne reste aucun de ses lieux)
       const keys = groupsOf(placed);
+      if (streetGroup !== null && streetLines.length && !keys.includes(streetGroup)) keys.push(streetGroup);
       legendEl.hidden = !keys.length;
       for (const key of [...hiddenGroups]) if (!keys.includes(key)) hiddenGroups.delete(key); // groupe disparu
       const toggle = el("button", "legend-toggle", hiddenGroups.size ? `Légende (${keys.length - hiddenGroups.size}/${keys.length})` : "Légende");

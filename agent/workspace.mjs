@@ -11,7 +11,7 @@ import { createTaskBoard } from "./tasks.mjs";
 
 const SAVE_DELAY_MS = 1000;
 
-export function createWorkspaces({ apiKey, resolvePoi, storage, trips }) {
+export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery }) {
   const spaces = new Map(); // id du compte → espace
 
   function open(user) {
@@ -35,7 +35,17 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips }) {
 
     let board = null;
     const live = createLiveManager({ apiKey, store, metrics, broadcast, board: () => board });
-    const tools = createTools({ store, resolvePoi, broadcast, uiConnected: () => clients.size > 0, appNote: (text) => live.appNote(text) });
+    // « Découverte de la ville » préparée en arrière-plan au « Let's Go! » (affichée sur demande)
+    let discoveryPending = null;
+    const discoveryApi = {
+      get: () => discoveryPending,
+      start: (args) => {
+        discoveryPending = discovery ? discovery.prepare(args) : Promise.reject(new Error("découverte indisponible"));
+        discoveryPending.catch(() => {});
+        return discoveryPending;
+      },
+    };
+    const tools = createTools({ store, resolvePoi, broadcast, uiConnected: () => clients.size > 0, appNote: (text) => live.appNote(text), discovery: discoveryApi });
     let tasksTimer = null;
     board = createTaskBoard({
       apiKey, store, tools, metrics,
@@ -150,6 +160,7 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips }) {
 
     return {
       user, store, board, live, tools, metrics, clients, sentAt,
+      startDiscovery: discoveryApi.start,
       lastGeocoded: null,
       broadcast,
       voiceState: () => voiceState,

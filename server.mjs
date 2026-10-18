@@ -13,6 +13,7 @@ import { distanceM } from "./agent/live.mjs";
 import { createMetrics } from "./agent/metrics.mjs";
 import { openDatabase, createAccounts, createWorkspaceStorage, createTripStorage, createPhrasebookStorage } from "./agent/db.mjs";
 import { createPractical } from "./agent/practical.mjs";
+import { createDiscovery } from "./agent/discovery.mjs";
 import { createNamer } from "./agent/naming.mjs";
 import { createWorkspaces } from "./agent/workspace.mjs";
 
@@ -67,7 +68,8 @@ const accounts = createAccounts(db, { inviteCodes: INVITE_CODES, devInvite: DEV 
 const sharedMetrics = createMetrics(); // Google et météo, communs à tous les comptes
 const resolvePoi = createResolver({ apiKey: GOOGLE_API_KEY, metrics: sharedMetrics });
 const trips = createTripStorage(db);
-const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, storage: createWorkspaceStorage(db), trips });
+const discovery = OPENAI_API_KEY ? createDiscovery({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
+const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, storage: createWorkspaceStorage(db), trips, discovery });
 const suggestNames = OPENAI_API_KEY ? createNamer({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
 const practical = createPractical({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createPhrasebookStorage(db) });
 
@@ -239,6 +241,8 @@ const routes = {
       .then(ready("phrasebook"), failed("phrasebook", "guide"));
     practical.funFacts({ neighborhood: place.neighborhood, city: place.city, country: place.country })
       .then(ready("facts"), failed("facts", "fun facts"));
+    // Découverte de la ville : préparée maintenant, affichée seulement si l'utilisateur la demande
+    ws.startDiscovery({ position: pos, city: place.city || place.neighborhood, country: place.country });
     practical.news({ city: place.city || place.neighborhood, country: place.country, timezone: weather?.timezone || ws.store.context.timezone })
       .then(ready("news"), failed("news", "actualités"));
   },

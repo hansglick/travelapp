@@ -102,6 +102,26 @@ function categoryMatch(category, types = []) {
   return types.some((t) => expected.includes(t) || (category === "restaurant" && t.endsWith("_restaurant")) || (category === "museum" && t.endsWith("_museum"))) ? 1 : 0;
 }
 
+// Décodage d'un tracé encodé de Google (« encoded polyline ») en points [lat, lng]
+function decodePolyline(encoded) {
+  const points = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    for (const axis of [0, 1]) {
+      let result = 0, shift = 0, byte;
+      do {
+        byte = encoded.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20);
+      const delta = result & 1 ? ~(result >> 1) : result >> 1;
+      if (axis === 0) lat += delta; else lng += delta;
+    }
+    points.push([lat / 1e5, lng / 1e5]);
+  }
+  return points;
+}
+
 function distanceKm(a, b) {
   const rad = (d) => (d * Math.PI) / 180;
   const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
@@ -348,7 +368,58 @@ export function createResolver({ apiKey, metrics }) {
   resolve.searchNear = searchNear;
   resolve.locate = locate;
   resolve.getDetails = getDetails;
+  // Tracé d'une rue (« Découverte de la ville ») : Google Geocoding donne la rue et son étendue (ses
+  // deux extrémités, jamais affichées) ; Google Routes trace un trajet à pied d'une extrémité à
+  // l'autre en passant par le milieu de la rue ; seule la partie située dans l'étendue de la rue est
+  // gardée. null si la voie n'est pas trouvée.
+  async function traceStreet({ name, city, country, near }) {
+    const params = new URLSearchParams({ address: [name, city, country].filter(Boolean).join(", "), language: "fr", key: apiKey });
+    const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    metrics.count("google_geocode");
+    const street = ((await response.json()).results || []).find((r) => r.types?.includes("route"));
+    if (!street) return null;
+    const box = street.geometry.bounds || street.geometry.viewport;
+    const center = street.geometry.location;
+    if (near && distanceKm(near, center) > 10) return null; // homonyme dans une autre ville
+    const sw = box.southwest, ne = box.northeast;
+    if (distanceKm(sw, ne) < 0.03) return null; // étendue inconnue : rien à tracer
+    // Les deux diagonales de l'étendue : on garde celle qui suit le mieux la rue
+    const ends = [[sw, ne], [{ lat: sw.lat, lng: ne.lng }, { lat: ne.lat, lng: sw.lng }]];
+    const paths = await Promise.all(ends.map(([a, b]) => walkPath(a, center, b).catch(() => null)));
+    const margin = 0.00015; // ≈ 15 m autour de l'étendue de la rue
+    const inside = ([lat, lng]) => lat >= sw.lat - margin && lat <= ne.lat + margin && lng >= sw.lng - margin && lng <= ne.lng + margin;
+    let best = null, bestKm = 0;
+    for (const path of paths.filter(Boolean)) {
+      // Plus longue suite de points dans l'étendue de la rue
+      let run = [];
+      for (const p of [...path, null]) {
+        if (p && inside(p)) { run.push(p); continue; }
+        const km = run.reduce((sum, q, i) => (i ? sum + distanceKm({ lat: run[i - 1][0], lng: run[i - 1][1] }, { lat: q[0], lng: q[1] }) : 0), 0);
+        if (km > bestKm) { bestKm = km; best = run; }
+        run = [];
+      }
+    }
+    if (!best || bestKm < 0.03) return null;
+    return { name: street.address_components?.[0]?.long_name || name, path: best.map(([lat, lng]) => [Math.round(lat * 1e5) / 1e5, Math.round(lng * 1e5) / 1e5]) };
+  }
+
+  // Trajet à pied a → (par le milieu de la rue) → b : liste de points [lat, lng]
+  async function walkPath(a, via, b) {
+    const point = (p) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
+    const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": "routes.polyline.encodedPolyline" },
+      body: JSON.stringify({ origin: point(a), destination: point(b), intermediates: [{ ...point(via), via: true }], travelMode: "WALK" }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    metrics.count("google_compute_routes");
+    if (!response.ok) throw new Error(`Routes ${response.status}`);
+    const encoded = (await response.json()).routes?.[0]?.polyline?.encodedPolyline;
+    return encoded ? decodePolyline(encoded) : null;
+  }
+
   resolve.walkMatrix = walkMatrix;
+  resolve.traceStreet = traceStreet;
   resolve.reverseAddress = (position) => reverseAddress(apiKey, position);
   return resolve;
 }

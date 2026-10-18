@@ -263,7 +263,7 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
     } else if (type === "done" || type === "failed") {
       // Recherche, localisation, point de retour : le guide dit seulement que c'est fait ; question
       // sur un lieu ou modification de la liste : il donne la réponse
-      const brief = type === "done" && ["search", "locate", "self"].includes(task.kind);
+      const brief = type === "done" && ["search", "locate", "self", "discover"].includes(task.kind);
       const content = brief
         ? `[APP] Tâche terminée — « ${task.title} ». Dis seulement, en une phrase courte, que c'est fait, sans détailler les lieux (pour toi seulement : ${task.result})`
         : `[APP] ${type === "done" ? "Tâche terminée" : "Tâche échouée"} — « ${task.title} » : ${task.result}`;

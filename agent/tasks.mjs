@@ -29,7 +29,8 @@ const QUESTION_GRACE_MS = 2000;    // une prise de parole finie avant ce délai 
 const ACTIVE = ["clarifying", "pending", "running"];
 // Types de tâches : recherche, localisation d'un lieu précis, auto-localisation (point de retour),
 // question sur les lieux (data), organisation de la liste
-const KINDS = ["search", "locate", "self", "info", "quick"];
+const KINDS = ["search", "locate", "self", "info", "quick", "discover"];
+const DISCOVER_GROUP = "Découverte de la ville";
 const LOCATE_GROUP = "Lieux placés"; // toutes les localisations partagent ce groupe (une couleur)
 
 // Noms des couleurs des groupes (même ordre que la palette de la page)
@@ -417,6 +418,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       t.colorIndex = locateColor;
       t.groupName = LOCATE_GROUP;
     }
+    if (t.kind === "discover") t.groupName = DISCOVER_GROUP;
     if (t.colorIndex === null && t.requestedCount && t.kind === "search") t.colorIndex = nextColor++;
     hydrate(t);
     tasks.set(t.id, t);
@@ -575,6 +577,12 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     // Auto-localisation : traitée directement par l'application, sans modèle
     if (t.kind === "self") {
       const result = await tools.placeBackPoint();
+      log(t, result);
+      return result;
+    }
+    // Découverte de la ville : préparée au « Let's Go! », affichée maintenant (sans modèle)
+    if (t.kind === "discover") {
+      const result = await tools.discover(t);
       log(t, result);
       return result;
     }

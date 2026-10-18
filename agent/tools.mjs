@@ -2,6 +2,8 @@
 // de lieux, chercher autour d'un repère, informations pratiques, montrer un lieu, préférences.
 // Chaque appel est validé ici ; la liste (store) reste la seule source de vérité.
 
+import { LIMITS } from "./store.mjs";
+
 const RESOLUTION_WAIT_MS = 2500; // update_pois attend au plus ce délai les résultats de Google
 
 function distanceM(a, b) {
@@ -11,7 +13,7 @@ function distanceM(a, b) {
   return 12742000 * Math.asin(Math.sqrt(h));
 }
 
-export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote }) {
+export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote, discovery }) {
   // task : { addedIds, candidates, requestedCount, log(text) } — la tâche qui appelle
   async function run(name, args, task) {
     switch (name) {
@@ -97,6 +99,48 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       default:
         return { status: "error", message: `Fonction inconnue : ${name}` };
     }
+  }
+
+  // « Découverte de la ville » : la préparation faite au « Let's Go! » (ou lancée maintenant) est
+  // affichée : lieux localisés dans Google et ajoutés au groupe de la tâche, rues colorées
+  async function discover(task) {
+    let pending = discovery?.get();
+    if (!pending) {
+      const position = store.context.position;
+      if (!position || !store.context.positionSource) return "Ta position n'est pas encore connue : choisis d'abord ton point de départ.";
+      pending = discovery.start({ position, city: store.context.place?.city, country: store.context.place?.country });
+    }
+    let prepared;
+    try {
+      prepared = await pending;
+    } catch (err) {
+      console.warn("[découverte] préparation :", err.message);
+      return "La découverte de la ville n'a pas pu être préparée (erreur technique).";
+    }
+    const room = Math.max(0, LIMITS.selectionSize - store.pois.size);
+    const places = prepared.places.slice(0, room);
+    for (let i = 0; i < places.length; i += LIMITS.addPerOperation) {
+      await run("update_pois", {
+        operation: "add", base_version: store.version, op_id: `discover-${i}`,
+        pois: places.slice(i, i + LIMITS.addPerOperation).map((p) => ({ ...p, sources: [], candidate_id: null })),
+        remove_ids: [], remove_category: null, area: null, requested_count: null,
+      }, task);
+    }
+    // Rues : tracées par Google maintenant (3 à la fois), puis coloriées à la couleur du groupe
+    const near = store.context.position;
+    const traced = [];
+    for (let i = 0; i < prepared.streets.length; i += 3) {
+      const batch = prepared.streets.slice(i, i + 3);
+      const shapes = await Promise.all(batch.map((s) => resolvePoi.traceStreet({ name: s.name, city: prepared.city, country: prepared.country, near }).catch(() => null)));
+      batch.forEach((s, k) => { if (shapes[k]) traced.push({ name: shapes[k].name, why: s.why, paths: [shapes[k].path] }); });
+    }
+    const missing = prepared.streets.length - traced.length;
+    if (missing) task.log?.(`${missing} rue(s) non tracée(s) (introuvable(s) dans Google)`);
+    store.setStreets({ taskId: task.id, colorIndex: task.ensureColor(), items: traced });
+    const placed = task.addedIds.filter((id) => store.pois.get(id)?.status === "resolved").length;
+    const left = prepared.places.length - places.length;
+    return `Découverte de la ville affichée : ${placed} lieu(x) et ${traced.length} rue(s) colorée(s).`
+      + (left ? ` ${left} lieu(x) non ajouté(s) : la carte est limitée à ${LIMITS.selectionSize} lieux.` : "");
   }
 
   // Auto-localisation : le point de retour « B » à la position actuelle de l'utilisateur (sans modèle)
@@ -236,5 +280,5 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
   // Lieu à relocaliser (coordonnées de plus de 30 jours après rechargement d'un compte)
   const relocate = (id) => resolveAndStore(id, null);
 
-  return { run, enforceDistance, relocate, placeBackPoint };
+  return { run, enforceDistance, relocate, placeBackPoint, discover };
 }
