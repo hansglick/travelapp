@@ -364,7 +364,7 @@
       display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
       padding: 10px 12px; border: 0; border-radius: 10px; background: none; color: #fff; text-align: left; cursor: pointer;
     }
-    #zero-suggest button:hover, #zero-suggest button:focus-visible { background: #222; outline: none; }
+    #zero-suggest button:hover, #zero-suggest button:focus-visible, #zero-suggest button.active { background: #222; outline: none; }
     .suggest-main { font-size: 0.95rem; }
     .suggest-secondary { font-size: 0.8rem; color: #999; }
     #zero-globe-wrap { position: relative; flex: 1; min-height: 220px; overflow: hidden; border-radius: 18px; background: #000; }
@@ -4486,9 +4486,33 @@
       }
       suggestTimer = setTimeout(fetchSuggestions, 250);
     });
+    // Clavier : ↓ / ↑ parcourent les suggestions (le texte tapé reste dans le champ), Entrée choisit
+    // la suggestion en surbrillance (ou la première), Échap ferme la liste
+    let suggestIndex = -1;
+
+    function highlightSuggestion(index) {
+      const buttons = [...zeroSuggest.querySelectorAll("button")];
+      const size = buttons.length + 1; // les suggestions, plus « aucune » (-1 : retour au texte tapé)
+      suggestIndex = buttons.length ? ((((index + 1) % size) + size) % size) - 1 : -1;
+      buttons.forEach((b, i) => b.classList.toggle("active", i === suggestIndex));
+      buttons[suggestIndex]?.scrollIntoView({ block: "nearest" });
+    }
+
     zeroSearch.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") zeroSuggest.querySelector("button")?.click();
-      if (e.key === "Escape") zeroSuggest.hidden = true;
+      const open = !zeroSuggest.hidden && zeroSuggest.childElementCount;
+      if (e.key === "ArrowDown" && open) {
+        e.preventDefault();
+        highlightSuggestion(suggestIndex + 1);
+      } else if (e.key === "ArrowUp" && open) {
+        e.preventDefault();
+        highlightSuggestion(suggestIndex - 1);
+      } else if (e.key === "Enter") {
+        const buttons = zeroSuggest.querySelectorAll("button");
+        (buttons[suggestIndex] || buttons[0])?.click();
+      } else if (e.key === "Escape") {
+        zeroSuggest.hidden = true;
+        suggestIndex = -1;
+      }
     });
 
     async function fetchSuggestions() {
@@ -4516,6 +4540,7 @@
         return li;
       }));
       zeroSuggest.hidden = !items.length;
+      suggestIndex = -1; // nouvelles suggestions : aucune en surbrillance
     }
 
     async function pickPlace(placeId, label) {
