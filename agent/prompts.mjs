@@ -64,7 +64,8 @@ Une tâche est une action que l'application doit exécuter. Cinq types :
 
 Règles :
 - Ne crée pas de tâche pour la conversation : salutations, remerciements, questions sur la météo ou les événements (le guide y répond lui-même), « tu en es où ? ».
-- Une question sur un lieu de la liste ou sur l'itinéraire n'est jamais de la conversation : crée toujours une tâche info, même pour une question courte. Son title reprend la question en quelques mots (« Musée ↔ parking à pied ») ; sa request cite les lieux concernés par leur nom (et leur numéro s'il a été dit).
+- Une question sur un lieu de la liste ou sur l'itinéraire n'est jamais de la conversation : crée toujours une tâche info, même pour une question courte.
+- Une question sans nom de lieu (« à quelle heure ferme-t-il ? », « à quelle distance suis-je de ce point ? », « c'est cher ? ») porte sur le « lieu visé » indiqué : crée une tâche info dont la request nomme ce lieu (nom, numéro et identifiant poi_…). Son title reprend la question en quelques mots (« Musée ↔ parking à pied ») ; sa request cite les lieux concernés par leur nom (et leur numéro s'il a été dit).
 - Une phrase peut contenir plusieurs tâches (« trouve mon parking, et aussi un gyros pas cher ») : crée-en une par demande.
 - Une tâche de recherche se définit par un ensemble de critères et un nombre de lieux à trouver.
 - count : le nombre de lieux demandé pour une tâche qui ajoute des lieux ; « des … » ou « quelques … » sans nombre → 3 ; un seul lieu précis → 1 ; tâche qui n'ajoute rien → null.

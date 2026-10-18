@@ -19,7 +19,8 @@ const WALK_M_PER_MIN = 80;         // vitesse de marche retenue pour les distanc
 const CALL_TIMEOUT_MS = 90000;
 const KEEP_TASKS = 40;             // tâches gardées dans le tableau
 const WAIT_FOR_MORE_MAX_MS = 8000; // phrase inachevée : on attend la suite au plus ce délai
-const EXTRACTOR_REASONING = process.env.EXTRACTOR_REASONING || "none"; // détection rapide
+const EXTRACTOR_REASONING = process.env.EXTRACTOR_REASONING || "low"; // « none » ratait des questions sur les lieux
+const FOCUS_TTL_MS = 15 * 60 * 1000; // bulle ouverte depuis plus longtemps : elle ne compte plus
 const MAX_QUESTIONS = 3;           // questions d'affinage posées au plus avant une recherche
 const MAX_DIMENSIONS = 6;
 const COUNT_DIMENSION = "nombre de suggestions"; // toujours demandé, en dernier, sauf nombre déjà dit
@@ -123,10 +124,12 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       };
     });
     const selection = store.selectionForModel().pois.map((p) => `${p.map_number ? `n°${p.map_number} ` : ""}${p.name} (${p.category})`);
+    const referent = referentPlace();
     const input = [
       "Tableau des tâches :", JSON.stringify(board),
       "Lieux sur la carte :", selection.join(" ; ") || "aucun",
       "Préférences enregistrées :", JSON.stringify(store.preferences || {}),
+      "Lieu visé par « il », « elle », « ce point », « ce lieu » :", referent ? `${referent.label} (${referent.why})` : "aucun",
       "Fin de la conversation (transcription) :", conversation.slice(-10).join("\n") || "(début)",
       "Nouvelle prise de parole de l'utilisateur :", text,
     ].join("\n");
@@ -154,9 +157,10 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     // Filet de sécurité : une question sur un lieu de la liste, oubliée par le détecteur, devient
     // quand même une tâche data
     const nothing = !out.new_tasks?.length && !out.refine?.length && !out.extend?.length && !out.clarify?.length && !out.cancel?.length;
-    if (nothing && !out.wait_for_more && isQuestionAboutPlaces(text)) {
+    if (nothing && !out.wait_for_more && isQuestionAboutPlaces(text, referent)) {
       console.log(`[tâches] question rattrapée : « ${text.slice(0, 80)} »`);
-      out.new_tasks = [{ title: text.replace(/\s*\?+\s*$/, "").slice(0, 60), request: `Répondre à la question de l'utilisateur sur ses lieux : « ${text} »`, kind: "info", count: null, criteria: [], dimensions: [] }];
+      const about = referent && mentionsReferent(text) ? ` Le lieu visé est ${referent.label} (${referent.why}).` : "";
+      out.new_tasks = [{ title: text.replace(/\s*\?+\s*$/, "").slice(0, 60), request: `Répondre à la question de l'utilisateur sur ses lieux : « ${text} ».${about}`, kind: "info", count: null, criteria: [], dimensions: [] }];
     }
     if (out.wait_for_more && !out.new_tasks?.length && !out.refine?.length) {
       heldUtterance = { text, at: Date.now() };
@@ -190,11 +194,37 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     askNext();
   }
 
-  // Question (« ? » ou mot interrogatif) qui cite un lieu de la liste : nom, n° d'étape, point de retour
-  function isQuestionAboutPlaces(text) {
+  // Lieu visé par une question sans nom : la bulle ouverte à l'écran, sinon le dernier lieu ajouté
+  // ou cité dans une réponse
+  function referentPlace() {
+    const label = (poi) => `${poi.mapNumber ? `n°${poi.mapNumber} ` : ""}« ${poi.place?.name || poi.name} » (${poi.id})`;
+    const focus = store.focus;
+    if (focus && Date.now() - focus.at < FOCUS_TTL_MS && store.pois.has(focus.id)) {
+      return { poi: store.pois.get(focus.id), label: label(store.pois.get(focus.id)), why: "sa bulle est ouverte à l'écran" };
+    }
+    for (const t of list().slice().reverse()) {
+      const ids = [...(t.relatedIds || []), ...t.addedIds].filter((id) => store.pois.has(id));
+      if (ids.length) {
+        const poi = store.pois.get(ids[ids.length - 1]);
+        return { poi, label: label(poi), why: "dernier lieu ajouté ou cité" };
+      }
+    }
+    return null;
+  }
+
+  // « il », « elle », « ce point », « ce lieu », « cet endroit », « là-bas »…
+  function mentionsReferent(text) {
+    const lower = ` ${normalize(text)} `;
+    return /\b(il|elle|t il|t elle|ce point|ce lieu|cet endroit|ce restaurant|ce musee|ce bar|ce cafe|cette adresse|la bas|y aller|j y)\b/.test(lower);
+  }
+
+  // Question (« ? » ou mot interrogatif) qui cite un lieu de la liste : nom, n° d'étape, point de
+  // retour, ou un pronom quand un lieu est visé (bulle ouverte, dernier lieu cité)
+  function isQuestionAboutPlaces(text, referent = null) {
     const lower = ` ${normalize(text)} `;
     const question = /\?/.test(text) || /\b(combien|quel|quelle|quels|quelles|quand|ou est|est ce|a quelle heure|ferme|ouvre|ouvert|note|telephone|prix)\b/.test(lower);
     if (!question) return false;
+    if (referent && mentionsReferent(text)) return true;
     if (/\b(n|numero|point|etape)\s*\d+\b/.test(lower) || lower.includes(" point de retour ")) return true;
     return [...store.pois.values()].some((poi) =>
       [poi.place?.name, poi.name].map(normalize).some((n) => n.length >= 4 && lower.includes(` ${n} `)));

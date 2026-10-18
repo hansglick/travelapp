@@ -241,6 +241,13 @@ const routes = {
       .then(ready("facts"), failed("facts", "fun facts"));
   },
 
+  // Bulle ouverte à l'écran (ou fermée : id null) : lieu visé par « il », « ce point »…
+  "POST /api/focus": async (req, res, ws) => {
+    const { id } = await readJson(req);
+    ws.store.focus = typeof id === "string" && ws.store.pois.has(id) ? { id, at: Date.now() } : null;
+    res.writeHead(204).end();
+  },
+
   // Action de l'utilisateur sur un lieu dans l'interface : décoché / recoché / visité
   "POST /api/pois/update": async (req, res, ws) => {
     const { id, included, visited } = await readJson(req);

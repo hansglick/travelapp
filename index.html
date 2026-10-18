@@ -1441,6 +1441,7 @@
     function closeBubble() {
       if (!infoWindow?.isOpen) return;
       infoWindow.close();
+      reportFocus(null);
       const view = viewBeforeBubble;
       viewBeforeBubble = null;
       if (view && !mapMovedByUser && map.getZoom() === view.zoom) map.panTo(view.center);
@@ -1586,7 +1587,13 @@
 
     // Bulle d'un lieu sur la carte (toucher son icône, ou demande au guide). Un lieu décoché n'a plus
     // d'icône : la bulle s'ouvre alors à son emplacement.
+    // Lieu dont la bulle est ouverte : le guide comprend « à quelle heure ferme-t-il ? »
+    function reportFocus(id) {
+      api("/api/focus", { id: id || null });
+    }
+
     function openMapBubble(poi) {
+      reportFocus(poi.id);
       rememberViewBeforeBubble();
       infoWindow.setContent(buildPoiCard(poi.props, placeCardSize(poi.props, document.getElementById("map"), 90)));
       if (poi.marker.getMap()) {
@@ -1618,6 +1625,7 @@
         name: p.place?.name || p.name,
         category: p.category,
         description: p.reason,
+        id: p.id,
         placeId: p.place?.placeId,
         special: p.special || null,
         color: p.special === "back" ? BACK_COLOR : taskColor(p.color_index), // bordure de la bulle
@@ -2716,12 +2724,14 @@
     const listBubbleEl = document.getElementById("list-bubble");
 
     function openListBubble(props) {
+      reportFocus(props.id);
       const size = placeCardSize(props, document.body, 48);
       listBubbleEl.replaceChildren(buildPoiCard(props, size, closeListBubble));
       listBubbleEl.hidden = false;
     }
 
     function closeListBubble() {
+      if (!listBubbleEl.hidden) reportFocus(null);
       listBubbleEl.hidden = true;
       listBubbleEl.replaceChildren();
     }
