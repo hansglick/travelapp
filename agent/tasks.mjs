@@ -130,6 +130,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       "Lieux sur la carte :", selection.join(" ; ") || "aucun",
       "Préférences enregistrées :", JSON.stringify(store.preferences || {}),
       "Lieu visé par « il », « elle », « ce point », « ce lieu » :", referent ? `${referent.label} (${referent.why})` : "aucun",
+      "Lieux supprimés récemment (restaurables par une tâche quick) :", store.trash.slice(-10).reverse().map((p) => p.place?.name || p.name).join(" ; ") || "aucun",
       "Fin de la conversation (transcription) :", conversation.slice(-10).join("\n") || "(début)",
       "Nouvelle prise de parole de l'utilisateur :", text,
     ].join("\n");
@@ -693,6 +694,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       case "measure_walk": return `marche : ${(output.results || []).map((r) => (r.status === "error" ? r.message
         : `${r.from} → ${r.to} ${r.walk_m != null ? `${r.walk_m} m, ${r.walk_minutes} min` : `${r.straight_line_m} m à vol d'oiseau`}`)).join(" ; ") || output.status}`;
       case "show_place": return args.poi_id ? `bulle ouverte (${args.poi_id})` : "bulle fermée";
+      case "restore_pois": return `remis sur la carte : ${(output.restored || []).map((r) => r.name).join(", ") || output.status}`;
       case "pin_steps": return `étapes figées : ${(output.applied || []).map((a) => `${a.name} (${a.position})`).join(", ") || output.status}`;
       case "update_preferences": return `préférences : ${(output.changed || []).join(", ") || output.status}`;
       default: return `${name} → ${output?.status}`;

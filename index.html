@@ -172,7 +172,10 @@
     .poi-title .poi-name { color: #e4572e; }
     .poi-rating { margin-left: 6px; color: #fff; font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
     .poi-card.place .poi-desc { margin: 8px 14px 0; min-height: 0; }
-    .poi-tools { flex: none; display: flex; align-items: center; justify-content: center; gap: 22px; min-height: 22px; margin: 10px 14px 12px; }
+    .poi-tools { position: relative; flex: none; display: flex; align-items: center; justify-content: center; gap: 22px; min-height: 22px; margin: 10px 14px 12px; }
+    /* Poubelle : grise, tout à droite de la ligne d'icônes */
+    .poi-tools .poi-trash { position: absolute; right: 0; top: 50%; transform: translateY(-50%); color: #8a8a8a; }
+    .poi-tools .poi-trash:hover { color: #c8c8c8; }
     .poi-tools a, .poi-tools button {
       display: flex; align-items: center; justify-content: center; padding: 0; border: 0;
       background: none; color: #fff; cursor: pointer;
@@ -524,7 +527,7 @@
        (10 s après l'affichage de la carte, puis toutes les 20 s) : diable en boîte + deux ondes noires */
     .info-btn {
       position: relative; width: 44px; height: 44px; margin: 12px; padding: 0;
-      border: 0; border-radius: 50%; background: #000; color: #fff; cursor: pointer;
+      border: 0; border-radius: 50%; background: #1a73e8; color: #fff; cursor: pointer;
       font: italic 700 23px/44px Georgia, "Times New Roman", serif;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
     }
@@ -532,9 +535,15 @@
       content: ""; position: absolute; inset: 0; border-radius: 50%;
       border: 3px solid #000; opacity: 0; pointer-events: none;
     }
-    .info-btn.nudge { animation: info-jack 0.9s cubic-bezier(0.3, 0.7, 0.4, 1) both; }
-    .info-btn.nudge::before { animation: info-sonar 1.9s ease-out 0.42s; }
-    .info-btn.nudge::after { animation: info-sonar 1.9s ease-out 1s; }
+    /* Halo blanc-jaune très clair qui s'allume deux fois autour de la pastille (le bond et les
+       ondes restent disponibles : info-jack, info-sonar) */
+    .info-btn.nudge { animation: info-halo 2.4s ease-in-out both; }
+    @keyframes info-halo {
+      0%, 100% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 0 rgba(255, 249, 214, 0); }
+      25% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 22px 10px rgba(255, 249, 214, 0.95); }
+      50% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 6px 2px rgba(255, 249, 214, 0.35); }
+      75% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 22px 10px rgba(255, 249, 214, 0.95); }
+    }
     @keyframes info-jack {
       0%   { transform: translateY(0) scale(1, 1); }
       14%  { transform: translateY(3px) scale(1.12, 0.8); }
@@ -1408,11 +1417,26 @@
             show.addEventListener("click", () => openCarousel(photos, props.color));
             tools.append(show);
           }
-          if (!tools.childElementCount) tools.remove();
+          if (!tools.childElementCount && !props.id) tools.remove();
         });
+      }
+      // Poubelle (grise, à droite) : le lieu quitte la carte et va dans la corbeille
+      if (props.id) {
+        const trash = el("button", "poi-trash");
+        trash.type = "button";
+        trash.innerHTML = TRASH_SVG;
+        trash.title = "Supprimer ce lieu de la carte";
+        trash.setAttribute("aria-label", `Supprimer ${props.name} de la carte`);
+        trash.addEventListener("click", () => {
+          onClose();
+          api("/api/pois/remove", { id: props.id });
+        });
+        tools.append(trash);
       }
       return card;
     }
+
+    const TRASH_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
     // Logo « images » blanc de la bulle
     const PHOTOS_WHITE_SVG = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8.5" cy="9.5" r="1.8" fill="currentColor"/><path d="M4 18l5-5.5 3.5 3.5 3-3 4.5 5z" fill="currentColor"/></svg>';
@@ -3766,7 +3790,7 @@
       button.title = "Informations utiles";
       button.setAttribute("aria-label", "Informations utiles");
       button.addEventListener("click", () => openSheet(usefulSheet));
-      button.addEventListener("animationend", (e) => { if (e.animationName === "info-jack") button.classList.remove("nudge"); });
+      button.addEventListener("animationend", (e) => { if (e.animationName === "info-halo") button.classList.remove("nudge"); });
       map.controls[google.maps.ControlPosition.TOP_LEFT].push(button);
       infoNudge = () => {
         button.classList.remove("nudge");

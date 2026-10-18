@@ -17,7 +17,7 @@
   /* Icône « i » : pastille noire, « i » blanc, en haut à gauche de la carte */
   .info-btn {
     position: relative; width: 44px; height: 44px; margin: 12px; padding: 0;
-    border: 0; border-radius: 50%; background: #000; color: #fff; cursor: pointer;
+    border: 0; border-radius: 50%; background: #1a73e8; color: #fff; cursor: pointer;
     font: italic 700 23px/44px Georgia, "Times New Roman", serif;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   }
@@ -28,9 +28,14 @@
   }
   /* Diable en boîte : s'écrase, bondit en grossissant, retombe avec un petit rebond ; les ondes
      partent quand il retombe */
-  .info-btn.nudge { animation: jack 0.9s cubic-bezier(0.3, 0.7, 0.4, 1) both; }
-  .info-btn.nudge::before { animation: sonar 1.9s ease-out 0.42s; }
-  .info-btn.nudge::after { animation: sonar 1.9s ease-out 1s; }
+  /* Halo blanc-jaune très clair, deux fois */
+  .info-btn.nudge { animation: halo 2.4s ease-in-out both; }
+  @keyframes halo {
+    0%, 100% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 0 rgba(255, 249, 214, 0); }
+    25% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 22px 10px rgba(255, 249, 214, 0.95); }
+    50% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 6px 2px rgba(255, 249, 214, 0.35); }
+    75% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 22px 10px rgba(255, 249, 214, 0.95); }
+  }
   @keyframes jack {
     0%   { transform: translateY(0) scale(1, 1); }
     14%  { transform: translateY(3px) scale(1.12, 0.8); }
@@ -63,7 +68,7 @@
 <body>
   <header>
     <div>
-      <h1>Démo : icône « i » (diable en boîte + ondes noires)</h1>
+      <h1>Démo : icône « i » (fond bleu, halo blanc-jaune)</h1>
       <small>Première animation 10 s après l'affichage de la carte, puis toutes les 20 s. Touche l'icône pour la fenêtre 2 × 2.</small>
     </div>
     <button id="replay" type="button">Rejouer l'animation</button>
@@ -131,7 +136,7 @@
     infoBtn.type = "button";
     infoBtn.textContent = "i";
     infoBtn.setAttribute("aria-label", "Informations pratiques");
-    infoBtn.addEventListener("animationend", (e) => { if (e.animationName === "jack") infoBtn.classList.remove("nudge"); });
+    infoBtn.addEventListener("animationend", (e) => { if (e.animationName === "halo") infoBtn.classList.remove("nudge"); });
     infoBtn.addEventListener("click", () => { overlay.hidden = false; });
     map.controls[google.maps.ControlPosition.TOP_LEFT].push(infoBtn);
     setTimeout(() => { nudge(); setInterval(nudge, EVERY_MS); }, FIRST_MS);

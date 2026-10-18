@@ -58,7 +58,7 @@ Une tâche est une action que l'application doit exécuter. Cinq types :
 - search (recherche) : trouver des lieux selon des critères, sans savoir lesquels à l'avance (« je cherche une boulangerie à 5 min à pied », « des restaurants de poisson »), ou chercher une information sur le web ;
 - locate (localisation) : placer sur la carte un ou plusieurs lieux précis que l'utilisateur désigne par leur nom (« place le Nike Store sur la carte », « place l'hôtel King Salomon près de la plage », « ajoute la forteresse Fortezza »). count = le nombre de lieux nommés ; criteria et dimensions vides ; request cite chaque nom avec ses repères (« près de la plage ») ;
 - self (auto-localisation) : placer un point à la position actuelle de l'utilisateur (« place un point à ma position », « marque l'endroit où je suis », « retiens ma position pour revenir ») : count, criteria et dimensions vides ;
-- quick (organisation) : modifier la liste sans recherche web (retirer des lieux, garder seulement une catégorie, figer l'ordre des étapes, montrer la bulle d'un lieu, enregistrer une préférence, ajouter un candidat déjà proposé) ;
+- quick (organisation) : modifier la liste sans recherche web (retirer des lieux, remettre un lieu supprimé récemment, garder seulement une catégorie, figer l'ordre des étapes, montrer la bulle d'un lieu, enregistrer une préférence, ajouter un candidat déjà proposé) ;
 - info (data) : question sur les lieux déjà dans la liste ou sur l'itinéraire, sans rien modifier (« à quelle heure ferme le n° 4 ? », « à quelle heure ferme Mona Lisa ? », « c'est ouvert le dimanche ? ») : distance ou temps de marche entre deux lieux ou depuis l'utilisateur (« à combien est le musée de mon parking ? »), lequel est le plus proche, ordre et suite du parcours (« qu'est-ce qu'il y a après le musée ? »), durée totale, ouvert ? horaires ? prix ? téléphone ? avis ?
 
 Règles :
@@ -260,6 +260,7 @@ Ne propose pas un lieu déjà dans la liste, ni un lieu excluded_by_user ou visi
   - Ouvert ? horaires ? prix ? téléphone ? avis ? → get_place_details, puis réponds en précisant que les données viennent de Google ; pour un numéro, indique que l'icône téléphone de la bulle permet d'appeler.
   - Réponse : directe, avec les chiffres (« 650 m, environ 8 minutes à pied »), en citant les lieux par leur nom.
 - Montrer un lieu → show_place (poi_id null pour fermer la bulle).
+- Remettre un lieu supprimé (« remets la plage », « finalement je garde le n° 2 ») → restore_pois avec son id pris dans recently_deleted ; ne le recherche pas à nouveau.
 - Ordre des étapes → pin_steps : "first", "last" (restent première / dernière même si des lieux sont ajoutés) ou "index" ; unpin_ids pour libérer. Un lieu exclu par l'utilisateur est remis dans l'itinéraire quand tu le figes : dis-le.
 - Préférences durables (« je ne veux plus de musées », « je ne mange pas de porc ») → update_preferences. Une envie ponctuelle n'est pas une préférence durable.
 - Si la tâche indique des lieux déjà ajoutés par une version précédente de cette tâche, garde ceux qui respectent les nouveaux critères, retire les autres, puis complète.
@@ -376,6 +377,18 @@ export const BACKEND_TOOLS = [
           },
         },
       },
+    },
+  },
+  {
+    type: "function",
+    name: "restore_pois",
+    description: "Remet sur la carte des lieux supprimés récemment (liste recently_deleted de la sélection), à l'identique et instantanément, sans nouvelle recherche.",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["ids"],
+      properties: { ids: { type: "array", items: { type: "string" }, description: "Identifiants (poi_…) pris dans recently_deleted." } },
     },
   },
   {

@@ -74,6 +74,7 @@ export class PoiStore extends EventEmitter {
   reset() {
     this.version = 0;
     this.practical = { weather: null, phrasebook: null, facts: null, news: null, place: null }; // menu ☰ et icône « i »
+    this.trash = [];            // lieux supprimés récemment (20 au plus) : restaurables sans nouvelle recherche
     this.renumberPending = false; // numéros absolus à recalculer (après une suppression ou un cadenas)
     this.pois = new Map();      // id → POI, dans l'ordre d'ajout
     this.nextId = 1;
@@ -214,6 +215,8 @@ export class PoiStore extends EventEmitter {
       })),
       preferences: this.preferences,
       context: this.contextForModel(),
+      // Supprimés récemment, du plus récent au plus ancien : restore_pois les remet sur la carte
+      recently_deleted: this.trash.slice(-10).reverse().map((p) => ({ id: p.id, name: p.place?.name || p.name, category: p.category })),
     };
   }
 
@@ -298,6 +301,7 @@ export class PoiStore extends EventEmitter {
       }
       if (category) for (const poi of this.pois.values()) if (poi.category === category && !removed.includes(poi)) removed.push(poi);
       for (const poi of removed) this.pois.delete(poi.id);
+      this.#toTrash(removed);
       if (removed.length) this.#needRenumber();
       if (!removed.length) {
         // Idempotent : supprimer un lieu déjà absent n'est pas une erreur
@@ -515,6 +519,7 @@ export class PoiStore extends EventEmitter {
   // Bouton « Effacer » : tous les lieux sont retirés, les préférences et le contexte sont gardés
   clearPois() {
     this.candidates.clear(); // candidats proposés lors des recherches effacées
+    this.trash = [];
     const removed = [...this.pois.values()];
     this.renumberPending = false;
     if (!removed.length) return 0;
@@ -610,6 +615,49 @@ export class PoiStore extends EventEmitter {
     this.version++;
     this.emit("change", { added: [], removed: [], resolved: poi });
     return poi;
+  }
+
+  // ---- Corbeille : un lieu supprimé (bouton poubelle, ou par le guide) y est gardé tel quel ----
+  #toTrash(removed) {
+    for (const poi of removed) {
+      if (poi.status !== "resolved" || poi.special) continue; // seulement des lieux placés sur la carte
+      this.trash = this.trash.filter((p) => p.id !== poi.id);
+      this.trash.push({ ...poi, removedAt: Date.now() });
+    }
+    if (this.trash.length > 20) this.trash = this.trash.slice(-20);
+  }
+
+  // Suppression depuis la bulle d'un lieu (bouton poubelle)
+  removeByUser(id) {
+    if (!this.pois.has(id)) return null;
+    const poi = this.pois.get(id);
+    const result = this.updatePois({
+      operation: "remove", base_version: this.version, op_id: `ui-remove-${id}-${Date.now()}`,
+      pois: [], remove_ids: [id], remove_category: null, area: null, requested_count: null,
+    });
+    return result.status === "applied" ? poi : null;
+  }
+
+  // Remet sur la carte des lieux de la corbeille, à l'identique (même couleur, même groupe), sans
+  // nouvelle recherche Google
+  restore(ids) {
+    const restored = [], rejected = [];
+    for (const id of Array.isArray(ids) ? ids : []) {
+      const saved = this.trash.find((p) => p.id === id);
+      if (!saved) { rejected.push({ id, reason: "pas dans la corbeille" }); continue; }
+      if (this.pois.size >= LIMITS.selectionSize) { rejected.push({ id, reason: `liste pleine (${LIMITS.selectionSize} lieux au maximum)` }); continue; }
+      const { removedAt, ...poi } = saved;
+      Object.assign(poi, { included: true, visitedAt: null, pin: null, absIndex: null, mapNumber: null });
+      this.pois.set(poi.id, poi);
+      this.#assignLast(poi);
+      this.trash = this.trash.filter((p) => p.id !== id);
+      restored.push({ id: poi.id, name: poi.place?.name || poi.name });
+    }
+    if (restored.length) {
+      this.version++;
+      this.emit("change", { added: restored.map((r) => this.pois.get(r.id)), removed: [] });
+    }
+    return { status: restored.length ? "applied" : "rejected", restored, rejected, version: this.version, selection: this.selectionForModel() };
   }
 
   // Infos pratiques mises à jour : affichage seulement, la version de la liste ne change pas

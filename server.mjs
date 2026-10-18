@@ -243,6 +243,16 @@ const routes = {
       .then(ready("news"), failed("news", "actualités"));
   },
 
+  // Bouton poubelle de la bulle : le lieu quitte la carte et va dans la corbeille (restaurable)
+  "POST /api/pois/remove": async (req, res, ws) => {
+    const { id } = await readJson(req);
+    if (typeof id !== "string") return json(res, 400, { error: "id manquant." });
+    const poi = ws.store.removeByUser(id);
+    if (!poi) return json(res, 404, { error: "Lieu introuvable." });
+    ws.live.appNote(`L'utilisateur a supprimé « ${poi.place?.name || poi.name} » depuis l'écran (bouton poubelle). Le lieu est dans la corbeille : il peut être remis tel quel s'il change d'avis.`);
+    json(res, 200, { ok: true });
+  },
+
   // Bulle ouverte à l'écran (ou fermée : id null) : lieu visé par « il », « ce point »…
   "POST /api/focus": async (req, res, ws) => {
     const { id } = await readJson(req);

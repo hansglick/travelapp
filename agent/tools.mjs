@@ -24,6 +24,9 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       case "pin_steps":
         return store.pinSteps(args);
 
+      case "restore_pois":
+        return store.restore(args.ids);
+
       case "find_places_near":
         return findPlacesNear(args, task);
 
