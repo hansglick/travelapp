@@ -18,16 +18,6 @@ const MOVE_NOTICE_M = 300;                 // déplacement signalé au guide au-
 const TURN_END_MS = 1300;                  // silence qui marque la fin d'une prise de parole
 const CONVERSATION_KEEP = 20;              // répliques gardées comme contexte pour les tâches
 
-// Pendant une recherche longue, le guide parle de la météo, des événements puis de la ville, en
-// rappelant que la recherche continue. S'il se tait, le serveur le relance (seulement pendant un
-// silence, et seulement tant qu'une tâche de recherche est réellement en cours).
-const NUDGE_AFTER_MS = 4000;               // pas de relance pour une recherche courte
-const NUDGE_SILENCE_MS = 2500;             // silence minimal avant une relance
-const NUDGE_EVERY_MS = 12000;              // écart minimal entre deux relances
-const NUDGE_MAX = 2;                       // relances au maximum par tâche
-
-const NUDGE_FIRST = "Une recherche est toujours en cours en arrière-plan. Dis-le en une courte phrase, puis donne des idées à l'utilisateur : d'abord la météo des prochains jours, puis les événements prévus cette semaine, d'après les informations [APP] reçues ; à défaut, parle de la ville. Ne pose aucune question.";
-const NUDGE_AGAIN = "La recherche est toujours en cours. Rappelle-le en quelques mots et continue avec une autre idée (un autre événement prévu, sinon la ville), sans poser de question.";
 
 export function distanceM(a, b) {
   const rad = (d) => (d * Math.PI) / 180;
@@ -36,7 +26,7 @@ export function distanceM(a, b) {
   return 12742000 * Math.asin(Math.sqrt(h));
 }
 
-export function createLiveManager({ apiKey, store, metrics, broadcast, briefing, board }) {
+export function createLiveManager({ apiKey, store, metrics, broadcast, board }) {
   let session = null; // une seule conversation à la fois (prototype mono-utilisateur)
   // Conversation transcrite (contexte des tâches), gardée d'une session à l'autre
   const conversation = [];
@@ -91,7 +81,6 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
     metrics.time("session_create_ms", Date.now() - started);
     session = newSession(result.session.id);
     attachSideband(session);
-    sendBriefing(session);
     return { session: { id: result.session.id }, transport: { type: "webrtc", sdp: result.transport.sdp } };
   }
 
@@ -121,25 +110,6 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
       timers: [],
       closing: false,
     };
-  }
-
-  // Météo et événements de la semaine, préparés pendant que la conversation démarre, puis transmis
-  // au guide sans qu'il les lise : il s'en sert pendant l'attente des recherches
-  async function sendBriefing(s) {
-    if (!briefing) return;
-    const started = Date.now();
-    const text = await briefing(store.context).catch(() => null);
-    metrics.time("briefing_ms", Date.now() - started);
-    if (!text) return;
-    await s.opened;
-    if (session !== s || s.closing) return;
-    console.log("[briefing]", text.replace(/\n/g, " | ").slice(0, 300));
-    send(s, {
-      type: "session.thinking.append",
-      event_id: `briefing_${Date.now()}`,
-      delegation_id: null,
-      content: `[APP] Sujets pour les moments d'attente pendant une recherche, dans cet ordre : d'abord la météo, puis les événements à venir.\n${text}`.slice(0, 1500),
-    });
   }
 
   // ---- Connexion de suivi (sideband) ----
@@ -176,7 +146,6 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
       if (Date.now() - s.lastActivity > IDLE_CLOSE_MS) close("idle", s);
     }, 15000));
     s.timers.push(setTimeout(() => close("max_duration", s), MAX_SESSION_MS));
-    s.timers.push(setInterval(() => nudgeDuringSearch(s), 1000));
   }
 
   function send(s, event) {
@@ -292,29 +261,20 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, briefing,
     } else if (type === "started") {
       appNote(`Tâche lancée : « ${task.title} ». ${summary}`);
     } else if (type === "done" || type === "failed") {
-      // Résultat à annoncer : le guide le dit avec ses mots
+      // Recherche, localisation, point de retour : le guide dit seulement que c'est fait ; question
+      // sur un lieu ou modification de la liste : il donne la réponse
+      const brief = type === "done" && ["search", "locate", "self"].includes(task.kind);
+      const content = brief
+        ? `[APP] Tâche terminée — « ${task.title} ». Dis seulement, en une phrase courte, que c'est fait, sans détailler les lieux (pour toi seulement : ${task.result})`
+        : `[APP] ${type === "done" ? "Tâche terminée" : "Tâche échouée"} — « ${task.title} » : ${task.result}`;
       send(s, {
         type: "session.commentary.append", event_id: `task_${task.id}_${Date.now()}`, delegation_id: null,
-        content: `[APP] ${type === "done" ? "Tâche terminée" : "Tâche échouée"} — « ${task.title} » : ${task.result}`.slice(0, 1400),
+        content: content.slice(0, 1400),
       });
       appNote(summary);
     } else if (type === "cancelled") {
       appNote(`Tâche « ${task.title} » arrêtée${task.replacedBy ? " et relancée avec la précision" : ""}. ${summary}`);
     }
-  }
-
-  // Relance du guide pendant une recherche longue, seulement s'il se tait
-  function nudgeDuringSearch(s) {
-    if (session !== s || s.closing) return;
-    const now = Date.now();
-    if (now - s.lastSpeechAt < NUDGE_SILENCE_MS) return;
-    const task = board().searchRunning()
-      .find((t) => now - t.startedAt >= NUDGE_AFTER_MS && t.nudges < NUDGE_MAX && now - t.lastNudgeAt >= NUDGE_EVERY_MS);
-    if (!task) return;
-    task.nudges++;
-    task.lastNudgeAt = now;
-    metrics.count("search_nudges");
-    send(s, { type: "session.instructions.append", event_id: `nudge_${now}`, delegation_id: null, content: task.nudges === 1 ? NUDGE_FIRST : NUDGE_AGAIN });
   }
 
   // ---- Informations de l'appli transmises au guide ([APP], sans les lire à voix haute) ----

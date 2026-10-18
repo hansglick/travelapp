@@ -73,7 +73,7 @@ export class PoiStore extends EventEmitter {
 
   reset() {
     this.version = 0;
-    this.practical = { weather: null, phrasebook: null, facts: null, place: null }; // menu ☰ : météo, guide, fun facts
+    this.practical = { weather: null, phrasebook: null, facts: null, news: null, place: null }; // menu ☰ et icône « i »
     this.renumberPending = false; // numéros absolus à recalculer (après une suppression ou un cadenas)
     this.pois = new Map();      // id → POI, dans l'ordre d'ajout
     this.nextId = 1;

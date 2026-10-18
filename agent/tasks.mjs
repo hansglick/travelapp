@@ -309,8 +309,6 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   // Champs d'exécution d'une tâche (non enregistrés) : annulation, journal, relances, couleur
   function hydrate(t) {
     t.abort = new AbortController();
-    t.nudges = 0;
-    t.lastNudgeAt = 0;
     t.relatedIds = new Set(Array.isArray(t.relatedIds) ? t.relatedIds : []); // lieux consultés par la tâche
     t.dimensions ||= [];
     t.log = (text) => log(t, text); // utilisé par les fonctions de l'appli (lieu retiré car trop loin…)

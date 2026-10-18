@@ -80,6 +80,31 @@ const FACTS_SCHEMA = {
   },
 };
 
+// Actualités : événements publics prévus dans les 7 prochains jours (recherche web)
+const NEWS_INSTRUCTIONS = `Tu prépares la fiche « Actualités » d'un voyageur francophone : les événements publics prévus dans le lieu indiqué et ses environs immédiats pendant les 7 prochains jours (festivals, fêtes locales ou religieuses, concerts, marchés, expositions, événements sportifs).
+- Cherche sur le web et ne garde que ce que des sources récentes confirment pour ces dates ; n'invente rien. Au plus 6 événements, du plus proche au plus lointain. Aucun événement confirmé → events vide.
+- title : le nom de l'événement. text : 1 ou 2 phrases courtes en français, qui commencent par le jour et la date (« Samedi 24 octobre – »), puis le lieu et une courte précision. Sans lien, sans source, sans markdown.`;
+
+const NEWS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["events"],
+  properties: {
+    events: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "text"],
+        properties: { title: { type: "string" }, text: { type: "string" } },
+      },
+    },
+  },
+};
+
+// Liens et citations retirés des textes produits avec la recherche web
+const cleanWebText = (t, max) => String(t || "").replace(/\[[^\]]*\]\([^)]*\)/g, "").replace(/\(\s*\)/g, "").replace(/\s+([.,;:!?])/g, "$1").replace(/\s+/g, " ").trim().slice(0, max);
+
 export function createPractical({ apiKey, metrics, storage }) {
   // Météo à trois moments : maintenant, dans 4 h, dans 24 h
   async function weather(position) {
@@ -225,5 +250,31 @@ export function createPractical({ apiKey, metrics, storage }) {
     });
   }
 
-  return { weather, phrasebook, funFacts };
+  // Actualités du lieu : mémorisées par ville et par jour (elles changent vite)
+  async function news({ city, country, timezone }) {
+    if (!city) return null;
+    const day = new Date().toLocaleDateString("sv-SE", { timeZone: timezone || "UTC" }); // « 2026-10-18 »
+    const key = `news:${city}, ${country || ""}:${day}`;
+    const saved = storage.get(key);
+    if (saved) return saved;
+    return once(key, async () => {
+      const started = Date.now();
+      const fmt = (d) => d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: timezone || "UTC" });
+      const end = new Date(Date.now() + 7 * 86400000);
+      const out = await ask({
+        instructions: NEWS_INSTRUCTIONS,
+        input: `Lieu : ${city}, ${country || ""}. Nous sommes le ${fmt(new Date())} ; période : jusqu'au ${fmt(end)}.`,
+        name: "news", schema: NEWS_SCHEMA, effort: "low", timeout: 120000,
+        tools: [{ type: "web_search" }],
+      });
+      const events = (out.events || []).slice(0, 6).map((e) => ({ title: cleanWebText(e.title, 90), text: cleanWebText(e.text, 400) })).filter((e) => e.title && e.text);
+      const result = { place: city, events, generatedAt: Date.now() };
+      storage.set(key, result);
+      metrics?.time("news_ms", Date.now() - started);
+      console.log(`[infos pratiques] actualités « ${city} » : ${events.length} événement(s) en ${Date.now() - started} ms`);
+      return result;
+    });
+  }
+
+  return { weather, phrasebook, funFacts, news };
 }

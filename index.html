@@ -506,7 +506,50 @@
     .wx-panel { background: linear-gradient(180deg, #13233a 0%, #0b1220 100%); margin-bottom: 16px; border: 1px solid #555; }
     /* Fenêtres météo et guide centrées dans l'écran (les autres partent du bas), sans bouton
        « Fermer » : toucher à côté les ferme */
-    #weather-sheet, #phrase-sheet, #facts-sheet { align-items: center; }
+    #weather-sheet, #phrase-sheet, #facts-sheet, #news-sheet, #useful-sheet { align-items: center; }
+
+    /* Fenêtre « Informations utiles » : fond noir, titre blanc non gras, 4 icônes blanches en 2 × 2 */
+    .useful-panel { max-width: 380px; background: #000; border: 1px solid #555; margin-bottom: 16px; }
+    .sheet-panel .useful-title { margin: 2px 0 14px; color: #fff; font-size: 1.05rem; font-weight: 400; text-align: center; }
+    .useful-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .useful-tile {
+      display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 8px;
+      border: 1px solid #2a2a2a; border-radius: 14px; background: #0d0d0d; color: #fff; cursor: pointer;
+      font: 600 0.85rem system-ui, sans-serif;
+    }
+    .useful-tile:hover { border-color: #555; }
+    .useful-tile svg { width: 40px; height: 40px; }
+
+    /* Icône « i » en haut à gauche de la carte : pastille noire, « i » blanc. Elle se fait remarquer
+       (10 s après l'affichage de la carte, puis toutes les 20 s) : diable en boîte + deux ondes noires */
+    .info-btn {
+      position: relative; width: 44px; height: 44px; margin: 12px; padding: 0;
+      border: 0; border-radius: 50%; background: #000; color: #fff; cursor: pointer;
+      font: italic 700 23px/44px Georgia, "Times New Roman", serif;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+    .info-btn::before, .info-btn::after {
+      content: ""; position: absolute; inset: 0; border-radius: 50%;
+      border: 3px solid #000; opacity: 0; pointer-events: none;
+    }
+    .info-btn.nudge { animation: info-jack 0.9s cubic-bezier(0.3, 0.7, 0.4, 1) both; }
+    .info-btn.nudge::before { animation: info-sonar 1.9s ease-out 0.42s; }
+    .info-btn.nudge::after { animation: info-sonar 1.9s ease-out 1s; }
+    @keyframes info-jack {
+      0%   { transform: translateY(0) scale(1, 1); }
+      14%  { transform: translateY(3px) scale(1.12, 0.8); }
+      40%  { transform: translateY(-15px) scale(1.18, 1.18); }
+      58%  { transform: translateY(0) scale(1.08, 0.92); }
+      74%  { transform: translateY(-4px) scale(1.02, 1.02); }
+      100% { transform: translateY(0) scale(1, 1); }
+    }
+    @keyframes info-sonar {
+      0%   { transform: scale(1); opacity: 0.9; }
+      100% { transform: scale(3.6); opacity: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .info-btn.nudge, .info-btn.nudge::before, .info-btn.nudge::after { animation: none; }
+    }
     /* Fun facts : titre gris, chaque fait en deux lignes (titre en gras, texte), traits discrets */
     .fact { position: relative; padding: 12px 2px 12px 20px; }
     /* Puce blanche devant chaque fait, alignée sur son titre (le texte reste en retrait) */
@@ -917,6 +960,49 @@
     </div>
   </div>
 
+  <!-- Actualités : événements prévus cette semaine autour du point de départ -->
+  <div id="news-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Actualités">
+    <div class="sheet-panel phrase-panel">
+      <div id="news-body"></div>
+    </div>
+  </div>
+
+  <!-- Informations utiles (icône « i » de la carte) : quatre fiches en 2 × 2 -->
+  <div id="useful-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Informations utiles">
+    <div class="sheet-panel useful-panel">
+      <h3 class="useful-title">Informations utiles</h3>
+      <div class="useful-grid">
+        <button type="button" class="useful-tile" data-sheet="weather">
+          <svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="18" cy="17" r="6"/><path d="M18 5v3M18 26v3M6 17h3M27 17h3M9.5 8.5l2 2M24.5 8.5l-2 2M9.5 25.5l2-2"/>
+            <path d="M17 39h19a7 7 0 0 0 .5-14 10 10 0 0 0-19 3 5.5 5.5 0 0 0-.5 11z" fill="#000"/>
+          </svg>
+          Météo
+        </button>
+        <button type="button" class="useful-tile" data-sheet="facts">
+          <svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M24 6a12 12 0 0 0-7 21.7c1.3 1 2 2.4 2 4V34h10v-2.3c0-1.6.7-3 2-4A12 12 0 0 0 24 6z"/><path d="M19 39h10M21 43h6M24 12v6M21 15h6"/>
+          </svg>
+          Fun facts
+        </button>
+        <button type="button" class="useful-tile" data-sheet="phrases">
+          <svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 10h22a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H15l-6 5v-5H6a3 3 0 0 1-3-3V13a3 3 0 0 1 3-3z"/>
+            <path d="M35 18h7a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-2v5l-6-5h-9a3 3 0 0 1-3-3v-1"/>
+          </svg>
+          Guide
+        </button>
+        <button type="button" class="useful-tile" data-sheet="news">
+          <svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 9h26v28a4 4 0 0 0 4 4H12a3 3 0 0 1-3-3z"/><path d="M35 17h5v20a4 4 0 0 1-4 4"/>
+            <path d="M14 15h16M14 21h7M14 27h7M14 33h16"/><rect x="24" y="20" width="6" height="8"/>
+          </svg>
+          Actualités
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div id="menu-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Menu">
     <div class="sheet-panel">
       <button type="button" id="menu-save" class="sheet-item" disabled>Enregistrer l'itinéraire</button>
@@ -924,6 +1010,7 @@
       <button type="button" id="menu-weather" class="sheet-item">Météo</button>
       <button type="button" id="menu-phrases" class="sheet-item">Guide de conversation</button>
       <button type="button" id="menu-facts" class="sheet-item">Fun facts</button>
+      <button type="button" id="menu-news" class="sheet-item">Actualités</button>
       <button type="button" id="menu-logout" class="sheet-item">Se déconnecter</button>
       <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
     </div>
@@ -3483,6 +3570,7 @@
       if (!weatherSheet.hidden) renderWeather();
       if (!phraseSheet.hidden) renderPhrases();
       if (!factsSheet.hidden) renderFacts();
+      if (!newsSheet.hidden) renderNews();
     }
 
     const weatherSheet = document.getElementById("weather-sheet");
@@ -3491,6 +3579,9 @@
     const phraseBody = document.getElementById("phrase-body");
     const factsSheet = document.getElementById("facts-sheet");
     const factsBody = document.getElementById("facts-body");
+    const newsSheet = document.getElementById("news-sheet");
+    const newsBody = document.getElementById("news-body");
+    const usefulSheet = document.getElementById("useful-sheet");
 
     // Drapeau d'un pays (code ISO « GR ») : image, les drapeaux emoji ne s'affichent pas sous Windows
     function flagImg(code, label) {
@@ -3621,6 +3712,79 @@
         }
       }
       factsBody.replaceChildren(...items);
+    }
+
+    // -- Actualités : événements prévus cette semaine, même présentation que les fun facts --
+    function renderNews() {
+      const news = practical?.news;
+      const items = [el("p", "phrase-title", news?.place ? `Actualités · ${news.place}` : "Actualités")];
+      if (news?.pending) items.push(el("p", "wx-empty", "Actualités en cours de recherche…"));
+      else if (!news) items.push(el("p", "wx-empty", "Les actualités se préparent au « Let's Go! »."));
+      else if (!news.events?.length) items.push(el("p", "wx-empty", "Aucun événement confirmé cette semaine."));
+      else {
+        for (const ev of news.events) {
+          const item = el("div", "fact");
+          item.append(el("p", "fact-title", ev.title), el("p", "fact-text", ev.text));
+          items.push(item);
+        }
+      }
+      newsBody.replaceChildren(...items);
+    }
+
+    // Ouvre une des fiches (menu ☰ ou fenêtre « Informations utiles »)
+    const PRACTICAL_SHEETS = {
+      weather: () => [weatherSheet, renderWeather],
+      phrases: () => [phraseSheet, renderPhrases],
+      facts: () => [factsSheet, renderFacts],
+      news: () => [newsSheet, renderNews],
+    };
+
+    function openPracticalSheet(name) {
+      const [sheet, render] = PRACTICAL_SHEETS[name]();
+      render();
+      openSheet(sheet);
+    }
+
+    document.getElementById("menu-news").addEventListener("click", () => {
+      closeSheet(menuSheet);
+      openPracticalSheet("news");
+    });
+
+    usefulSheet.querySelectorAll(".useful-tile").forEach((tile) => tile.addEventListener("click", () => {
+      closeSheet(usefulSheet);
+      openPracticalSheet(tile.dataset.sheet);
+    }));
+
+    // Icône « i » en haut à gauche de la carte : ouvre « Informations utiles » ; se fait remarquer
+    // 10 s après que la carte s'affiche (sortie de l'écran zéro), puis toutes les 20 s
+    const INFO_FIRST_MS = 10000;
+    const INFO_EVERY_MS = 20000;
+
+    function createInfoButton() {
+      const button = el("button", "info-btn", "i");
+      button.type = "button";
+      button.title = "Informations utiles";
+      button.setAttribute("aria-label", "Informations utiles");
+      button.addEventListener("click", () => openSheet(usefulSheet));
+      button.addEventListener("animationend", (e) => { if (e.animationName === "info-jack") button.classList.remove("nudge"); });
+      map.controls[google.maps.ControlPosition.TOP_LEFT].push(button);
+      infoNudge = () => {
+        button.classList.remove("nudge");
+        void button.offsetWidth; // relance l'animation
+        button.classList.add("nudge");
+      };
+    }
+
+    let infoNudge = null;
+    let infoTimer = null;
+
+    // Carte affichée : première animation au bout de 10 s, puis toutes les 20 s (une seule série)
+    function startInfoNudges() {
+      if (infoTimer || !infoNudge) return;
+      infoTimer = setTimeout(() => {
+        infoNudge();
+        infoTimer = setInterval(infoNudge, INFO_EVERY_MS);
+      }, INFO_FIRST_MS);
     }
 
     document.getElementById("menu-facts").addEventListener("click", () => {
@@ -4140,6 +4304,7 @@
       legendEl.hidden = true;
       map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(legendEl);
       createStartControls();
+      createInfoButton();
       setUserPosition(DEFAULT_POSITION);
       renderSteps();
       // Lieux, tâches et conversation du compte : une fois connecté
@@ -4402,6 +4567,7 @@
 
     function leaveZeroScreen() {
       zeroScreen.hidden = true;
+      startInfoNudges();
       spinning = false;
       stopOrbit();
     }

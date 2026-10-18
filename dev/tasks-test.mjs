@@ -16,7 +16,9 @@ const t0 = Date.now();
 const at = () => `${((Date.now() - t0) / 1000).toFixed(1).padStart(5)} s`;
 
 if (process.argv[4] === "reset") await post("/api/reset", {});
-await post("/api/context", { position: { lat: 35.37, lng: 24.4715 }, timezone: "Europe/Athens" });
+// Position de test : TEST_POS="lat,lng" (Réthymnon par défaut)
+const [testLat, testLng] = (process.env.TEST_POS || "35.37,24.4715").split(",").map(Number);
+await post("/api/context", { position: { lat: testLat, lng: testLng }, timezone: "Europe/Paris" });
 
 let lastTasks = "", lastPois = "", tasks = [];
 const res = await fetch(BASE + "/api/events", { headers: { Cookie: H.Cookie } });

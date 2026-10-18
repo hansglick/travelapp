@@ -11,7 +11,7 @@ import { createTaskBoard } from "./tasks.mjs";
 
 const SAVE_DELAY_MS = 1000;
 
-export function createWorkspaces({ apiKey, resolvePoi, briefing, storage, trips }) {
+export function createWorkspaces({ apiKey, resolvePoi, storage, trips }) {
   const spaces = new Map(); // id du compte → espace
 
   function open(user) {
@@ -34,7 +34,7 @@ export function createWorkspaces({ apiKey, resolvePoi, briefing, storage, trips 
     }
 
     let board = null;
-    const live = createLiveManager({ apiKey, store, metrics, broadcast, briefing, board: () => board });
+    const live = createLiveManager({ apiKey, store, metrics, broadcast, board: () => board });
     const tools = createTools({ store, resolvePoi, broadcast, uiConnected: () => clients.size > 0, appNote: (text) => live.appNote(text) });
     let tasksTimer = null;
     board = createTaskBoard({

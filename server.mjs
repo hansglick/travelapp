@@ -11,7 +11,6 @@ import { fileURLToPath } from "node:url";
 import { createResolver, reverseGeocode } from "./agent/places.mjs";
 import { distanceM } from "./agent/live.mjs";
 import { createMetrics } from "./agent/metrics.mjs";
-import { createBriefing } from "./agent/briefing.mjs";
 import { openDatabase, createAccounts, createWorkspaceStorage, createTripStorage, createPhrasebookStorage } from "./agent/db.mjs";
 import { createPractical } from "./agent/practical.mjs";
 import { createNamer } from "./agent/naming.mjs";
@@ -67,15 +66,16 @@ const db = openDatabase(DB_PATH);
 const accounts = createAccounts(db, { inviteCodes: INVITE_CODES, devInvite: DEV ? "DEV" : null });
 const sharedMetrics = createMetrics(); // Google et météo, communs à tous les comptes
 const resolvePoi = createResolver({ apiKey: GOOGLE_API_KEY, metrics: sharedMetrics });
-const briefing = OPENAI_API_KEY ? createBriefing({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
 const trips = createTripStorage(db);
-const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, briefing, storage: createWorkspaceStorage(db), trips });
+const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, storage: createWorkspaceStorage(db), trips });
 const suggestNames = OPENAI_API_KEY ? createNamer({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
 const practical = createPractical({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createPhrasebookStorage(db) });
 
 // ---- HTTP ----
 
 const STATIC = { "/": "index.html", "/index.html": "index.html" };
+// Mode test : pages de démonstration (dev/)
+if (DEV) STATIC["/demo-info"] = "dev/demo-info.html";
 const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json" };
 
 function json(res, status, body, headers = {}) {
@@ -224,7 +224,7 @@ const routes = {
     ws.store.setPractical({
       weather,
       place: place ? { city: place.city || place.neighborhood, neighborhood: place.neighborhood, region: place.region, country: place.country, countryCode: place.countryCode } : null,
-      ...(phrasebook ? { phrasebook: { pending: true }, facts: { pending: true } } : {}),
+      ...(phrasebook ? { phrasebook: { pending: true }, facts: { pending: true }, news: { pending: true } } : {}),
     });
     if (!phrasebook) return;
     // Guide de conversation et fun facts : en parallèle, en arrière-plan (indépendants des tâches
@@ -234,11 +234,13 @@ const routes = {
       console.warn(`[infos pratiques] ${label} :`, err.message);
       ws.store.setPractical({ [name]: null });
     };
-    if (!OPENAI_API_KEY || !place?.country) return ws.store.setPractical({ phrasebook: null, facts: null });
+    if (!OPENAI_API_KEY || !place?.country) return ws.store.setPractical({ phrasebook: null, facts: null, news: null });
     practical.phrasebook({ city: place.city || place.neighborhood, region: place.region, country: place.country })
       .then(ready("phrasebook"), failed("phrasebook", "guide"));
     practical.funFacts({ neighborhood: place.neighborhood, city: place.city, country: place.country })
       .then(ready("facts"), failed("facts", "fun facts"));
+    practical.news({ city: place.city || place.neighborhood, country: place.country, timezone: weather?.timezone || ws.store.context.timezone })
+      .then(ready("news"), failed("news", "actualités"));
   },
 
   // Bulle ouverte à l'écran (ou fermée : id null) : lieu visé par « il », « ce point »…

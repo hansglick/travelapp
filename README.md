@@ -21,7 +21,6 @@ Node.js 24 (base SQLite intégrée). Le micro demande une page servie en `localh
 - `agent/live.mjs` : session GPT-Live (délégation « par l'application »), suivi « sideband », fin des prises de parole, informations transmises au guide.
 - `agent/tasks.mjs` : tableau des tâches — détection à chaque prise de parole, exécution par le modèle de calcul (3 en parallèle), arrêt et relance d'une tâche précisée.
 - `agent/tools.mjs` : fonctions de l'appli appelées pendant une tâche (liste de lieux, repères, informations pratiques, distances à pied, bulle, préférences).
-- `agent/briefing.mjs` : météo et événements de la semaine, pour les moments d'attente.
 - `agent/prompts.mjs` : consignes et outils du guide vocal (GPT-Live), du détecteur de tâches et du modèle de calcul (Responses, `gpt-6-luna`).
 - `agent/store.mjs` : liste des lieux, préférences et contexte d'un compte, validation des modifications. Seuls l'identifiant Google et des coordonnées datées (30 jours au plus) sont enregistrés, conformément aux règles de Google.
 - `agent/places.mjs` : localisation des lieux dans Google Places (Text Search).
