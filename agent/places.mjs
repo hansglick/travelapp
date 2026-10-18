@@ -7,6 +7,9 @@
 
 import { normalize } from "./store.mjs";
 
+// Note, nombre d'avis, prix et horaires sont demandés dès la localisation : l'agent répond ensuite
+// sans rouvrir chaque fiche (« lequel est le plus populaire ? »). Gardés en mémoire seulement (règles
+// de Google : seuls l'identifiant et les coordonnées peuvent être enregistrés).
 const FIELD_MASK = [
   "places.id",
   "places.displayName",
@@ -15,7 +18,26 @@ const FIELD_MASK = [
   "places.types",
   "places.primaryType",
   "places.businessStatus",
+  "places.rating",
+  "places.userRatingCount",
+  "places.priceLevel",
+  "places.regularOpeningHours.weekdayDescriptions",
 ].join(",");
+
+const PRICE_LEVELS = {
+  PRICE_LEVEL_FREE: "gratuit", PRICE_LEVEL_INEXPENSIVE: "bon marché (€)", PRICE_LEVEL_MODERATE: "prix moyens (€€)",
+  PRICE_LEVEL_EXPENSIVE: "cher (€€€)", PRICE_LEVEL_VERY_EXPENSIVE: "très cher (€€€€)",
+};
+
+// Note, avis, prix et horaires d'un résultat Google (champs absents : null)
+function googleInfo(p) {
+  return {
+    rating: p.rating ?? null,
+    ratingCount: p.userRatingCount ?? null,
+    price: PRICE_LEVELS[p.priceLevel] || null,
+    hours: p.regularOpeningHours?.weekdayDescriptions || null,
+  };
+}
 
 const TIMEOUT_MS = 6000;
 const MAX_PARALLEL = 4;
@@ -146,6 +168,7 @@ export function createResolver({ apiKey, metrics }) {
       address: c.place.formattedAddress || null,
       location: c.location,
       types: (c.place.types || []).slice(0, 5),
+      ...googleInfo(c.place),
     });
     const [best, second] = scored;
     // Nom descriptif et Google ne renvoie qu'un seul lieu, de la bonne catégorie et proche : il est sûr
@@ -198,6 +221,7 @@ export function createResolver({ apiKey, metrics }) {
             address: p.formattedAddress || null,
             location,
             types: (p.types || []).slice(0, 5),
+            ...googleInfo(p),
           },
           distance_m: meters,
           direction: anchors
@@ -259,10 +283,6 @@ export function createResolver({ apiKey, metrics }) {
   // Informations pratiques d'un lieu (pour répondre aux questions de l'utilisateur), demandées
   // seulement quand le modèle en a besoin et gardées 1 h en mémoire
   const details = new Map(); // placeId → { at, value: Promise }
-  const PRICE_LEVELS = {
-    PRICE_LEVEL_FREE: "gratuit", PRICE_LEVEL_INEXPENSIVE: "bon marché (€)", PRICE_LEVEL_MODERATE: "prix moyens (€€)",
-    PRICE_LEVEL_EXPENSIVE: "cher (€€€)", PRICE_LEVEL_VERY_EXPENSIVE: "très cher (€€€€)",
-  };
 
   async function fetchDetails(placeId) {
     const fields = [

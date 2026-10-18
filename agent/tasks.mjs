@@ -226,6 +226,8 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     const question = /\?/.test(text) || /\b(combien|quel|quelle|quels|quelles|quand|ou est|est ce|a quelle heure|ferme|ouvre|ouvert|note|telephone|prix)\b/.test(lower);
     if (!question) return false;
     if (referent && mentionsReferent(text)) return true;
+    // Comparaison entre les lieux de la liste (« lequel est le mieux noté ? », « le plus proche ? »)
+    if (store.pois.size && /\b(lequel|laquelle|lesquels|lesquelles|le plus|la plus|les plus|le mieux|le moins|ces lieux|mes lieux|parmi)\b/.test(lower)) return true;
     if (/\b(n|numero|point|etape)\s*\d+\b/.test(lower) || lower.includes(" point de retour ")) return true;
     return [...store.pois.values()].some((poi) =>
       [poi.place?.name, poi.name].map(normalize).some((n) => n.length >= 4 && lower.includes(` ${n} `)));

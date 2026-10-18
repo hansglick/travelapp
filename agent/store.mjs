@@ -208,6 +208,11 @@ export class PoiStore extends EventEmitter {
         ...(p.absIndex ? { itinerary_step: p.absIndex } : {}),
         ...(p.pin ? { pinned: p.pin.position === "index" ? p.pin.index : p.pin.position } : {}),
         ...(p.place?.address ? { address: p.place.address } : {}),
+        // Données Google gardées en mémoire depuis la localisation : l'agent répond sans rouvrir la fiche
+        ...(p.place?.rating != null ? { rating: p.place.rating } : {}),
+        ...(p.place?.ratingCount != null ? { rating_count: p.place.ratingCount } : {}),
+        ...(p.place?.price ? { price: p.place.price } : {}),
+        ...(p.place?.hours?.length ? { opening_hours: p.place.hours } : {}),
         ...(p.candidates?.length ? { google_candidates: p.candidates.map((c) => `${c.name} (${c.address || "adresse inconnue"})`) } : {}),
         ...(p.included ? {} : { excluded_by_user: true }),
         ...(p.visitedAt ? { visited: true } : {}),
@@ -241,7 +246,11 @@ export class PoiStore extends EventEmitter {
     return list.map((c) => {
       const id = `cand_${this.nextCandidate++}`;
       this.candidates.set(id, c.place);
-      return { candidate_id: id, name: c.place.name, address: c.place.address, position: c.direction, ...(c.distance_from_user_m != null ? { distance_from_user_m: c.distance_from_user_m } : {}) };
+      return {
+        candidate_id: id, name: c.place.name, address: c.place.address, position: c.direction,
+        ...(c.distance_from_user_m != null ? { distance_from_user_m: c.distance_from_user_m } : {}),
+        ...(c.place.rating != null ? { rating: c.place.rating, rating_count: c.place.ratingCount } : {}),
+      };
     });
   }
 
@@ -658,6 +667,16 @@ export class PoiStore extends EventEmitter {
       this.emit("change", { added: restored.map((r) => this.pois.get(r.id)), removed: [] });
     }
     return { status: restored.length ? "applied" : "rejected", restored, rejected, version: this.version, selection: this.selectionForModel() };
+  }
+
+  // Note, avis, prix, horaires redemandés à Google après un rechargement (mémoire seulement)
+  setPlaceInfo(id, info) {
+    const poi = this.pois.get(id);
+    if (!poi?.place) return;
+    Object.assign(poi.place, {
+      rating: info.rating ?? null, ratingCount: info.rating_count ?? null,
+      price: info.price || null, hours: info.opening_hours || null,
+    });
   }
 
   // Infos pratiques mises à jour : affichage seulement, la version de la liste ne change pas

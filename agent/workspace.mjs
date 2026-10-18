@@ -55,6 +55,16 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips }) {
     let linked = saved?.linked || null; // { id, name, tripName }
     if (stale.length) console.log(`[compte ${user.pseudo}] ${stale.length} lieu(x) à relocaliser`);
     stale.forEach((id) => tools.relocate(id));
+    refreshPlaceInfo();
+
+    // Lieux rechargés (compte ou itinéraire) : note, avis, prix et horaires ne sont pas enregistrés
+    // (règles de Google) ; ils sont redemandés en arrière-plan
+    function refreshPlaceInfo() {
+      for (const poi of store.pois.values()) {
+        if (poi.status !== "resolved" || !poi.place?.placeId || poi.place.rating !== undefined) continue;
+        resolvePoi.getDetails(poi.place.placeId).then((info) => store.setPlaceInfo(poi.id, info)).catch(() => {});
+      }
+    }
 
     // Chaque changement est poussé aux écrans du compte et enregistré
     const sentAt = new Map();
@@ -115,6 +125,7 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips }) {
       live.clearConversation();
       linked = { id: it.id, name: it.name, tripName: it.tripName };
       staleIds.forEach((pid) => tools.relocate(pid));
+      refreshPlaceInfo();
       store.emit("change", {});
       broadcast({ type: "tasks", tasks: board.snapshot() });
       broadcast({ type: "itinerary", current: linked });
