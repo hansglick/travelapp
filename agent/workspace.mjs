@@ -36,14 +36,21 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery
     let board = null;
     const live = createLiveManager({ apiKey, store, metrics, broadcast, board: () => board });
     // « Découverte de la ville » préparée en arrière-plan au « Let's Go! » (affichée sur demande)
+    // État pour le bouton de la carte : preparing (arcs qui tournent), ready, displaying, shown, error
     let discoveryPending = null;
     const discoveryApi = {
       get: () => discoveryPending,
       start: (args) => {
+        discoveryApi.setState("preparing");
         discoveryPending = discovery ? discovery.prepare(args) : Promise.reject(new Error("découverte indisponible"));
-        discoveryPending.catch(() => {});
+        discoveryPending.then(() => discoveryApi.setState("ready"), (err) => {
+          console.warn("[découverte] préparation :", err.message);
+          discoveryApi.setState("error");
+        });
         return discoveryPending;
       },
+      materialize: (entry, position) => discovery.materialize(entry, position),
+      setState: (state) => store.setPractical({ discovery: { state, at: Date.now() } }),
     };
     const tools = createTools({ store, resolvePoi, broadcast, uiConnected: () => clients.size > 0, appNote: (text) => live.appNote(text), discovery: discoveryApi });
     let tasksTimer = null;
@@ -66,6 +73,20 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery
     if (stale.length) console.log(`[compte ${user.pseudo}] ${stale.length} lieu(x) à relocaliser`);
     stale.forEach((id) => tools.relocate(id));
     refreshPlaceInfo();
+    refreshStreets();
+
+    // Rues de la découverte dont le tracé (donnée Google) a plus de 30 jours : retracées en arrière-plan
+    function refreshStreets() {
+      const streets = store.streets;
+      if (!streets?.items?.some((s) => !s.paths?.length)) return;
+      Promise.all(streets.items.map(async (s) => {
+        if (s.paths?.length) return s;
+        const shape = await resolvePoi.traceStreet({ name: s.name, city: streets.city, country: streets.country, near: store.context.position }).catch(() => null);
+        return shape ? { ...s, paths: [shape.path], tracedAt: Date.now() } : null;
+      })).then((items) => {
+        if (store.streets === streets) store.setStreets({ ...streets, items: items.filter(Boolean) });
+      });
+    }
 
     // Lieux rechargés (compte ou itinéraire) : note, avis, prix et horaires ne sont pas enregistrés
     // (règles de Google) ; ils sont redemandés en arrière-plan
@@ -136,6 +157,8 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery
       linked = { id: it.id, name: it.name, tripName: it.tripName };
       staleIds.forEach((pid) => tools.relocate(pid));
       refreshPlaceInfo();
+      refreshStreets();
+      discoveryPending = null; // sélection à refaire pour ce lieu (base commune : souvent immédiate)
       store.emit("change", {});
       broadcast({ type: "tasks", tasks: board.snapshot() });
       broadcast({ type: "itinerary", current: linked });

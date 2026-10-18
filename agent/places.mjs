@@ -420,6 +420,7 @@ export function createResolver({ apiKey, metrics }) {
 
   resolve.walkMatrix = walkMatrix;
   resolve.traceStreet = traceStreet;
+  resolve.reverseGeocode = (position) => reverseGeocode(apiKey, position);
   resolve.reverseAddress = (position) => reverseAddress(apiKey, position);
   return resolve;
 }

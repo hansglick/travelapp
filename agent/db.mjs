@@ -60,6 +60,11 @@ export function openDatabase(path) {
       updated_at INTEGER NOT NULL,
       UNIQUE (trip_id, name)
     );
+    CREATE TABLE IF NOT EXISTS discoveries (
+      place_key TEXT PRIMARY KEY COLLATE NOCASE,
+      data TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS phrasebooks (
       country TEXT PRIMARY KEY COLLATE NOCASE,
       data TEXT NOT NULL,
@@ -67,6 +72,21 @@ export function openDatabase(path) {
     );
   `);
   return db;
+}
+
+// « Découverte de la ville », commune à tous les comptes : une par quartier (ou ville). Sélection du
+// modèle et identifiants Google sans limite ; coordonnées et tracés datés (30 jours au plus, voir
+// discovery.mjs)
+export function createDiscoveryStorage(db) {
+  const get = db.prepare("SELECT data FROM discoveries WHERE place_key = ?");
+  const put = db.prepare("INSERT OR REPLACE INTO discoveries (place_key, data, updated_at) VALUES (?, ?, ?)");
+  return {
+    get: (key) => {
+      const row = get.get(key);
+      return row ? JSON.parse(row.data) : null;
+    },
+    set: (key, data) => put.run(key, JSON.stringify(data), Date.now()),
+  };
 }
 
 // Guides de conversation (écran « Infos pratiques »), communs à tous les comptes : un par pays

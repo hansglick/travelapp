@@ -3,6 +3,7 @@
 // Chaque appel est validé ici ; la liste (store) reste la seule source de vérité.
 
 import { LIMITS } from "./store.mjs";
+import { MAX_TRAVEL_S, MAX_SHOWN } from "./discovery.mjs";
 
 const RESOLUTION_WAIT_MS = 2500; // update_pois attend au plus ce délai les résultats de Google
 
@@ -104,43 +105,70 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
   // « Découverte de la ville » : la préparation faite au « Let's Go! » (ou lancée maintenant) est
   // affichée : lieux localisés dans Google et ajoutés au groupe de la tâche, rues colorées
   async function discover(task) {
-    let pending = discovery?.get();
-    if (!pending) {
-      const position = store.context.position;
-      if (!position || !store.context.positionSource) return "Ta position n'est pas encore connue : choisis d'abord ton point de départ.";
-      pending = discovery.start({ position, city: store.context.place?.city, country: store.context.place?.country });
-    }
-    let prepared;
+    const position = store.context.position;
+    if (!position || !store.context.positionSource) return "Ta position n'est pas encore connue : choisis d'abord ton point de départ.";
+    discovery.setState("displaying");
     try {
-      prepared = await pending;
+      // Sélection préparée au « Let's Go! » (ou depuis la base commune), sinon lancée maintenant
+      // Ville ou quartier du départ : si le contexte ne les connaît pas encore, on les demande maintenant
+      const place = store.context.place?.city ? store.context.place : await resolvePoi.reverseGeocode(position);
+      const entry = await (discovery.get() || discovery.start({ place, position }));
+      await discovery.materialize(entry, position);
+      // Temps de trajet réels depuis le point de départ : un seul appel pour les lieux et les rues
+      const located = entry.candidates.filter((c) => c.location);
+      const streets = entry.streets.filter((s) => s.path?.length);
+      const nearest = (path) => {
+        let best = null, bestM = Infinity;
+        for (const [lat, lng] of path) {
+          const m = distanceM(position, { lat, lng });
+          if (m < bestM) { bestM = m; best = { lat, lng }; }
+        }
+        return best;
+      };
+      const targets = [...located.map((c) => c.location), ...streets.map((s) => nearest(s.path))];
+      let seconds;
+      try {
+        const grid = targets.length ? await resolvePoi.walkMatrix([position], targets) : [[]];
+        seconds = grid[0].map((cell) => (cell ? cell.seconds : Infinity));
+      } catch {
+        // Trajets indisponibles : estimation à vol d'oiseau (80 m par minute de marche)
+        seconds = targets.map((t) => (distanceM(position, t) / 80) * 60);
+      }
+      const reachable = (i) => seconds[i] <= MAX_TRAVEL_S;
+      const room = Math.max(0, LIMITS.selectionSize - store.pois.size);
+      const chosen = located.filter((c, i) => reachable(i)).slice(0, Math.min(MAX_SHOWN, room));
+      const keptStreets = streets.filter((s, i) => reachable(located.length + i));
+      // Lieux déjà localisés : ajoutés tels quels (sans nouvelle recherche Google)
+      const ids = store.rememberCandidates(chosen.map((c) => ({ place: { placeId: c.placeId, name: c.name, address: null, location: c.location, types: [] } })))
+        .map((v) => v.candidate_id);
+      for (let i = 0; i < chosen.length; i += LIMITS.addPerOperation) {
+        await run("update_pois", {
+          operation: "add", base_version: store.version, op_id: `discover-${i}`,
+          pois: chosen.slice(i, i + LIMITS.addPerOperation).map((c, k) => ({
+            name: c.name, query: c.query, category: c.category, reason: c.reason, sources: [], candidate_id: ids[i + k],
+          })),
+          remove_ids: [], remove_category: null, area: null, requested_count: null,
+        }, task);
+      }
+      // Note, avis, prix et horaires : demandés en arrière-plan (mémoire seulement)
+      for (const id of task.addedIds) {
+        const poi = store.pois.get(id);
+        if (poi?.place?.placeId) resolvePoi.getDetails(poi.place.placeId).then((info) => store.setPlaceInfo(id, info)).catch(() => {});
+      }
+      store.setStreets({
+        taskId: task.id, colorIndex: task.ensureColor(), city: entry.city, country: entry.country,
+        items: keptStreets.map((s) => ({ name: s.name, why: s.why, paths: [s.path], tracedAt: s.tracedAt })),
+      });
+      discovery.setState("shown");
+      const placed = task.addedIds.filter((id) => store.pois.get(id)?.status === "resolved").length;
+      const tooFar = located.length - located.filter((c, i) => reachable(i)).length;
+      return `Découverte de la ville affichée : ${placed} lieu(x) à 40 min au plus et ${keptStreets.length} rue(s) colorée(s)`
+        + (tooFar ? ` (${tooFar} lieu(x) écarté(s), à plus de 40 min).` : ".");
     } catch (err) {
-      console.warn("[découverte] préparation :", err.message);
+      console.warn("[découverte] affichage :", err.message);
+      discovery.setState("error");
       return "La découverte de la ville n'a pas pu être préparée (erreur technique).";
     }
-    const room = Math.max(0, LIMITS.selectionSize - store.pois.size);
-    const places = prepared.places.slice(0, room);
-    for (let i = 0; i < places.length; i += LIMITS.addPerOperation) {
-      await run("update_pois", {
-        operation: "add", base_version: store.version, op_id: `discover-${i}`,
-        pois: places.slice(i, i + LIMITS.addPerOperation).map((p) => ({ ...p, sources: [], candidate_id: null })),
-        remove_ids: [], remove_category: null, area: null, requested_count: null,
-      }, task);
-    }
-    // Rues : tracées par Google maintenant (3 à la fois), puis coloriées à la couleur du groupe
-    const near = store.context.position;
-    const traced = [];
-    for (let i = 0; i < prepared.streets.length; i += 3) {
-      const batch = prepared.streets.slice(i, i + 3);
-      const shapes = await Promise.all(batch.map((s) => resolvePoi.traceStreet({ name: s.name, city: prepared.city, country: prepared.country, near }).catch(() => null)));
-      batch.forEach((s, k) => { if (shapes[k]) traced.push({ name: shapes[k].name, why: s.why, paths: [shapes[k].path] }); });
-    }
-    const missing = prepared.streets.length - traced.length;
-    if (missing) task.log?.(`${missing} rue(s) non tracée(s) (introuvable(s) dans Google)`);
-    store.setStreets({ taskId: task.id, colorIndex: task.ensureColor(), items: traced });
-    const placed = task.addedIds.filter((id) => store.pois.get(id)?.status === "resolved").length;
-    const left = prepared.places.length - places.length;
-    return `Découverte de la ville affichée : ${placed} lieu(x) et ${traced.length} rue(s) colorée(s).`
-      + (left ? ` ${left} lieu(x) non ajouté(s) : la carte est limitée à ${LIMITS.selectionSize} lieux.` : "");
   }
 
   // Auto-localisation : le point de retour « B » à la position actuelle de l'utilisateur (sans modèle)

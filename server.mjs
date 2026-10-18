@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { createResolver, reverseGeocode } from "./agent/places.mjs";
 import { distanceM } from "./agent/live.mjs";
 import { createMetrics } from "./agent/metrics.mjs";
-import { openDatabase, createAccounts, createWorkspaceStorage, createTripStorage, createPhrasebookStorage } from "./agent/db.mjs";
+import { openDatabase, createAccounts, createWorkspaceStorage, createTripStorage, createPhrasebookStorage, createDiscoveryStorage } from "./agent/db.mjs";
 import { createPractical } from "./agent/practical.mjs";
 import { createDiscovery } from "./agent/discovery.mjs";
 import { createNamer } from "./agent/naming.mjs";
@@ -68,7 +68,7 @@ const accounts = createAccounts(db, { inviteCodes: INVITE_CODES, devInvite: DEV 
 const sharedMetrics = createMetrics(); // Google et météo, communs à tous les comptes
 const resolvePoi = createResolver({ apiKey: GOOGLE_API_KEY, metrics: sharedMetrics });
 const trips = createTripStorage(db);
-const discovery = OPENAI_API_KEY ? createDiscovery({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
+const discovery = OPENAI_API_KEY ? createDiscovery({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createDiscoveryStorage(db), resolvePoi }) : null;
 const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, storage: createWorkspaceStorage(db), trips, discovery });
 const suggestNames = OPENAI_API_KEY ? createNamer({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
 const practical = createPractical({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createPhrasebookStorage(db) });
@@ -78,6 +78,7 @@ const practical = createPractical({ apiKey: OPENAI_API_KEY, metrics: sharedMetri
 const STATIC = { "/": "index.html", "/index.html": "index.html" };
 // Mode test : pages de démonstration (dev/)
 if (DEV) STATIC["/demo-info"] = "dev/demo-info.html";
+if (DEV) STATIC["/demo-streets"] = "dev/demo-streets.html";
 const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json" };
 
 function json(res, status, body, headers = {}) {
@@ -242,9 +243,16 @@ const routes = {
     practical.funFacts({ neighborhood: place.neighborhood, city: place.city, country: place.country })
       .then(ready("facts"), failed("facts", "fun facts"));
     // Découverte de la ville : préparée maintenant, affichée seulement si l'utilisateur la demande
-    ws.startDiscovery({ position: pos, city: place.city || place.neighborhood, country: place.country });
+    ws.startDiscovery({ position: pos, place: { neighborhood: place.neighborhood, city: place.city, country: place.country } });
     practical.news({ city: place.city || place.neighborhood, country: place.country, timezone: weather?.timezone || ws.store.context.timezone })
       .then(ready("news"), failed("news", "actualités"));
+  },
+
+  // Bouton « Découverte de la ville » de la carte : même tâche que la demande vocale
+  "POST /api/discover": async (req, res, ws) => {
+    const running = [...ws.board.tasks.values()].some((t) => t.kind === "discover" && ["pending", "running"].includes(t.status));
+    if (!running) ws.board.add({ title: "Découvrir la ville", kind: "discover", utterance: "(bouton Découverte de la ville)", request: "Afficher la découverte de la ville." });
+    json(res, 202, { ok: true });
   },
 
   // Bouton poubelle de la bulle : le lieu quitte la carte et va dans la corbeille (restaurable)

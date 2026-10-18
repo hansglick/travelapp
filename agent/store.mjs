@@ -135,7 +135,11 @@ export class PoiStore extends EventEmitter {
     this.renumberPending = Boolean(data.renumberPending);
     if (data.preferences) this.preferences = { ...this.preferences, ...data.preferences };
     if (data.practical) this.practical = { ...this.practical, ...data.practical };
-    this.streets = data.streets || null;
+    // Tracés des rues : coordonnées Google, 30 jours au plus ; au-delà, retracés (workspace)
+    this.streets = data.streets ? {
+      ...data.streets,
+      items: (data.streets.items || []).map((s) => (Date.now() - (s.tracedAt || 0) > 30 * 86400000 ? { ...s, paths: [], tracedAt: null } : s)),
+    } : null;
     const stale = [];
     for (const p of data.pois || []) {
       if (p.special === "back" && p.ownLocation) {
