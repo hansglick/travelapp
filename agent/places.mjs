@@ -212,7 +212,9 @@ export function createResolver({ apiKey, metrics }) {
   // plus loin, rayon élargi jusqu'à 10 km s'il n'y a rien) ; les mots rattrapent ceux que Google a
   // mal classés (la station du Super U de Quiberon n'est pas une « gas_station » pour Google)
   // want : nombre de lieux du type voulus avant d'arrêter d'élargir le rayon
+  // googleType : un type Google, ou une famille de types (tableau)
   async function searchNear({ textQuery, googleType, anchors, radius, position, limit = 8, want = 1 }) {
+    const includedTypes = (Array.isArray(googleType) ? googleType : [googleType]).filter(Boolean);
     const anchor = anchors[0].location;
     const circle = (r) => ({ circle: { center: { latitude: anchor.lat, longitude: anchor.lng }, radius: r } });
     const call = async (endpoint, body, metric) => {
@@ -228,12 +230,12 @@ export function createResolver({ apiKey, metrics }) {
     };
     const byType = async () => {
       for (let reach = radius; ; reach = Math.min(reach * 4, 10000)) {
-        const found = await call("searchNearby", { includedTypes: [googleType], languageCode: "fr", maxResultCount: 10, rankPreference: "DISTANCE", locationRestriction: circle(reach) }, "google_nearby_search");
+        const found = await call("searchNearby", { includedTypes, languageCode: "fr", maxResultCount: 10, rankPreference: "DISTANCE", locationRestriction: circle(reach) }, "google_nearby_search");
         if (found.length >= want || reach >= 10000) return { found, reach };
       }
     };
     const [typed, worded] = await Promise.all([
-      googleType ? byType().catch(() => ({ found: [], reach: radius })) : { found: [], reach: radius },
+      includedTypes.length ? byType().catch(() => ({ found: [], reach: radius })) : { found: [], reach: radius },
       call("searchText", { textQuery, languageCode: "fr", maxResultCount: 10, locationBias: circle(radius) }, "google_text_search"),
     ]);
     const reach = Math.max(radius, typed.reach);

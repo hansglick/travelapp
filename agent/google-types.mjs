@@ -31,3 +31,36 @@ export const GOOGLE_TYPE_LIST = [...new Set(Object.values(GOOGLE_TYPES).flatMap(
 
 // Ce que Google renvoie pour chaque lieu trouvé (critères vérifiables sans recherche web)
 export const GOOGLE_FIELDS = "distance, note et nombre d'avis, niveau de prix (€ à €€€€), ouvert en ce moment, horaires de la semaine";
+
+// Familles de types proches : Google classe parfois un lieu dans un type voisin de celui qu'on
+// cherche (à Réthymnon, « Ma Douce Pâtisserie » ou « Kanakakis Patisserie » sont des
+// « confectionery »). Pour un type demandé, la recherche couvre sa famille et un lieu d'un type
+// cousin n'est pas écarté. Familles courtes, choisies à la main : un type absent d'ici reste seul
+// (une borne de recharge ne passe jamais pour une station essence).
+export const TYPE_FAMILIES = {
+  pastry_shop: ["pastry_shop", "bakery", "cake_shop", "confectionery", "dessert_shop", "chocolate_shop"],
+  cake_shop: ["cake_shop", "pastry_shop", "bakery", "confectionery", "dessert_shop"],
+  confectionery: ["confectionery", "pastry_shop", "cake_shop", "candy_store", "chocolate_shop", "dessert_shop"],
+  bakery: ["bakery", "pastry_shop"],
+  dessert_shop: ["dessert_shop", "pastry_shop", "cake_shop", "confectionery", "ice_cream_shop"],
+  ice_cream_shop: ["ice_cream_shop", "dessert_shop"],
+  cafe: ["cafe", "coffee_shop", "coffee_stand", "tea_house"],
+  coffee_shop: ["coffee_shop", "cafe", "coffee_stand", "tea_house"],
+  bar: ["bar", "pub", "wine_bar", "cocktail_bar", "lounge_bar", "beer_garden", "sports_bar", "irish_pub", "brewpub"],
+  pub: ["pub", "bar", "irish_pub", "brewpub", "gastropub"],
+  wine_bar: ["wine_bar", "bar"],
+  supermarket: ["supermarket", "grocery_store", "convenience_store", "discount_supermarket", "hypermarket", "food_store"],
+  grocery_store: ["grocery_store", "supermarket", "convenience_store", "food_store"],
+  pharmacy: ["pharmacy", "drugstore"],
+  hotel: ["hotel", "lodging", "guest_house", "bed_and_breakfast", "inn", "motel", "resort_hotel", "hostel"],
+  parking: ["parking", "parking_lot", "parking_garage"],
+  museum: ["museum", "art_museum", "history_museum", "art_gallery"],
+  park: ["park", "city_park", "garden", "botanical_garden"],
+  seafood_restaurant: ["seafood_restaurant", "fish_and_chips_restaurant", "oyster_bar_restaurant"],
+  fast_food_restaurant: ["fast_food_restaurant", "hamburger_restaurant", "sandwich_shop", "snack_bar", "kebab_shop"],
+  kebab_shop: ["kebab_shop", "gyro_restaurant", "shawarma_restaurant"],
+  gyro_restaurant: ["gyro_restaurant", "greek_restaurant", "kebab_shop", "shawarma_restaurant"],
+};
+
+// Les types acceptés pour un type demandé : sa famille, ou lui seul
+export const familyOf = (type) => (type ? TYPE_FAMILIES[type] || [type] : []);

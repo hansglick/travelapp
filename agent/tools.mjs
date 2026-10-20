@@ -5,10 +5,13 @@
 import { LIMITS } from "./store.mjs";
 import { MAX_TRAVEL_S, MAX_SHOWN } from "./discovery.mjs";
 import { MAX_VIEWPOINTS, AREA_KM } from "./viewpoints.mjs";
-import { GOOGLE_TYPE_LIST } from "./google-types.mjs";
+import { GOOGLE_TYPE_LIST, familyOf } from "./google-types.mjs";
 import { categoryFromTypes } from "./places.mjs";
 
 // Prix compatibles avec « pas cher » (gratuit, €, €€)
+// Texte comparable : minuscules, sans accents ni ponctuation (« Pâtisserie-Café » → « patisserie cafe »)
+const plain = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
 const CHEAP_LEVELS = ["PRICE_LEVEL_FREE", "PRICE_LEVEL_INEXPENSIVE", "PRICE_LEVEL_MODERATE"];
 
 // Recherche exhaustive : tous les lieux du rayon, 20 au plus ; sans rayon donné, 15 min à pied
@@ -262,15 +265,6 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
     };
   }
 
-  // Recherche directe (canaux google et mixed, sans le modèle de calcul). La demande est découpée par
-  // le détecteur : la partie Google (type exact, formulations, ouvert, bien noté, pas cher) est
-  // cherchée tout de suite et TOUS les lieux du rayon s'affichent (20 au plus, du plus proche au plus
-  // loin) ; la partie web (check : critère concret, thème ou réputation) est vérifiée ensuite en
-  // arrière-plan sur ces lieux (analyzeInBackground). On garde les lieux du bon type ou sans type
-  // précis (Google n'a pas classé la station du Super U de Quiberon), jamais ceux classés dans un autre
-  // type (bornes de recharge, gare…) ; ceux où le type n'est que secondaire (un poké bowl classé aussi
-  // « thaï ») seulement s'il n'y a presque rien d'autre. null si rien ne convient : la tâche passe au
-  // modèle.
   // Localisation directe (tâche locate) : chaque lieu nommé est cherché autour de l'utilisateur par
   // paliers (10, 30 puis 60 min à pied) ; le lieu le plus pertinent pour Google au premier palier où il
   // apparaît est placé. Un nom introuvable à 60 min, ou un lieu décrit par rapport à un repère : null,
@@ -304,6 +298,15 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
     return `Lieu(x) placé(s) d'après Google : ${lines.join(" ; ")}.`;
   }
 
+  // Recherche directe (canaux google et mixed, sans le modèle de calcul). La demande est découpée par
+  // le détecteur : la partie Google (type exact, formulations, ouvert, bien noté, pas cher) est
+  // cherchée tout de suite et TOUS les lieux du rayon s'affichent (20 au plus, du plus proche au plus
+  // loin) ; la partie web (check : critère concret, thème ou réputation) est vérifiée ensuite en
+  // arrière-plan sur ces lieux (analyzeInBackground). On garde les lieux du bon type ou sans type
+  // précis (Google n'a pas classé la station du Super U de Quiberon), jamais ceux classés dans un autre
+  // type (bornes de recharge, gare…) ; ceux où le type n'est que secondaire (un poké bowl classé aussi
+  // « thaï ») seulement s'il n'y a presque rien d'autre. null si rien ne convient : la tâche passe au
+  // modèle.
   async function googleDirect(task) {
     const g = task.google;
     const position = store.context.position;
@@ -311,20 +314,26 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
     const limitM = task.maxDistanceM || DEFAULT_RADIUS_M;
     const radius = Math.min(Math.max(limitM, 300), 10000);
     const anchors = [{ name: "l'utilisateur", location: position }];
+    // Le type demandé et ses cousins (pâtisserie : pâtisserie, boulangerie, confiserie…)
+    const family = familyOf(g.type);
     const previous = task.previousAddedIds.filter((id) => store.pois.has(id));
     // Ajout à un groupe : le nombre demandé ; sinon, recherche exhaustive
     const goal = task.extends ? Math.max(1, (task.requestedCount || 1) - previous.length) : MAX_RESULTS;
     const runs = await Promise.all(g.words.slice(0, 3).map((word, i) =>
-      resolvePoi.searchNear({ textQuery: word, googleType: i === 0 ? g.type : null, anchors, radius, position, limit: 20, want: Math.min(goal, 20) }).catch(() => [])));
+      resolvePoi.searchNear({ textQuery: word, googleType: i === 0 ? family : null, anchors, radius, position, limit: 20, want: Math.min(goal, 20) }).catch(() => [])));
     const seen = new Set();
     const found = runs.flat().filter((c) => !seen.has(c.place.placeId) && seen.add(c.place.placeId));
     const GENERIC = new Set(["point_of_interest", "establishment", "service", "store", "food"]);
-    // 0 : le type demandé est sa catégorie principale (ou pas de type demandé) ; 1 : lieu sans type
-    // précis ; 2 : type demandé seulement secondaire ; 3 : classé dans un autre type, écarté
+    // Le nom fait foi : un lieu qui porte le mot cherché (« ma douce patisserie-cafe » pour
+    // « pâtisserie ») est gardé quel que soit son type Google
+    const named = (c) => g.words.some((w) => plain(c.place.name).includes(plain(w)));
+    // 0 : un type de la famille demandée est sa catégorie principale, ou son nom porte le mot cherché
+    // (ou pas de type demandé) ; 1 : lieu sans type précis ; 2 : type de la famille seulement
+    // secondaire ; 3 : classé dans un autre type, écarté
     const rank = (c) => {
-      if (!g.type || c.place.primaryType === g.type) return 0;
+      if (!g.type || family.includes(c.place.primaryType) || named(c)) return 0;
       if (c.place.types.every((type) => GENERIC.has(type))) return 1;
-      return c.place.types.includes(g.type) ? 2 : 3;
+      return c.place.types.some((type) => family.includes(type)) ? 2 : 3;
     };
     const onMap = new Set([...store.pois.values()].map((p) => p.place?.placeId).filter(Boolean));
     const matching = found
