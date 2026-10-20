@@ -333,6 +333,7 @@ export function createResolver({ apiKey, metrics }) {
       rating: p.rating ?? null,
       rating_count: p.userRatingCount ?? null,
       price: PRICE_LEVELS[p.priceLevel] || null,
+      price_level: p.priceLevel || null,
       open_now: p.currentOpeningHours?.openNow ?? null,
       opening_hours: p.regularOpeningHours?.weekdayDescriptions || null,
       phone: p.internationalPhoneNumber || p.nationalPhoneNumber || null,

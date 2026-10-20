@@ -96,8 +96,9 @@ Règles :
 - Les numéros (« supprime le point 6 », « montre le 3 ») désignent des lieux de la carte, jamais des tâches : crée une tâche quick, n'annule rien.
 - « Laisse tomber les pâtisseries » → cancel de la tâche concernée si elle n'est pas terminée ; si elle est terminée, crée plutôt une tâche quick pour retirer ses lieux.
 - Réponse à une question posée par une tâche terminée (« lequel ? » → « le premier ») → nouvelle tâche quick qui reprend le choix exact (nom et candidate_id cités dans le résultat de cette tâche).
-- Caractéristiques (dimensions) d'une nouvelle tâche search : la distance d'abord (toujours, avec sa valeur si la demande la donne), puis imagine les 2 à 5 autres caractéristiques qui comptent le plus pour choisir ce type de lieu, la plus importante en premier, et adaptées à ce type :
-  restaurant → distance, budget, type de cuisine, ouvert maintenant, fréquentation ; musée → thème, durée de visite, prix, distance, fréquentation ; parking → distance de la destination, prix, gratuit ou payant…
+- Caractéristiques (dimensions) d'une nouvelle tâche search : la distance d'abord (toujours, avec sa valeur si la demande la donne), puis 1 à 3 autres caractéristiques, seulement si elles changent vraiment la recherche, la plus importante en premier :
+  restaurant → distance, type de cuisine ; musée → distance, thème ; parking → distance de la destination, gratuit ou payant…
+  Ne pose JAMAIS de question sur le budget, le prix, l'ambiance, la fréquentation, le calme, l'animation, ni sur l'ouverture ou les horaires : la recherche reste large et exhaustive, c'est l'utilisateur qui fera son tri. Un budget, une ambiance ou « ouvert maintenant » dits spontanément restent des critères, mais ne se demandent pas.
   known_value : la valeur déjà donnée dans la demande ou la conversation, ou déduite des préférences enregistrées ; sinon null. question : ce que le guide demandera à l'oral si la valeur manque.
   Les tâches quick et info, et les ajouts à un groupe (extend), n'ont pas de caractéristiques.
   Un lieu précis désigné par son nom est une tâche locate, jamais search : rien à affiner.

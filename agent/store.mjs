@@ -133,6 +133,7 @@ export class PoiStore extends EventEmitter {
         reason: p.special ? null : p.reason, // adresse du point de retour : donnée Google, non gardée
         check: p.check || null,
         walk: p.walk || null,
+        openAtSearch: p.openAtSearch ?? null,
         area: p.area, status: p.status, included: p.included, visitedAt: p.visitedAt, pin: p.pin,
         createdAt: p.createdAt, taskId: p.taskId, colorIndex: p.colorIndex, absIndex: p.absIndex || null,
         special: p.special || null,
@@ -197,6 +198,7 @@ export class PoiStore extends EventEmitter {
       reason: poi.reason,
       check: poi.check || null,
       walk: poi.walk || null,
+      open_at_search: poi.openAtSearch ?? null,
       sources: poi.sources,
       status: poi.status,
       included: poi.included,
@@ -432,6 +434,8 @@ export class PoiStore extends EventEmitter {
       absIndex: null,
       // Numéro fixe affiché sur la carte, dans l'ordre d'ajout (pas pour le point de retour « B »)
       number: p.special ? null : this.nextNumber++,
+      // Ouvert ou fermé au moment de la recherche (pastille de la fiche) ; null si Google ne le sait pas
+      openAtSearch: typeof p.place?.openNow === "boolean" ? p.place.openNow : null,
     };
     if (!ITINERARY) poi.mapNumber = poi.number;
     this.pois.set(poi.id, poi);
@@ -746,8 +750,11 @@ export class PoiStore extends EventEmitter {
     if (!poi?.place) return;
     Object.assign(poi.place, {
       rating: info.rating ?? null, ratingCount: info.rating_count ?? null,
-      price: info.price || null, hours: info.opening_hours || null,
+      price: info.price || null, priceLevel: info.price_level || null, hours: info.opening_hours || null,
     });
+    // La fiche affiche note, prix et horaires : la page doit les recevoir
+    this.version++;
+    this.emit("change", { added: [], removed: [] });
   }
 
   // Infos pratiques mises à jour : affichage seulement, la version de la liste ne change pas

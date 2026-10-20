@@ -359,11 +359,8 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       }, task);
     }
     const ids = store.rememberCandidates(chosen).map((c) => c.candidate_id);
-    // Description de la fiche : l'ouverture et l'adresse (le temps de marche et la note s'affichent à part)
-    const describe = (c) => [
-      c.place.openNow === true ? "Ouvert en ce moment" : c.place.openNow === false ? "Fermé en ce moment" : null,
-      c.place.address,
-    ].filter(Boolean).join(" · ") + ".";
+    // Description de la fiche : l'adresse (ouverture, temps de marche et note s'affichent à part)
+    const describe = (c) => (c.place.address ? `${c.place.address}.` : "");
     // Partie web : chaque lieu est « en cours d'analyse » (arcs autour du marqueur) jusqu'à sa réponse
     const pending = g.check ? { status: "pending", label: g.check.label, note: "" } : null;
     await run("update_pois", {

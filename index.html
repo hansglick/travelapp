@@ -259,6 +259,18 @@
       background: none; color: #fff; cursor: pointer;
     }
     .poi-price { color: #fff; font-size: 0.95rem; font-weight: 700; letter-spacing: 1px; }
+    /* Ouvert (pastille blanche pleine) ou fermé (cercle blanc, fond noir) au moment de la recherche,
+       entre le nom et le temps de marche ; un toucher affiche les horaires */
+    .poi-open {
+      display: inline-block; width: 9px; height: 9px; margin-left: 7px; padding: 0; vertical-align: middle;
+      border: 1.5px solid #fff; border-radius: 50%; background: #000; cursor: pointer; box-sizing: border-box;
+    }
+    .poi-open.open { background: #fff; }
+    .poi-open[hidden] { display: none; }
+    /* Horaires de la semaine : dépliés sous les logos, aujourd'hui en blanc */
+    .poi-hours { flex: none; margin: -4px 14px 12px; padding-top: 8px; border-top: 1px solid #2a2a2a; }
+    .poi-hours p { margin: 2px 0; color: #9aa6b5; font-size: 0.75rem; line-height: 1.4; text-align: center; }
+    .poi-hours p.today { color: #fff; }
 
     /* Nom des lieux sur la carte (case « Labels » de la légende) : couleur du groupe, contour blanc */
     .poi-map-label {
@@ -1420,16 +1432,15 @@
     // le temps de la visite
     function getPlaceInfo(placeId) {
       if (!photoCache.has(placeId)) {
-        const fields = "photos,rating,priceLevel,internationalPhoneNumber,nationalPhoneNumber";
-        const request = fetch(`https://places.googleapis.com/v1/places/${placeId}?fields=${fields}&key=${GOOGLE_MAPS_API_KEY}`)
+        // Photos et téléphone seulement : la note, le prix et les horaires viennent de la recherche
+        const fields = "photos,internationalPhoneNumber,nationalPhoneNumber";
+        const request = fetch(`https://places.googleapis.com/v1/places/${placeId}?fields=${fields}&languageCode=fr&key=${GOOGLE_MAPS_API_KEY}`)
           .then((r) => (r.ok ? r.json() : {}))
           .then((p) => ({
             photos: pickPhotos(p.photos),
-            rating: p.rating ?? null,
             phone: p.internationalPhoneNumber || p.nationalPhoneNumber || null,
-            price: PRICE_SYMBOLS[p.priceLevel] || null,
           }))
-          .catch(() => ({ photos: [], rating: null, phone: null, price: null }));
+          .catch(() => ({ photos: [], phone: null }));
         photoCache.set(placeId, request);
       }
       return photoCache.get(placeId);
@@ -1497,6 +1508,13 @@
       const name = el("span", "poi-name", props.name);
       name.style.color = props.color || TASK_COLORS[0]; // couleur du groupe
       title.append(name);
+      // Ouvert ou fermé au moment de la recherche : pastille (montrée quand Google a des horaires)
+      const openDot = el("button", `poi-open${props.openAtSearch ? " open" : ""}`);
+      openDot.type = "button";
+      openDot.hidden = true;
+      openDot.title = props.openAtSearch ? "Ouvert lors de la recherche : voir les horaires" : "Fermé lors de la recherche : voir les horaires";
+      openDot.setAttribute("aria-label", openDot.title);
+      if (typeof props.openAtSearch === "boolean") title.append(openDot);
       const walk = walkLabel(props.walk);
       if (walk) title.append(el("span", "poi-walk", walk));
       const close = el("button", "poi-close", "×");
@@ -1507,33 +1525,69 @@
       if (props.description) card.append(el("p", "poi-desc", props.description));
       const checkLine = checkText(props.check);
       if (checkLine) card.append(el("p", `poi-check ${checkLine.kind}`, checkLine.text));
-      // Note, téléphone, budget et photos : données Google, chargées à l'ouverture
+      // Note, horaires et budget : déjà connus depuis la recherche (aucun appel à Google) ; téléphone
+      // et photos : demandés à Google à l'ouverture de la fiche, seulement pour les lieux consultés
       const tools = el("div", "poi-tools");
       card.append(tools);
+      if (props.rating) tools.append(el("span", "poi-rating", `★ ${props.rating.toLocaleString("fr-FR", { minimumFractionDigits: 1 })}`));
+      // Horaires : le calendrier (et la pastille) les déplient sous les logos ; sans horaires, ni l'un ni l'autre
+      if (props.hours?.length) {
+        const panel = el("div", "poi-hours");
+        panel.hidden = true;
+        const today = (new Date().getDay() + 6) % 7; // Google commence la semaine le lundi
+        props.hours.forEach((day, i) => panel.append(el("p", i === today ? "today" : null, day)));
+        tools.after(panel);
+        const toggle = () => {
+          panel.hidden = !panel.hidden;
+          // La fiche grandit vers le haut : la carte se décale pour qu'elle reste entièrement visible
+          requestAnimationFrame(() => {
+            const r = card.getBoundingClientRect(), m = document.getElementById("map").getBoundingClientRect();
+            if (r.top < m.top + 10) map.panBy(0, r.top - m.top - 16);
+          });
+        };
+        const cal = el("button", "poi-calendar");
+        cal.type = "button";
+        cal.innerHTML = CALENDAR_SVG;
+        cal.setAttribute("aria-label", `Horaires de ${props.name}`);
+        cal.addEventListener("click", toggle);
+        tools.append(cal);
+        openDot.hidden = false;
+        openDot.addEventListener("click", toggle);
+      }
+      const price = PRICE_SYMBOLS[props.priceLevel];
+      const priceTag = price ? el("span", "poi-price", price) : null;
+      if (priceTag) {
+        priceTag.title = "Budget (Google)";
+        tools.append(priceTag);
+      }
+      // Téléphone et photos : les logos sont là tout de suite, en même temps que les autres ; ils
+      // deviennent actifs dès que Google a répondu (un toucher avant attend sa réponse), et
+      // disparaissent si Google n'a ni téléphone ni photos pour ce lieu
       if (props.placeId) {
-        getPlaceInfo(props.placeId).then(({ rating, phone, price, photos }) => {
-          if (rating) tools.prepend(el("span", "poi-rating", `★ ${rating.toLocaleString("fr-FR", { minimumFractionDigits: 1 })}`));
+        const info = getPlaceInfo(props.placeId);
+        const call = el("a", "poi-phone");
+        call.innerHTML = PHONE_SVG;
+        call.setAttribute("aria-label", `Appeler ${props.name}`);
+        call.addEventListener("click", (e) => {
+          if (call.href) return; // numéro déjà connu : le lien fait l'appel
+          e.preventDefault();
+          info.then(({ phone }) => { if (phone) location.href = `tel:${phone.replace(/[^\d+]/g, "")}`; });
+        });
+        if (priceTag) tools.insertBefore(call, priceTag);
+        else tools.append(call);
+        const show = el("button", "poi-photos");
+        show.type = "button";
+        show.innerHTML = PHOTOS_WHITE_SVG;
+        show.setAttribute("aria-label", `Voir les photos de ${props.name}`);
+        show.addEventListener("click", () => info.then(({ photos }) => { if (photos.length) openCarousel(photos, props.color); }));
+        tools.append(show);
+        info.then(({ phone, photos }) => {
           if (phone) {
-            const call = el("a", "poi-phone");
             call.href = `tel:${phone.replace(/[^\d+]/g, "")}`;
-            call.innerHTML = PHONE_SVG;
             call.title = phone;
             call.setAttribute("aria-label", `Appeler ${props.name} : ${phone}`);
-            tools.append(call);
-          }
-          if (price) {
-            const tag = el("span", "poi-price", price);
-            tag.title = "Budget (Google)";
-            tools.append(tag);
-          }
-          if (photos.length) {
-            const show = el("button", "poi-photos");
-            show.type = "button";
-            show.innerHTML = PHOTOS_WHITE_SVG;
-            show.setAttribute("aria-label", `Voir les photos de ${props.name}`);
-            show.addEventListener("click", () => openCarousel(photos, props.color));
-            tools.append(show);
-          }
+          } else call.remove();
+          if (!photos.length) show.remove();
           if (!tools.childElementCount && !props.id) tools.remove();
         });
       }
@@ -1591,6 +1645,7 @@
     }
 
     // Icône téléphone de la bulle : un toucher ouvre le composeur avec le numéro du lieu
+    const CALENDAR_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M7.5 14h2M11 14h2M14.5 14h2M7.5 17.5h2M11 17.5h2" stroke-width="2"/></svg>';
     const PHONE_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>';
 
     // Miniature de la bulle : la photo est réduite proprement aux dimensions exactes de la zone
@@ -1877,6 +1932,11 @@
         description: p.reason,
         check: p.check || null,
         walk: p.walk || null,
+        openAtSearch: p.open_at_search ?? null,
+        // Note, prix et horaires : demandés à Google une seule fois, pendant la recherche
+        rating: p.place?.rating ?? null,
+        priceLevel: p.place?.priceLevel || null,
+        hours: p.place?.hours || null,
         id: p.id,
         placeId: p.place?.placeId,
         special: p.special || null,
@@ -4122,6 +4182,7 @@
     function onTasks(tasks) {
       agentTasks = tasks;
       renderChat();
+      chatPrimed = true; // tâches reçues : l'historique est affiché d'un coup, la suite s'écrira
       updateEraseButton();
       if (tasksPanelEl.classList.contains("open")) renderTasks();
       if (dimsPanelEl.classList.contains("open")) renderDims();
@@ -4326,6 +4387,7 @@
     function searchBlock(chain) {
       const root = chain[0], last = chain[chain.length - 1];
       const block = el("div", "chat-block search");
+      block.dataset.key = root.id;
       // Définition : la demande, les questions du guide et les réponses
       block.append(line("user", root.utterance || root.request));
       for (const d of root.dimensions || []) {
@@ -4376,6 +4438,7 @@
 
     function questionBlock(t) {
       const block = el("div", "chat-block question");
+      block.dataset.key = t.id;
       block.append(line("user", t.utterance || t.title));
       const places = (t.relatedIds || []).map(poiLabel).filter(Boolean);
       if (places.length) block.append(line("place", places.join(", ")));
@@ -4385,6 +4448,7 @@
 
     function actionBlock(t) {
       const block = el("div", "chat-block action");
+      block.dataset.key = t.id;
       if (t.utterance) block.append(line("user", t.utterance));
       let text = "…";
       if (t.status === "done") {
@@ -4393,6 +4457,47 @@
       } else if (t.status === "failed") text = t.result;
       block.append(line("answer", text));
       return block;
+    }
+
+    // Écriture caractère par caractère des nouvelles lignes du chat, l'une après l'autre dans l'ordre du
+    // fil (environ 30 caractères par seconde). Ce qui est déjà écrit ne se réécrit pas quand le chat se
+    // met à jour ; une ligne qui change (« Recherche en cours… » → « 5 lieux trouvés ») s'écrit à
+    // nouveau. L'historique présent au chargement, ou arrivé chat masqué, s'affiche d'un coup.
+    const CHAT_TYPE_MS = 33;
+    const chatTyped = new Map(); // ligne → nombre de caractères déjà écrits
+    let chatTargets = [];
+    let chatPrimed = false;
+    let chatTimer = null;
+    const chatFresh = new Set(); // blocs dont la tâche vient de changer : seules leurs nouvelles lignes s'écrivent
+
+    function applyTyping(items) {
+      const targets = [];
+      for (const block of items) {
+        if (!block.dataset?.key) continue;
+        block.querySelectorAll(".chat-line, .chat-synth-row > span:last-child").forEach((node, i) => {
+          const text = node.textContent;
+          const key = `${block.dataset.key}:${i}:${text}`;
+          if (!chatTyped.has(key)) chatTyped.set(key, chatPrimed && !chatEl.hidden && chatFresh.has(block.dataset.key) ? 0 : text.length);
+          node.textContent = text.slice(0, chatTyped.get(key));
+          targets.push({ node, text, key });
+        });
+      }
+      chatTargets = targets;
+      if (!chatTimer && targets.some((x) => chatTyped.get(x.key) < x.text.length)) chatTimer = setInterval(typeStep, CHAT_TYPE_MS);
+    }
+
+    function typeStep() {
+      const next = chatTargets.find((x) => chatTyped.get(x.key) < x.text.length);
+      if (!next) {
+        clearInterval(chatTimer);
+        chatTimer = null;
+        return;
+      }
+      const follow = chatBodyEl.scrollHeight - chatBodyEl.scrollTop - chatBodyEl.clientHeight < 40;
+      const n = chatTyped.get(next.key) + 1;
+      chatTyped.set(next.key, n);
+      next.node.textContent = next.text.slice(0, n);
+      if (follow) chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
     }
 
     // Empreinte d'une tâche : ce qui change à l'écran (pour la pastille « nouveau » et l'onglet suivi)
@@ -4408,6 +4513,8 @@
         const print = chatPrint(t);
         if (chatSeen.get(t.id) === print) continue;
         chatSeen.set(t.id, print);
+        // Le bloc de cette tâche (pour une précision : celui de la recherche d'origine) peut s'écrire
+        if (chatPrimed) for (let x = t; x; x = x.replaces ? tasks.find((y) => y.id === x.replaces) : null) chatFresh.add(x.id);
         if (!latest || t.createdAt >= latest.createdAt) latest = t;
         chatUnread.add(t.kind);
       }
@@ -4438,6 +4545,7 @@
       if (!items.length) items.push(el("p", "chat-empty", "Parle au guide : ta demande s'affichera ici."));
       const atBottom = chatBodyEl.scrollHeight - chatBodyEl.scrollTop - chatBodyEl.clientHeight < 40;
       chatBodyEl.replaceChildren(...items);
+      applyTyping(items);
       if (atBottom || latest) chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
     }
 

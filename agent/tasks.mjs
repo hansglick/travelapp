@@ -23,6 +23,9 @@ const EXTRACTOR_REASONING = process.env.EXTRACTOR_REASONING || "low"; // « none
 const FOCUS_TTL_MS = 15 * 60 * 1000; // bulle ouverte depuis plus longtemps : elle ne compte plus
 const MAX_QUESTIONS = 3;           // questions d'affinage posées au plus avant une recherche
 const MAX_DIMENSIONS = 6;
+// Jamais de question sur le budget, l'ambiance ni l'ouverture : la recherche reste large, l'utilisateur
+// trie lui-même
+const NEVER_ASKED = /budget|prix|tarif|cher|ambiance|frequentation|calme|anime|bruit|touristique|cadre|ouvert|ouverture|horaire|heure/;
 const COUNT_DIMENSION = "nombre de suggestions"; // plus demandé : recherche exhaustive (voir initialDimensions)
 const DEFAULT_COUNT = 3;
 const QUESTION_GRACE_MS = 2000;    // une prise de parole finie avant ce délai ne répond pas à la question
@@ -403,7 +406,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   // suggestions ; le rayon est toujours demandé en premier si la demande ne le donne pas
   function initialDimensions(list) {
     let toAsk = 0;
-    const raw = (Array.isArray(list) ? list : []).filter((d) => normalize(d.name) !== normalize(COUNT_DIMENSION));
+    const raw = (Array.isArray(list) ? list : []).filter((d) => normalize(d.name) !== normalize(COUNT_DIMENSION) && !NEVER_ASKED.test(normalize(d.name)));
     const isDistance = (d) => /distance|rayon|temps de marche/.test(normalize(d.name));
     if (raw.length && !raw.some(isDistance)) {
       raw.unshift({ name: "distance", known_value: null, question: "Jusqu'à combien de minutes à pied ? Par exemple 5, 10 ou 15 minutes." });
