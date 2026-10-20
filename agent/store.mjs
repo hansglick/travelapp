@@ -29,6 +29,17 @@ export const ITINERARY = false;
 // État de l'analyse web d'un lieu (critère de la recherche), pour le modèle
 const CHECK_WORDS = { pending: "analyse web en cours", confirmed: "répond au critère", maybe: "à vérifier", rejected: "écarté (ne répond pas au critère)" };
 
+// Temps de marche d'un lieu (mesuré lors de la recherche) : affiché tant que l'utilisateur est à
+// 100 m au plus de l'endroit de la recherche
+export const WALK_VALID_M = 100;
+function walkStillValid(walk, position) {
+  if (!walk?.from || !position || !Number.isFinite(walk.seconds)) return false;
+  const rad = (d) => (d * Math.PI) / 180;
+  const h = Math.sin(rad(position.lat - walk.from.lat) / 2) ** 2
+    + Math.cos(rad(walk.from.lat)) * Math.cos(rad(position.lat)) * Math.sin(rad(position.lng - walk.from.lng) / 2) ** 2;
+  return 12742000 * Math.asin(Math.sqrt(h)) <= WALK_VALID_M;
+}
+
 export const LIMITS = {
   addPerOperation: 20,
   selectionSize: 60,
@@ -121,6 +132,7 @@ export class PoiStore extends EventEmitter {
         id: p.id, number: p.number || null, name: p.name, query: p.query, category: p.category, sources: p.sources,
         reason: p.special ? null : p.reason, // adresse du point de retour : donnée Google, non gardée
         check: p.check || null,
+        walk: p.walk || null,
         area: p.area, status: p.status, included: p.included, visitedAt: p.visitedAt, pin: p.pin,
         createdAt: p.createdAt, taskId: p.taskId, colorIndex: p.colorIndex, absIndex: p.absIndex || null,
         special: p.special || null,
@@ -184,6 +196,7 @@ export class PoiStore extends EventEmitter {
       query: poi.query,
       reason: poi.reason,
       check: poi.check || null,
+      walk: poi.walk || null,
       sources: poi.sources,
       status: poi.status,
       included: poi.included,
@@ -225,6 +238,8 @@ export class PoiStore extends EventEmitter {
         ...(ITINERARY && p.absIndex ? { itinerary_step: p.absIndex } : {}),
         ...(ITINERARY && p.pin ? { pinned: p.pin.position === "index" ? p.pin.index : p.pin.position } : {}),
         ...(p.place?.address ? { address: p.place.address } : {}),
+        // Temps de marche mesuré lors de la recherche : valable tant que l'utilisateur n'a pas bougé de plus de 100 m
+        ...(walkStillValid(p.walk, this.context.position) ? { walk_minutes_from_user: Math.max(1, Math.round(p.walk.seconds / 60)) } : {}),
         ...(p.check ? { criterion_check: `${CHECK_WORDS[p.check.status] || p.check.status}${p.check.note ? ` : ${p.check.note}` : ""}` } : {}),
         // Données Google gardées en mémoire depuis la localisation : l'agent répond sans rouvrir la fiche
         ...(p.place?.rating != null ? { rating: p.place.rating } : {}),
@@ -698,6 +713,21 @@ export class PoiStore extends EventEmitter {
       this.emit("change", { added: restored.map((r) => this.pois.get(r.id)), removed: [] });
     }
     return { status: restored.length ? "applied" : "rejected", restored, rejected, version: this.version, selection: this.selectionForModel() };
+  }
+
+  // Temps de marche depuis l'endroit de la recherche (fiche du lieu) : { seconds, from } par id ; la
+  // page ne l'affiche plus dès que l'utilisateur est à plus de 100 m de « from »
+  setWalks(walks) {
+    let changed = false;
+    for (const [id, walk] of walks) {
+      const poi = this.pois.get(id);
+      if (!poi) continue;
+      poi.walk = walk;
+      changed = true;
+    }
+    if (!changed) return;
+    this.version++;
+    this.emit("change", { added: [], removed: [] });
   }
 
   // Analyse web d'un lieu (critère de la recherche) : pending (arcs qui tournent), confirmed (bague

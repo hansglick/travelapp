@@ -68,6 +68,48 @@
       -webkit-tap-highlight-color: transparent;
     }
     #mute-btn[hidden] { display: none; }
+    /* Bouton chat : à gauche de la pastille haut-parleur, orange */
+    #chat-btn {
+      grid-column: 1; grid-row: 1; justify-self: end;
+      display: flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%;
+      background: #e4572e; color: #fff; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Chat par-dessus la carte : fond noir légèrement transparent, volet qui descend à l'ouverture */
+    #chat {
+      position: fixed; z-index: 30; display: flex; flex-direction: column; overflow: hidden;
+      border-radius: 16px; background: rgba(0, 0, 0, 0.9); color: #fff;
+      clip-path: inset(0 0 100% 0); transition: clip-path 0.38s ease;
+    }
+    #chat.open { clip-path: inset(0 0 0 0); }
+    #chat[hidden] { display: none; }
+    #chat-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 0 12px; border-bottom: 1px solid #2a2a2a; }
+    #chat-tabs { flex: 1; display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; }
+    .chat-tab {
+      position: relative; flex: none; padding: 8px 0; border: 0; border-bottom: 2px solid transparent;
+      background: none; color: #9aa6b5; font: inherit; font-size: 0.85rem; cursor: pointer;
+    }
+    .chat-tab.active { color: #fff; border-bottom-color: #e4572e; }
+    .chat-dot { position: absolute; top: 5px; right: -8px; width: 6px; height: 6px; border-radius: 50%; background: #e4572e; }
+    #chat-close { flex: none; width: 32px; height: 32px; border: 0; background: none; color: #fff; font-size: 22px; line-height: 32px; cursor: pointer; }
+    #chat-body { flex: 1; overflow-y: auto; padding: 12px 14px 16px; }
+    /* Fil de la conversation : largeur d'un téléphone, centré sur un grand écran */
+    #chat-body > * { max-width: 640px; margin-left: auto; margin-right: auto; }
+    .chat-block { padding: 2px 0 2px 10px; border-left: 3px solid #e4572e; }
+    .chat-block.question { border-left-color: #4a90d9; }
+    .chat-block.action { border-left-color: #6b7280; }
+    .chat-line { margin: 6px 0; font-size: 0.9rem; line-height: 1.4; }
+    .chat-line.user { text-align: right; color: #fff; }
+    .chat-line.guide { color: #b9c0c9; }
+    .chat-line.place { color: #9ec5f0; font-size: 0.85rem; }
+    .chat-line.answer { color: #e6edf6; }
+    .chat-synth { margin: 10px 0 4px; }
+    .chat-synth-row { margin: 3px 0; font-size: 0.85rem; line-height: 1.4; color: #fff; }
+    .chat-synth-label { color: #f0a35e; margin-right: 6px; }
+    .chat-synth-label::after { content: " :"; }
+    .chat-sep { margin: 14px 0; border: 0; border-top: 1px solid #333; }
+    .chat-empty { margin: 24px 0; color: #9aa6b5; text-align: center; font-style: italic; }
     #mute-btn.muted { border-color: #c0392b; background: #c0392b; }
     @keyframes voice-glow {
       0% { box-shadow: 0 0 0 0 rgba(228, 87, 46, 0.75), 0 0 14px 2px rgba(228, 87, 46, 0.6); }
@@ -170,7 +212,10 @@
     .poi-card.place .poi-close { grid-column: 3; width: 24px; height: 24px; margin: 0; font-size: 16px; line-height: 24px; }
     .poi-title { grid-column: 2; margin: 0; font-size: 1rem; font-weight: normal; line-height: 1.3; text-align: center; }
     .poi-title .poi-name { color: #e4572e; }
-    .poi-rating { margin-left: 6px; color: #fff; font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+    /* Temps de marche depuis l'endroit de la recherche, à droite du nom : blanc, italique */
+    .poi-walk { margin-left: 6px; color: #fff; font-size: 0.85rem; font-style: italic; font-weight: 400; white-space: nowrap; }
+    /* Note Google : sur la ligne des logos du bas, sans gras */
+    .poi-rating { color: #fff; font-size: 0.85rem; font-weight: 400; white-space: nowrap; }
     .poi-card.place .poi-desc { margin: 8px 14px 0; min-height: 0; }
     /* Critère précis de la recherche (« dorade ») : confirmé par une source (vert) ou à vérifier (orange) */
     .poi-check { flex: none; margin: 6px 14px 0; font-size: 0.75rem; font-weight: 600; text-align: center; }
@@ -881,8 +926,17 @@
     <div id="voice-status" role="status" aria-live="polite"></div>
     <div id="search-states" role="status" aria-live="polite"></div>
     <div id="map"></div>
+    <!-- Chat : la conversation avec le guide, par-dessus la carte (mêmes dimensions) -->
+    <section id="chat" hidden aria-label="Conversation avec le guide">
+      <div id="chat-head">
+        <div id="chat-tabs" role="tablist"></div>
+        <button id="chat-close" type="button" aria-label="Masquer la conversation">×</button>
+      </div>
+      <div id="chat-body"></div>
+    </section>
     <div id="list-handle">
       <div class="voice-row">
+      <button id="chat-btn" type="button" aria-label="Afficher la conversation"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H10l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7.5 9.5h9M7.5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
       <button id="mute-btn" type="button" aria-label="Couper le micro" aria-pressed="false" hidden></button>
       <button id="voice-btn" aria-label="Parler au guide" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1443,6 +1497,8 @@
       const name = el("span", "poi-name", props.name);
       name.style.color = props.color || TASK_COLORS[0]; // couleur du groupe
       title.append(name);
+      const walk = walkLabel(props.walk);
+      if (walk) title.append(el("span", "poi-walk", walk));
       const close = el("button", "poi-close", "×");
       close.setAttribute("aria-label", "Fermer");
       close.addEventListener("click", onClose);
@@ -1456,7 +1512,7 @@
       card.append(tools);
       if (props.placeId) {
         getPlaceInfo(props.placeId).then(({ rating, phone, price, photos }) => {
-          if (rating) title.append(el("span", "poi-rating", `★ ${rating.toLocaleString("fr-FR", { minimumFractionDigits: 1 })}`));
+          if (rating) tools.prepend(el("span", "poi-rating", `★ ${rating.toLocaleString("fr-FR", { minimumFractionDigits: 1 })}`));
           if (phone) {
             const call = el("a", "poi-phone");
             call.href = `tel:${phone.replace(/[^\d+]/g, "")}`;
@@ -1804,12 +1860,23 @@
       return null;
     }
 
+    // Temps de marche de la fiche (« 6 min à pied ») : mesuré lors de la recherche, affiché tant que
+    // l'utilisateur est à 100 m au plus de l'endroit de la recherche
+    const WALK_VALID_M = 100;
+    function walkLabel(walk) {
+      if (!walk?.from || !Number.isFinite(walk.seconds) || !userMarker) return null;
+      const here = userMarker.getPosition();
+      if (google.maps.geometry.spherical.computeDistanceBetween(here, new google.maps.LatLng(walk.from)) > WALK_VALID_M) return null;
+      return `${Math.max(1, Math.round(walk.seconds / 60))} min à pied`;
+    }
+
     function poiProps(p) {
       return {
         name: p.place?.name || p.name,
         category: p.category,
         description: p.reason,
         check: p.check || null,
+        walk: p.walk || null,
         id: p.id,
         placeId: p.place?.placeId,
         special: p.special || null,
@@ -1883,8 +1950,9 @@
         }
         poi.absIndex = p.abs_index; // numéro absolu dans l'itinéraire (figé, donné par le serveur)
         poi.number = p.map_number; // sans itinéraire : numéro fixe, dans l'ordre d'ajout
-        if (JSON.stringify(poi.check || null) !== JSON.stringify(p.check || null)) {
+        if (JSON.stringify([poi.check || null, poi.walk || null]) !== JSON.stringify([p.check || null, p.walk || null])) {
           poi.check = p.check || null;
+          poi.walk = p.walk || null;
           poi.props = poiProps(p);
         }
         // Étape figée ou libérée (par le guide, ou depuis cet écran)
@@ -2140,6 +2208,7 @@
         renderLegend();
         renderPoiList();
         if (questionsPanelEl.classList.contains("open")) renderQuestions();
+        renderChat(); // numéros et analyses web à jour dans le chat
         return;
       }
       // Étapes figées toujours à leur place, quel que soit le changement (ajout, arrivée, lieu remis…)
@@ -3337,7 +3406,7 @@
     }
 
     // Sous la carte : glisser vers le haut (hors pastille du guide) ouvre la liste
-    onVerticalSwipe(document.getElementById("list-handle"), { up: openPoiList }, "#voice-btn, #mute-btn");
+    onVerticalSwipe(document.getElementById("list-handle"), { up: openPoiList }, "#voice-btn, #mute-btn, #chat-btn");
 
     // ---- Effacer tous les lieux (avec confirmation) ----
     const eraseBtn = document.getElementById("erase-btn");
@@ -4052,6 +4121,7 @@
 
     function onTasks(tasks) {
       agentTasks = tasks;
+      renderChat();
       updateEraseButton();
       if (tasksPanelEl.classList.contains("open")) renderTasks();
       if (dimsPanelEl.classList.contains("open")) renderDims();
@@ -4177,6 +4247,199 @@
       if (e.key === "ArrowRight") showPhoto(carouselIndex + 1, 1);
       if (e.key === "ArrowLeft") showPhoto(carouselIndex - 1, -1);
     });
+
+    // ---- Chat : la conversation avec le guide, par-dessus la carte ----
+    // Construit à partir des tâches (demande, questions du guide, réponses, synthèse, résultat) : un
+    // onglet par type de tâche, affiché dès qu'il en existe une. S'ouvre à chaque connexion vocale
+    // (volet qui descend) ; la croix le masque pour toute la conversation, le bouton chat sous la carte
+    // le rouvre. Tant qu'il est ouvert, la carte n'est pas accessible.
+    const chatEl = document.getElementById("chat");
+    const chatTabsEl = document.getElementById("chat-tabs");
+    const chatBodyEl = document.getElementById("chat-body");
+    const chatBtn = document.getElementById("chat-btn");
+    const CHAT_TABS = [
+      { id: "search", label: "Requêtes" },
+      { id: "info", label: "Questions" },
+      { id: "locate", label: "Lieux placés" },
+      { id: "self", label: "Ma position" },
+      { id: "quick", label: "Organisation" },
+    ];
+    let chatTab = "search";
+    let chatHiddenByUser = false;
+    const chatSeen = new Map();   // tâche → empreinte déjà affichée (pour les pastilles « nouveau »)
+    const chatUnread = new Set(); // onglets avec du nouveau
+
+    function placeChat() {
+      const r = document.getElementById("map").getBoundingClientRect();
+      Object.assign(chatEl.style, { top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px` });
+    }
+    window.addEventListener("resize", () => { if (!chatEl.hidden) placeChat(); });
+
+    function openChat() {
+      placeChat();
+      chatEl.hidden = false;
+      requestAnimationFrame(() => chatEl.classList.add("open"));
+      chatUnread.delete(chatTab);
+      renderChat();
+    }
+
+    function closeChat() {
+      chatEl.classList.remove("open");
+      setTimeout(() => { if (!chatEl.classList.contains("open")) chatEl.hidden = true; }, 380);
+    }
+
+    document.getElementById("chat-close").addEventListener("click", () => {
+      chatHiddenByUser = true;
+      closeChat();
+    });
+    chatBtn.addEventListener("click", () => {
+      chatHiddenByUser = false;
+      openChat();
+    });
+
+    // Connexion vocale établie : le chat s'ouvre, sauf s'il a été masqué pendant cette conversation
+    function chatOnConnect() {
+      chatHiddenByUser = false;
+      openChat();
+    }
+
+    const chatTasks = () => agentTasks.filter((t) => CHAT_TABS.some((tab) => tab.id === t.kind));
+    const poiLabel = (id) => {
+      const poi = pois.find((p) => p.id === id);
+      return poi ? `${poi.number ? `n° ${poi.number} ` : ""}${poi.props.name}` : null;
+    };
+    const line = (cls, text) => el("p", `chat-line ${cls}`, text);
+
+    // Une recherche et ses précisions (tâches qui la remplacent ou la complètent) forment un bloc
+    function searchChains(tasks) {
+      const byId = new Map(tasks.map((t) => [t.id, t]));
+      const rootOf = (t) => (t.replaces && byId.get(t.replaces) ? rootOf(byId.get(t.replaces)) : t);
+      const chains = new Map();
+      for (const t of [...tasks].sort((a, b) => a.createdAt - b.createdAt)) {
+        const root = rootOf(t);
+        if (!chains.has(root.id)) chains.set(root.id, []);
+        chains.get(root.id).push(t);
+      }
+      return [...chains.values()];
+    }
+
+    function searchBlock(chain) {
+      const root = chain[0], last = chain[chain.length - 1];
+      const block = el("div", "chat-block search");
+      // Définition : la demande, les questions du guide et les réponses
+      block.append(line("user", root.utterance || root.request));
+      for (const d of root.dimensions || []) {
+        if (!["asked", "answered", "skipped", "unanswered"].includes(d.status)) continue;
+        block.append(line("guide", d.question));
+        if (d.status === "answered") block.append(line("user", d.value));
+        if (d.status === "skipped") block.append(line("user", "Peu importe"));
+      }
+      for (const t of chain.slice(1)) if (t.utterance) block.append(line("user", t.utterance));
+      if (last.status === "clarifying") return block;
+      // Synthèse : ce qui part chez Google (recherche globale) et ce qui se vérifie ailleurs (affinée)
+      const g = last.google;
+      const minutes = (last.criteria || []).find((c) => c.type === "distance" && c.maxWalkMinutes)?.maxWalkMinutes;
+      const global = [
+        last.groupName || g?.words?.[0] || last.title,
+        `${minutes || 15} min à pied`,
+        g?.openNow ? "ouvert maintenant" : null,
+        g?.minRating ? "bien noté" : null,
+        g?.cheap ? "pas cher" : null,
+      ].filter(Boolean).join(" · ");
+      const synth = el("div", "chat-synth");
+      const row = (label, value) => {
+        const p = el("p", "chat-synth-row");
+        p.append(el("span", "chat-synth-label", label), el("span", null, value));
+        return p;
+      };
+      synth.append(row("Recherche globale", global));
+      if (g?.check) synth.append(row("Recherche affinée", g.check.kind === "reputation" ? "lieux recommandés" : g.check.question));
+      // Résultat : lieux trouvés, puis l'analyse web
+      let result;
+      if (["pending", "running"].includes(last.status)) result = "Recherche en cours…";
+      else if (last.status === "failed" || last.status === "cancelled") result = last.status === "failed" ? "La recherche n'a pas abouti." : "Recherche annulée.";
+      else {
+        const found = pois.filter((p) => !p.special && Number.isInteger(last.colorIndex) && p.colorIndex === last.colorIndex);
+        result = `${found.length} lieu${found.length > 1 ? "x" : ""} trouvé${found.length > 1 ? "s" : ""}`;
+        const checks = found.map((p) => p.check?.status).filter(Boolean);
+        if (checks.includes("pending")) result += " · analyse en cours…";
+        else if (checks.length) {
+          const n = (s) => checks.filter((x) => x === s).length;
+          const label = (g?.check?.label || "critère").toLowerCase();
+          result += [` · ${n("confirmed")} ✓ ${label}`, n("maybe") ? `${n("maybe")} à vérifier` : null, n("rejected") ? `${n("rejected")} écarté${n("rejected") > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ");
+        }
+      }
+      synth.append(row("Résultat", result));
+      block.append(synth);
+      return block;
+    }
+
+    function questionBlock(t) {
+      const block = el("div", "chat-block question");
+      block.append(line("user", t.utterance || t.title));
+      const places = (t.relatedIds || []).map(poiLabel).filter(Boolean);
+      if (places.length) block.append(line("place", places.join(", ")));
+      block.append(line("answer", t.status === "done" || t.status === "failed" ? t.result : "…"));
+      return block;
+    }
+
+    function actionBlock(t) {
+      const block = el("div", "chat-block action");
+      if (t.utterance) block.append(line("user", t.utterance));
+      let text = "…";
+      if (t.status === "done") {
+        const placed = t.kind === "locate" ? (t.addedIds || []).map(poiLabel).filter(Boolean) : [];
+        text = placed.length ? `${placed.join(", ")} → placé${placed.length > 1 ? "s" : ""} sur la carte` : t.result;
+      } else if (t.status === "failed") text = t.result;
+      block.append(line("answer", text));
+      return block;
+    }
+
+    // Empreinte d'une tâche : ce qui change à l'écran (pour la pastille « nouveau » et l'onglet suivi)
+    const chatPrint = (t) => JSON.stringify([t.status, (t.dimensions || []).map((d) => [d.status, d.value]), t.result]);
+
+    function renderChat() {
+      if (!chatEl) return;
+      const tasks = chatTasks();
+      // Activité : l'onglet de la tâche la plus récente qui a changé passe devant ; les autres
+      // onglets qui ont du nouveau reçoivent une pastille
+      let latest = null;
+      for (const t of tasks) {
+        const print = chatPrint(t);
+        if (chatSeen.get(t.id) === print) continue;
+        chatSeen.set(t.id, print);
+        if (!latest || t.createdAt >= latest.createdAt) latest = t;
+        chatUnread.add(t.kind);
+      }
+      if (latest && !chatEl.hidden) chatTab = latest.kind;
+      const present = CHAT_TABS.filter((tab) => tasks.some((t) => t.kind === tab.id));
+      if (present.length && !present.some((tab) => tab.id === chatTab)) chatTab = present[0].id;
+      if (!chatEl.hidden) chatUnread.delete(chatTab);
+      chatTabsEl.replaceChildren(...present.map((tab) => {
+        const b = el("button", `chat-tab${tab.id === chatTab ? " active" : ""}`, tab.label);
+        b.type = "button";
+        if (chatUnread.has(tab.id) && tab.id !== chatTab) b.append(el("span", "chat-dot"));
+        b.addEventListener("click", () => {
+          chatTab = tab.id;
+          chatUnread.delete(tab.id);
+          renderChat();
+        });
+        return b;
+      }));
+      const mine = tasks.filter((t) => t.kind === chatTab).sort((a, b) => a.createdAt - b.createdAt);
+      const blocks = chatTab === "search" ? searchChains(mine).map(searchBlock)
+        : chatTab === "info" ? mine.map(questionBlock)
+        : mine.map(actionBlock);
+      const items = [];
+      blocks.forEach((b, i) => {
+        if (i) items.push(el("hr", "chat-sep"));
+        items.push(b);
+      });
+      if (!items.length) items.push(el("p", "chat-empty", "Parle au guide : ta demande s'affichera ici."));
+      const atBottom = chatBodyEl.scrollHeight - chatBodyEl.scrollTop - chatBodyEl.clientHeight < 40;
+      chatBodyEl.replaceChildren(...items);
+      if (atBottom || latest) chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
+    }
 
     // ---- Conversation vocale avec le guide (GPT-Live via WebRTC) ----
     // Le micro et la voix passent par la connexion WebRTC. La clé OpenAI reste sur le serveur :
@@ -4312,6 +4575,7 @@
       if (voice !== v) return;
       if (event.type === "session.started") {
         setVoiceButton("active");
+        chatOnConnect();
         showVoiceStatus("Le guide vous écoute");
       } else if (event.type === "session.closed") {
         endVoice(v, null);

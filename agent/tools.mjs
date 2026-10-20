@@ -288,7 +288,7 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
         operation: "add", base_version: store.version, op_id: `locate-${task.id}`,
         pois: fresh.map((c, k) => ({
           name: c.place.name, query: [c.place.name, c.place.address].filter(Boolean).join(", "), category: categoryFromTypes(c.place.types),
-          reason: `À ${meters(c.distance_from_user_m)}${c.place.address ? `, ${c.place.address}` : ""}.`, sources: [], candidate_id: ids[k], verified: null, check_note: "",
+          reason: c.place.address ? `${c.place.address}.` : "", sources: [], candidate_id: ids[k], verified: null, check_note: "",
         })),
         remove_ids: [], remove_category: null, area: null, requested_count: null,
       }, task);
@@ -359,11 +359,11 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       }, task);
     }
     const ids = store.rememberCandidates(chosen).map((c) => c.candidate_id);
+    // Description de la fiche : l'ouverture et l'adresse (le temps de marche et la note s'affichent à part)
     const describe = (c) => [
-      `À ${c.distance_from_user_m < 1000 ? `${c.distance_from_user_m} m` : `${(c.distance_from_user_m / 1000).toFixed(1).replace(".", ",")} km`}`,
-      c.place.openNow === true ? "ouvert en ce moment" : c.place.openNow === false ? "fermé en ce moment" : null,
-      c.place.rating ? `noté ${String(c.place.rating).replace(".", ",")}/5` : null,
-    ].filter(Boolean).join(", ") + ".";
+      c.place.openNow === true ? "Ouvert en ce moment" : c.place.openNow === false ? "Fermé en ce moment" : null,
+      c.place.address,
+    ].filter(Boolean).join(" · ") + ".";
     // Partie web : chaque lieu est « en cours d'analyse » (arcs autour du marqueur) jusqu'à sa réponse
     const pending = g.check ? { status: "pending", label: g.check.label, note: "" } : null;
     await run("update_pois", {
@@ -495,5 +495,22 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
   // Lieu à relocaliser (coordonnées de plus de 30 jours après rechargement d'un compte)
   const relocate = (id) => resolveAndStore(id, null);
 
-  return { run, enforceDistance, relocate, placeBackPoint, discover, showViewpoints, googleDirect, locateDirect };
+  // Temps de marche depuis l'endroit de la recherche vers les lieux qu'elle a ajoutés (un seul appel
+  // Google pour tous) : affiché dans la fiche tant que l'utilisateur reste à 100 m au plus de cet endroit
+  async function attachWalks(ids) {
+    const position = store.context.position;
+    const pois = [...new Set(ids)].map((id) => store.pois.get(id)).filter((p) => p?.status === "resolved" && p.place?.location && !p.special);
+    if (!position || !pois.length) return;
+    const from = { lat: position.lat, lng: position.lng };
+    let seconds;
+    try {
+      seconds = (await resolvePoi.walkMatrix([from], pois.map((p) => p.place.location)))[0].map((cell) => cell?.seconds ?? null);
+    } catch {
+      // Trajets indisponibles : estimation à vol d'oiseau (80 m par minute de marche)
+      seconds = pois.map((p) => (distanceM(from, p.place.location) / 80) * 60);
+    }
+    store.setWalks(pois.map((p, i) => [p.id, Number.isFinite(seconds[i]) ? { seconds: Math.round(seconds[i]), from } : null]).filter(([, w]) => w));
+  }
+
+  return { run, enforceDistance, relocate, placeBackPoint, discover, showViewpoints, googleDirect, locateDirect, attachWalks };
 }

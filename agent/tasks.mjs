@@ -89,6 +89,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       requestedCount: t.requestedCount, placedCount: placedCount(t), criteria: t.criteria, maxDistanceM: t.maxDistanceM,
       colorIndex: t.colorIndex, extends: t.extends,
       relatedIds: [...t.relatedIds].filter((id) => store.pois.has(id)), // lieux concernés par une question
+      addedIds: t.addedIds.filter((id) => store.pois.has(id)), // lieux ajoutés (chat : « Lieux placés »)
       dimensions: t.dimensions, groupName: t.groupName, channel: t.channel, google: t.google,
     };
   }
@@ -565,6 +566,10 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       t.result = result || "Tâche terminée.";
       t.status = "done";
       if (t.kind === "info") noteMentionedPlaces(t);
+      // Lieux ajoutés : temps de marche depuis l'endroit de la recherche, pour leur fiche
+      if (["search", "locate", "discover", "viewpoints"].includes(t.kind) && t.addedIds.length) {
+        tools.attachWalks(t.addedIds).catch((err) => console.warn("[temps de marche]", err.message));
+      }
       log(t, "terminée");
       metrics.time(`task_${t.kind}_ms`, Date.now() - t.startedAt);
       notify({ type: "done", task: t, summary: summary() });
