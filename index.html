@@ -1238,7 +1238,11 @@
     document.documentElement.classList.toggle("no-itinerary", !ITINERARY);
 
     // Map ID Google (style de carte défini dans la console Google Cloud, pas un secret)
-    const MAP_ID = "5d9eb529da45a90f564c4471";
+    // Tests d'affichage (adresse) : chacun ne change qu'une chose, pour savoir d'où vient un défaut
+    // « ?carte=google » : style standard de Google, carte vectorielle (seul le style change)
+    // « ?carte=classique » : notre style, carte classique en images (seul le moteur change)
+    const MAP_TEST = new URLSearchParams(location.search).get("carte");
+    const MAP_ID = MAP_TEST === "google" ? "DEMO_MAP_ID" : "5d9eb529da45a90f564c4471";
 
     const MAP_STYLE = [
       { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
@@ -4906,6 +4910,7 @@
         // Carte vectorielle stylée dans la console Google Cloud (zones animées « business corridor »
         // colorées) ; MAP_STYLE ne sert plus que si MAP_ID est vide
         ...(MAP_ID ? { mapId: MAP_ID } : { styles: MAP_STYLE }),
+        ...(MAP_TEST === "google" ? { renderingType: "VECTOR" } : MAP_TEST === "classique" ? { renderingType: "RASTER" } : {}),
         disableDefaultUI: true,
         zoomControl: true,
         clickableIcons: false,
