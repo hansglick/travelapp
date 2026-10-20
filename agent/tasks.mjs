@@ -31,11 +31,10 @@ const DEFAULT_COUNT = 3;
 const QUESTION_GRACE_MS = 2000;    // une prise de parole finie avant ce délai ne répond pas à la question
 const ACTIVE = ["clarifying", "pending", "running"];
 // Types de tâches : recherche, localisation d'un lieu précis, auto-localisation (point de retour),
-// question sur les lieux (data), organisation de la liste ; découverte de la ville et points de vue : créés
+// question sur les lieux (data), organisation de la liste ; découverte de la ville : créée
 // seulement par les boutons de la carte (jamais par le détecteur)
-const KINDS = ["search", "locate", "self", "info", "quick", "discover", "viewpoints"];
+const KINDS = ["search", "locate", "self", "info", "quick", "discover"];
 const DISCOVER_GROUP = "Découverte de la ville";
-const VIEWPOINTS_GROUP = "Points de vue";
 const LOCATE_GROUP = "Lieux placés"; // toutes les localisations partagent ce groupe (une couleur)
 
 // Noms des couleurs des groupes (même ordre que la palette de la page)
@@ -103,8 +102,8 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
 
   // État résumé pour le guide vocal et le détecteur
   function summary() {
-    // Les boutons de la carte (découverte, points de vue) ne concernent pas la conversation
-    const conversational = list().filter((t) => t.kind !== "discover" && t.kind !== "viewpoints");
+    // Les boutons de la carte (découverte de la ville) ne concernent pas la conversation
+    const conversational = list().filter((t) => t.kind !== "discover");
     const running = conversational.filter((t) => t.status === "running");
     const pending = conversational.filter((t) => t.status === "pending");
     const clarifying = conversational.filter((t) => t.status === "clarifying");
@@ -453,7 +452,6 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       t.groupName = LOCATE_GROUP;
     }
     if (t.kind === "discover") t.groupName = DISCOVER_GROUP;
-    if (t.kind === "viewpoints") t.groupName = VIEWPOINTS_GROUP;
     if (t.colorIndex === null && t.requestedCount && t.kind === "search") t.colorIndex = nextColor++;
     hydrate(t);
     tasks.set(t.id, t);
@@ -570,7 +568,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       t.status = "done";
       if (t.kind === "info") noteMentionedPlaces(t);
       // Lieux ajoutés : temps de marche depuis l'endroit de la recherche, pour leur fiche
-      if (["search", "locate", "discover", "viewpoints"].includes(t.kind) && t.addedIds.length) {
+      if (["search", "locate", "discover"].includes(t.kind) && t.addedIds.length) {
         tools.attachWalks(t.addedIds).catch((err) => console.warn("[temps de marche]", err.message));
       }
       log(t, "terminée");
@@ -622,9 +620,9 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       log(t, result);
       return result;
     }
-    // Découverte de la ville et points de vue : préparés au « Let's Go! », affichées maintenant (sans modèle)
-    if (t.kind === "discover" || t.kind === "viewpoints") {
-      const result = await (t.kind === "discover" ? tools.discover(t) : tools.showViewpoints(t));
+    // Découverte de la ville : préparée au « Let's Go! », affichée maintenant (sans modèle)
+    if (t.kind === "discover") {
+      const result = await tools.discover(t);
       log(t, result);
       return result;
     }

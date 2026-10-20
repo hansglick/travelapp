@@ -1,6 +1,5 @@
 // « Découverte de la ville » : les lieux emblématiques, préparés en arrière-plan au « Let's Go! »,
-// affichés quand l'utilisateur touche le bouton de la carte dépliée (les points de vue ont leur
-// propre bouton : viewpoints.mjs).
+// affichés quand l'utilisateur touche le bouton de la carte dépliée.
 //
 // 1. Sélection (une seule passe du petit modèle, avec recherche web) : une réserve de 30 lieux
 //    emblématiques variés, classés du plus au moins incontournable, autour du point de départ

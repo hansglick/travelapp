@@ -250,8 +250,8 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
     console.log(`[tâches] ${task.id} ${type} « ${task.title} »${type === "done" || type === "failed" ? ` : ${task.result}` : ""}`);
     broadcast({ type: "agent", state: board().searchRunning().length ? "searching" : summary.startsWith("Plus aucune") ? "idle" : "working" });
     if (!s || s.closing) return;
-    // Boutons de la carte (découverte de la ville, points de vue) : hors de la conversation, le guide n'en dit rien
-    if (task.kind === "discover" || task.kind === "viewpoints") return;
+    // Bouton de la carte (découverte de la ville) : hors de la conversation, le guide n'en dit rien
+    if (task.kind === "discover") return;
     if (type === "question") {
       // Question d'affinage avant une recherche : le guide la pose tout de suite
       send(s, {

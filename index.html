@@ -75,6 +75,8 @@
       width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%;
       background: #e4572e; color: #fff; cursor: pointer; -webkit-tap-highlight-color: transparent;
     }
+    /* Grisé tant qu'aucune conversation n'est en cours (il ouvre quand même l'historique) */
+    #chat-btn.idle { background: #4a4a4a; color: #b5b5b5; }
 
     /* Chat par-dessus la carte : fond noir légèrement transparent, volet qui descend à l'ouverture */
     #chat {
@@ -628,6 +630,22 @@
     /* Halo blanc-jaune très clair qui s'allume deux fois autour de la pastille (le bond et les
        ondes restent disponibles : info-jack, info-sonar) */
     .info-btn.nudge { animation: info-halo 2.4s ease-in-out both; }
+    /* Sous « i » : les 4 informations utiles, qui arrivent de la gauche une par une avec un rebond,
+       et repartent de même. Bleu un peu plus clair que « i », bordure blanche, ombre. */
+    .info-control { display: flex; flex-direction: column; align-items: center; }
+    .info-control .info-btn { margin: 12px 12px 6px; }
+    .info-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-bottom: 6px; }
+    .info-rail[hidden] { display: none; }
+    .info-item {
+      display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0;
+      border: 2px solid #fff; border-radius: 50%; background: #4f9cf5; cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); opacity: 0;
+    }
+    .info-item svg { width: 24px; height: 24px; }
+    .info-rail.open .info-item { animation: info-in 0.42s cubic-bezier(0.34, 1.6, 0.64, 1) both; }
+    .info-rail.closing .info-item { animation: info-out 0.24s ease-in both; }
+    @keyframes info-in { from { opacity: 0; transform: translateX(-80px); } to { opacity: 1; transform: none; } }
+    @keyframes info-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(-80px); } }
     @keyframes info-halo {
       0%, 100% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 0 0 rgba(255, 249, 214, 0); }
       25% { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 22px 10px rgba(255, 249, 214, 0.95); }
@@ -648,6 +666,7 @@
     }
     @media (prefers-reduced-motion: reduce) {
       .info-btn.nudge, .info-btn.nudge::before, .info-btn.nudge::after { animation: none; }
+      .info-rail.open .info-item, .info-rail.closing .info-item { animation-duration: 0.01s; }
     }
     /* Fun facts : titre gris, chaque fait en deux lignes (titre en gras, texte), traits discrets */
     .fact { position: relative; padding: 12px 2px 12px 20px; }
@@ -948,7 +967,7 @@
     </section>
     <div id="list-handle">
       <div class="voice-row">
-      <button id="chat-btn" type="button" aria-label="Afficher la conversation"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H10l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7.5 9.5h9M7.5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      <button id="chat-btn" class="idle" type="button" aria-label="Afficher la conversation"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H10l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7.5 9.5h9M7.5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
       <button id="mute-btn" type="button" aria-label="Couper le micro" aria-pressed="false" hidden></button>
       <button id="voice-btn" aria-label="Parler au guide" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2104,13 +2123,12 @@
       renderLegend();
     }
 
-    // Boutons de la carte, en haut à droite, l'un sous l'autre : « Découverte de la ville » (carte
-    // dépliée : les lieux emblématiques) et « Points de vue » (bonhomme qui marche), tous deux en lieux.
+    // Bouton de la carte, en haut à droite : « Découverte de la ville » (carte dépliée : les lieux
+    // emblématiques).
     // Pastille orange, icône en traits blancs épais. Des arcs orange tournent autour pendant la
     // préparation (dès le « Let's Go! ») et l'affichage ; un « pop » quand c'est prêt. Un toucher
     // affiche, puis masque ou réaffiche (comme la case du groupe dans la légende).
     const DISCOVER_SVG = '<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M3 6.5l5-2 8 2 5-2v13l-5 2-8-2-5 2z" fill="none" stroke="#fff" stroke-width="2.4" stroke-linejoin="round"/><path d="M8 4.5v13M16 6.5v13" stroke="#fff" stroke-width="2.1"/><path d="M15.5 3.6a3.3 3.3 0 0 1 3.3 3.3c0 2.3-3.3 5.3-3.3 5.3s-3.3-3-3.3-5.3a3.3 3.3 0 0 1 3.3-3.3z" fill="#fff" stroke="#e4572e" stroke-width="1.2"/><circle cx="15.5" cy="6.9" r="1.2" fill="#e4572e"/></svg>';
-    const VIEWPOINTS_SVG = '<svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.6" cy="3.9" r="2" fill="#fff" stroke="none"/><path d="M12.9 7.6l-1.6 5.6M11.3 13.2l2.6 3.2.2 4.6M11.3 13.2l-2.1 3.5-2.6 3.4M12.9 7.6l2.6 2.9 2.7.7M12.9 7.6l-3.4 1.9-1 3"/></svg>';
 
     // kind : type de la tâche lancée par le bouton ; group() : couleur du groupe affiché ;
     // shown() : des lieux du groupe sont sur la carte
@@ -2118,11 +2136,6 @@
       discover: {
         svg: DISCOVER_SVG, label: "Découverte de la ville", api: "/api/discover", practicalKey: "discovery",
         group: () => taskGroup("discover"),
-        shown: (group) => pois.some((p) => p.colorIndex === group),
-      },
-      viewpoints: {
-        svg: VIEWPOINTS_SVG, label: "Points de vue", api: "/api/viewpoints", practicalKey: "viewpoints",
-        group: () => taskGroup("viewpoints"),
         shown: (group) => pois.some((p) => p.colorIndex === group),
       },
     };
@@ -4088,14 +4101,55 @@
     const INFO_FIRST_MS = 10000;
     const INFO_EVERY_MS = 20000;
 
+    // « i » : un toucher fait arriver sous lui, de la gauche, les 4 informations utiles (météo, fun
+    // facts, guide de conversation, actualités), une par une avec un rebond ; un second toucher les
+    // fait repartir de même. Chacune ouvre sa fiche.
+    const INFO_STEP_MS = 70;
+
     function createInfoButton() {
+      const control = el("div", "info-control");
       const button = el("button", "info-btn", "i");
       button.type = "button";
       button.title = "Informations utiles";
       button.setAttribute("aria-label", "Informations utiles");
-      button.addEventListener("click", () => openSheet(usefulSheet));
+      button.setAttribute("aria-expanded", "false");
+      const rail = el("div", "info-rail");
+      rail.hidden = true;
+      // Les icônes des fiches de la fenêtre « Informations utiles »
+      const items = [...usefulSheet.querySelectorAll(".useful-tile")].map((tile) => {
+        const item = el("button", "info-item");
+        item.type = "button";
+        item.title = tile.textContent.trim();
+        item.setAttribute("aria-label", item.title);
+        item.innerHTML = tile.querySelector("svg").outerHTML.replaceAll('fill="#000"', 'fill="#4f9cf5"');
+        item.addEventListener("click", () => openPracticalSheet(tile.dataset.sheet));
+        rail.append(item);
+        return item;
+      });
+      let closeTimer = null;
+      button.addEventListener("click", () => {
+        clearTimeout(closeTimer);
+        const opening = rail.hidden || rail.classList.contains("closing");
+        button.setAttribute("aria-expanded", String(opening));
+        if (opening) {
+          // Arrivée de haut en bas
+          items.forEach((item, i) => { item.style.animationDelay = `${i * INFO_STEP_MS}ms`; });
+          rail.classList.remove("closing");
+          rail.hidden = false;
+          void rail.offsetWidth; // relance l'animation
+          rail.classList.add("open");
+        } else {
+          // Départ de bas en haut, puis le rail disparaît
+          items.forEach((item, i) => { item.style.animationDelay = `${(items.length - 1 - i) * INFO_STEP_MS}ms`; });
+          rail.classList.remove("open");
+          void rail.offsetWidth;
+          rail.classList.add("closing");
+          closeTimer = setTimeout(() => { rail.hidden = true; rail.classList.remove("closing"); }, 240 + items.length * INFO_STEP_MS);
+        }
+      });
       button.addEventListener("animationend", (e) => { if (e.animationName === "info-halo") button.classList.remove("nudge"); });
-      map.controls[google.maps.ControlPosition.TOP_LEFT].push(button);
+      control.append(button, rail);
+      map.controls[google.maps.ControlPosition.TOP_LEFT].push(control);
       infoNudge = () => {
         button.classList.remove("nudge");
         void button.offsetWidth; // relance l'animation
@@ -4600,6 +4654,7 @@
       muteBtn.hidden = state !== "active";
       if (state !== "active" || !muteBtn.innerHTML) setMuted(Boolean(voice?.muted) && state === "active");
       voiceBtn.classList.toggle("connecting", state === "connecting");
+      chatBtn.classList.toggle("idle", state !== "active"); // grisé hors conversation
       voiceBtn.classList.toggle("active", state === "active");
       if (state !== "active") voiceBtn.classList.remove("working");
       voiceBtn.setAttribute("aria-pressed", String(state === "active"));

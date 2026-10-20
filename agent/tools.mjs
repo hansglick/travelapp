@@ -4,7 +4,6 @@
 
 import { LIMITS } from "./store.mjs";
 import { MAX_TRAVEL_S, MAX_SHOWN } from "./discovery.mjs";
-import { MAX_VIEWPOINTS, AREA_KM } from "./viewpoints.mjs";
 import { GOOGLE_TYPE_LIST, familyOf } from "./google-types.mjs";
 import { categoryFromTypes } from "./places.mjs";
 
@@ -28,7 +27,7 @@ function distanceM(a, b) {
   return 12742000 * Math.asin(Math.sqrt(h));
 }
 
-export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote, announce, discovery, viewpoints, verifier }) {
+export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote, announce, discovery, verifier }) {
   // task : { addedIds, candidates, requestedCount, log(text) } — la tâche qui appelle
   async function run(name, args, task) {
     switch (name) {
@@ -168,50 +167,6 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       console.warn("[découverte] affichage :", err.message);
       discovery.setState("error");
       return "La découverte de la ville n'a pas pu être préparée (erreur technique).";
-    }
-  }
-
-  // « Points de vue » (bouton du bonhomme qui marche) : les points de vue préparés au « Let's Go! »
-  // (ou cherchés maintenant) sont ajoutés comme des lieux, au groupe de la tâche : 7 au plus, dans
-  // la zone de la ville (15 km), sans la règle des 40 min ; un lieu déjà sur la carte (découverte de
-  // la ville…) n'est pas ajouté une seconde fois.
-  async function showViewpoints(task) {
-    const position = store.context.position;
-    if (!position || !store.context.positionSource) return "Ta position n'est pas encore connue : choisis d'abord ton point de départ.";
-    viewpoints.setState("displaying");
-    try {
-      const place = store.context.place?.city ? store.context.place : await resolvePoi.reverseGeocode(position);
-      const entry = await (viewpoints.get() || viewpoints.start({ place, position }));
-      await viewpoints.materialize(entry, position);
-      const onMap = [...store.pois.values()].filter((p) => p.place?.location);
-      const already = (c) => onMap.some((p) => (c.placeId && p.place.placeId === c.placeId) || distanceM(p.place.location, c.location) <= 50);
-      const inZone = entry.candidates.filter((c) => c.location && distanceM(position, c.location) <= AREA_KM * 1000);
-      const room = Math.max(0, LIMITS.selectionSize - store.pois.size);
-      const chosen = inZone.filter((c) => !already(c)).slice(0, Math.min(MAX_VIEWPOINTS, room));
-      const ids = store.rememberCandidates(chosen.map((c) => ({ place: { placeId: c.placeId, name: c.name, address: null, location: c.location, types: [] } })))
-        .map((v) => v.candidate_id);
-      for (let i = 0; i < chosen.length; i += LIMITS.addPerOperation) {
-        await run("update_pois", {
-          operation: "add", base_version: store.version, op_id: `viewpoints-${i}`,
-          pois: chosen.slice(i, i + LIMITS.addPerOperation).map((c, k) => ({
-            name: c.name, query: c.query, category: "viewpoint", reason: c.reason, sources: [], candidate_id: ids[i + k],
-          })),
-          remove_ids: [], remove_category: null, area: null, requested_count: null,
-        }, task);
-      }
-      // Note, avis, prix et horaires : demandés en arrière-plan (mémoire seulement)
-      for (const id of task.addedIds) {
-        const poi = store.pois.get(id);
-        if (poi?.place?.placeId) resolvePoi.getDetails(poi.place.placeId).then((info) => store.setPlaceInfo(id, info)).catch(() => {});
-      }
-      viewpoints.setState("shown");
-      const placed = task.addedIds.filter((id) => store.pois.get(id)?.status === "resolved").length;
-      const skipped = inZone.filter(already).length;
-      return `Points de vue affichés : ${placed}` + (skipped ? ` (${skipped} déjà sur la carte).` : ".");
-    } catch (err) {
-      console.warn("[points de vue] affichage :", err.message);
-      viewpoints.setState("error");
-      return "Les points de vue n'ont pas pu être préparés (erreur technique).";
     }
   }
 
@@ -509,5 +464,5 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
     store.setWalks(pois.map((p, i) => [p.id, Number.isFinite(seconds[i]) ? { seconds: Math.round(seconds[i]), from } : null]).filter(([, w]) => w));
   }
 
-  return { run, enforceDistance, relocate, placeBackPoint, discover, showViewpoints, googleDirect, locateDirect, attachWalks };
+  return { run, enforceDistance, relocate, placeBackPoint, discover, googleDirect, locateDirect, attachWalks };
 }

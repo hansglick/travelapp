@@ -12,7 +12,7 @@ import { createVerifier } from "./verify.mjs";
 
 const SAVE_DELAY_MS = 1000;
 
-export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery, viewpoints }) {
+export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery }) {
   const spaces = new Map(); // id du compte → espace
 
   function open(user) {
@@ -53,26 +53,9 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery
       materialize: (entry, position) => discovery.materialize(entry, position),
       setState: (state) => store.setPractical({ discovery: { state, at: Date.now() } }),
     };
-    // « Points de vue » préparés aussi au « Let's Go! » (bouton du bonhomme qui marche)
-    // État pour le bouton : preparing, ready, displaying, shown, error
-    let viewpointsPending = null;
-    const viewpointsApi = {
-      get: () => viewpointsPending,
-      start: ({ place, position }) => {
-        viewpointsApi.setState("preparing");
-        viewpointsPending = viewpoints ? viewpoints.prepare({ place }) : Promise.reject(new Error("points de vue indisponibles"));
-        viewpointsPending.then(() => viewpointsApi.setState("ready"), (err) => {
-          console.warn("[points de vue] préparation :", err.message);
-          viewpointsApi.setState("error");
-        });
-        return viewpointsPending;
-      },
-      materialize: (entry, position) => viewpoints.materialize(entry, position),
-      setState: (state) => store.setPractical({ viewpoints: { state, at: Date.now() } }),
-    };
     // Canal mixte : vérification sur le web des candidats Google (critère concret ou réputation)
     const verifier = apiKey ? createVerifier({ apiKey, metrics }) : null;
-    const tools = createTools({ store, resolvePoi, broadcast, uiConnected: () => clients.size > 0, appNote: (text) => live.appNote(text), announce: (text) => live.announce(text), discovery: discoveryApi, viewpoints: viewpointsApi, verifier });
+    const tools = createTools({ store, resolvePoi, broadcast, uiConnected: () => clients.size > 0, appNote: (text) => live.appNote(text), announce: (text) => live.announce(text), discovery: discoveryApi, verifier });
     let tasksTimer = null;
     board = createTaskBoard({
       apiKey, store, tools, metrics,
@@ -164,7 +147,6 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery
       staleIds.forEach((pid) => tools.relocate(pid));
       refreshPlaceInfo();
       discoveryPending = null; // sélections à refaire pour ce lieu (base commune : souvent immédiate)
-      viewpointsPending = null;
       store.emit("change", {});
       broadcast({ type: "tasks", tasks: board.snapshot() });
       broadcast({ type: "itinerary", current: linked });
@@ -190,7 +172,6 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery
     return {
       user, store, board, live, tools, metrics, clients, sentAt,
       startDiscovery: discoveryApi.start,
-      startViewpoints: viewpointsApi.start,
       lastGeocoded: null,
       broadcast,
       voiceState: () => voiceState,
