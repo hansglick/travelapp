@@ -14,6 +14,7 @@ import { createMetrics } from "./agent/metrics.mjs";
 import { openDatabase, createAccounts, createWorkspaceStorage, createTripStorage, createPhrasebookStorage, createDiscoveryStorage } from "./agent/db.mjs";
 import { createPractical } from "./agent/practical.mjs";
 import { createDiscovery } from "./agent/discovery.mjs";
+import { createViewpoints } from "./agent/viewpoints.mjs";
 import { createNamer } from "./agent/naming.mjs";
 import { createWorkspaces } from "./agent/workspace.mjs";
 
@@ -69,7 +70,9 @@ const sharedMetrics = createMetrics(); // Google et météo, communs à tous les
 const resolvePoi = createResolver({ apiKey: GOOGLE_API_KEY, metrics: sharedMetrics });
 const trips = createTripStorage(db);
 const discovery = OPENAI_API_KEY ? createDiscovery({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createDiscoveryStorage(db), resolvePoi }) : null;
-const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, storage: createWorkspaceStorage(db), trips, discovery });
+// Points de vue : même table que la découverte (clé « points de vue, ville, pays »)
+const viewpoints = OPENAI_API_KEY ? createViewpoints({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createDiscoveryStorage(db), resolvePoi }) : null;
+const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, storage: createWorkspaceStorage(db), trips, discovery, viewpoints });
 const suggestNames = OPENAI_API_KEY ? createNamer({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
 const practical = createPractical({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createPhrasebookStorage(db) });
 
@@ -78,7 +81,8 @@ const practical = createPractical({ apiKey: OPENAI_API_KEY, metrics: sharedMetri
 const STATIC = { "/": "index.html", "/index.html": "index.html" };
 // Mode test : pages de démonstration (dev/)
 if (DEV) STATIC["/demo-info"] = "dev/demo-info.html";
-if (DEV) STATIC["/demo-streets"] = "dev/demo-streets.html";
+if (DEV) STATIC["/demo-corridors"] = "dev/demo-corridors.html";
+if (DEV) STATIC["/demo-rings"] = "dev/demo-rings.html";
 const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json" };
 
 function json(res, status, body, headers = {}) {
@@ -242,16 +246,26 @@ const routes = {
       .then(ready("phrasebook"), failed("phrasebook", "guide"));
     practical.funFacts({ neighborhood: place.neighborhood, city: place.city, country: place.country })
       .then(ready("facts"), failed("facts", "fun facts"));
-    // Découverte de la ville : préparée maintenant, affichée seulement si l'utilisateur la demande
-    ws.startDiscovery({ position: pos, place: { neighborhood: place.neighborhood, city: place.city, country: place.country } });
+    // Découverte de la ville et points de vue : préparés maintenant, affichées seulement si l'utilisateur
+    // touche leur bouton
+    const where = { neighborhood: place.neighborhood, city: place.city, country: place.country };
+    ws.startDiscovery({ position: pos, place: where });
+    ws.startViewpoints({ position: pos, place: where });
     practical.news({ city: place.city || place.neighborhood, country: place.country, timezone: weather?.timezone || ws.store.context.timezone })
       .then(ready("news"), failed("news", "actualités"));
   },
 
-  // Bouton « Découverte de la ville » de la carte : même tâche que la demande vocale
+  // Bouton « Découverte de la ville » (carte dépliée) : les lieux emblématiques
   "POST /api/discover": async (req, res, ws) => {
     const running = [...ws.board.tasks.values()].some((t) => t.kind === "discover" && ["pending", "running"].includes(t.status));
     if (!running) ws.board.add({ title: "Découvrir la ville", kind: "discover", utterance: "(bouton Découverte de la ville)", request: "Afficher la découverte de la ville." });
+    json(res, 202, { ok: true });
+  },
+
+  // Bouton « Points de vue » (bonhomme qui marche) : les points de vue de la ville, comme des lieux
+  "POST /api/viewpoints": async (req, res, ws) => {
+    const running = [...ws.board.tasks.values()].some((t) => t.kind === "viewpoints" && ["pending", "running"].includes(t.status));
+    if (!running) ws.board.add({ title: "Afficher les points de vue", kind: "viewpoints", utterance: "(bouton Points de vue)", request: "Afficher les points de vue de la ville." });
     json(res, 202, { ok: true });
   },
 

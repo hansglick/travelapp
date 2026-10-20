@@ -22,12 +22,20 @@ const describePin = (pin) => (pin.position === "first" ? "première étape" : pi
 
 export const BACK_NAME = "Point de retour";
 
+// Itinéraire (ordre des étapes, cadenas, lieux visités, tracé) : mis de côté pour l'instant ; le code
+// reste en place. Les numéros des lieux sont de simples identifiants, dans l'ordre d'ajout.
+export const ITINERARY = false;
+
+// État de l'analyse web d'un lieu (critère de la recherche), pour le modèle
+const CHECK_WORDS = { pending: "analyse web en cours", confirmed: "répond au critère", maybe: "à vérifier", rejected: "écarté (ne répond pas au critère)" };
+
 export const LIMITS = {
-  addPerOperation: 10,
-  selectionSize: 25,
+  addPerOperation: 20,
+  selectionSize: 60,
   name: 120,
   query: 200,
   reason: 300,
+  check: 160,
   sources: 3,
   area: 120,
 };
@@ -75,10 +83,10 @@ export class PoiStore extends EventEmitter {
     this.version = 0;
     this.practical = { weather: null, phrasebook: null, facts: null, news: null, place: null }; // menu ☰ et icône « i »
     this.trash = [];            // lieux supprimés récemment (20 au plus) : restaurables sans nouvelle recherche
-    this.streets = null;        // « Découverte de la ville » : { taskId, colorIndex, items: [{ name, why, paths }] }
     this.renumberPending = false; // numéros absolus à recalculer (après une suppression ou un cadenas)
     this.pois = new Map();      // id → POI, dans l'ordre d'ajout
     this.nextId = 1;
+    this.nextNumber = 1;       // numéro affiché du prochain lieu (fixe, dans l'ordre d'ajout)
     this.doneOps = new Map();   // op_id → résultat déjà renvoyé (idempotence)
     this.candidates = new Map(); // cand_… → lieu Google proposé par find_places_near
     this.nextCandidate = 1;
@@ -104,14 +112,15 @@ export class PoiStore extends EventEmitter {
   toJSON() {
     return {
       practical: this.practical, // météo (Open-Meteo) et guide de conversation : enregistrés avec l'itinéraire
-      streets: this.streets,     // tracés OpenStreetMap (données libres) : enregistrés avec l'itinéraire
       nextId: this.nextId,
+      nextNumber: this.nextNumber,
       version: this.version,
       renumberPending: this.renumberPending,
       preferences: this.preferences,
       pois: [...this.pois.values()].map((p) => ({
-        id: p.id, name: p.name, query: p.query, category: p.category, sources: p.sources,
+        id: p.id, number: p.number || null, name: p.name, query: p.query, category: p.category, sources: p.sources,
         reason: p.special ? null : p.reason, // adresse du point de retour : donnée Google, non gardée
+        check: p.check || null,
         area: p.area, status: p.status, included: p.included, visitedAt: p.visitedAt, pin: p.pin,
         createdAt: p.createdAt, taskId: p.taskId, colorIndex: p.colorIndex, absIndex: p.absIndex || null,
         special: p.special || null,
@@ -131,31 +140,31 @@ export class PoiStore extends EventEmitter {
   load(data) {
     if (!data) return [];
     this.nextId = Number.isInteger(data.nextId) ? data.nextId : 1;
+    this.nextNumber = Number.isInteger(data.nextNumber) ? data.nextNumber : 1;
     this.version = Number.isInteger(data.version) ? data.version : 0;
     this.renumberPending = Boolean(data.renumberPending);
     if (data.preferences) this.preferences = { ...this.preferences, ...data.preferences };
     if (data.practical) this.practical = { ...this.practical, ...data.practical };
-    // Tracés des rues : coordonnées Google, 30 jours au plus ; au-delà, retracés (workspace)
-    this.streets = data.streets ? {
-      ...data.streets,
-      items: (data.streets.items || []).map((s) => (Date.now() - (s.tracedAt || 0) > 30 * 86400000 ? { ...s, paths: [], tracedAt: null } : s)),
-    } : null;
     const stale = [];
     for (const p of data.pois || []) {
       if (p.special === "back" && p.ownLocation) {
         const { ownLocation, ...rest } = p;
         this.pois.set(p.id, {
-          ...rest, candidates: null, mapNumber: null, status: "resolved",
+          ...rest, candidates: null, mapNumber: null, number: null, status: "resolved",
           reason: "Ta position au moment de la demande.",
           place: { placeId: null, name: BACK_NAME, location: ownLocation, address: null, types: [], locationSavedAt: Date.now() },
         });
         continue;
       }
       const old = p.place && Date.now() - (p.place.locationSavedAt || 0) > 30 * 86400000;
+      // Numéro fixe (identifiant affiché) ; un lieu enregistré avant les numéros fixes en reçoit un
+      const number = Number.isInteger(p.number) ? p.number : this.nextNumber;
+      this.nextNumber = Math.max(this.nextNumber, number + 1);
       const poi = {
         ...p,
+        number,
         candidates: null,
-        mapNumber: null,
+        mapNumber: ITINERARY ? null : number,
         place: p.place && !old ? { ...p.place, name: null, address: null, types: [] } : null,
         status: p.status === "resolved" && (!p.place || old) ? "pending" : p.status,
       };
@@ -174,6 +183,7 @@ export class PoiStore extends EventEmitter {
       category: poi.category,
       query: poi.query,
       reason: poi.reason,
+      check: poi.check || null,
       sources: poi.sources,
       status: poi.status,
       included: poi.included,
@@ -196,7 +206,6 @@ export class PoiStore extends EventEmitter {
       pois: [...this.pois.values()].map((p) => this.poiView(p)),
       preferences: this.preferences,
       practical: this.practical,
-      streets: this.streets,
       // La page doit renvoyer son ordre pour renuméroter (demande en cours ou numéro manquant)
       renumber_pending: this.renumberPending ||
         [...this.pois.values()].some((p) => p.status === "resolved" && p.included && !p.visitedAt && !p.absIndex),
@@ -213,9 +222,10 @@ export class PoiStore extends EventEmitter {
         category: p.category,
         status: p.status,
         ...(p.mapNumber ? { map_number: p.mapNumber } : {}),
-        ...(p.absIndex ? { itinerary_step: p.absIndex } : {}),
-        ...(p.pin ? { pinned: p.pin.position === "index" ? p.pin.index : p.pin.position } : {}),
+        ...(ITINERARY && p.absIndex ? { itinerary_step: p.absIndex } : {}),
+        ...(ITINERARY && p.pin ? { pinned: p.pin.position === "index" ? p.pin.index : p.pin.position } : {}),
         ...(p.place?.address ? { address: p.place.address } : {}),
+        ...(p.check ? { criterion_check: `${CHECK_WORDS[p.check.status] || p.check.status}${p.check.note ? ` : ${p.check.note}` : ""}` } : {}),
         // Données Google gardées en mémoire depuis la localisation : l'agent répond sans rouvrir la fiche
         ...(p.place?.rating != null ? { rating: p.place.rating } : {}),
         ...(p.place?.ratingCount != null ? { rating_count: p.place.ratingCount } : {}),
@@ -256,8 +266,11 @@ export class PoiStore extends EventEmitter {
       this.candidates.set(id, c.place);
       return {
         candidate_id: id, name: c.place.name, address: c.place.address, position: c.direction,
+        ...(c.place.types?.length ? { google_types: c.place.types.slice(0, 3) } : {}),
         ...(c.distance_from_user_m != null ? { distance_from_user_m: c.distance_from_user_m } : {}),
         ...(c.place.rating != null ? { rating: c.place.rating, rating_count: c.place.ratingCount } : {}),
+        ...(c.place.price ? { price: c.place.price } : {}),
+        ...(c.place.openNow != null ? { open_now: c.place.openNow } : {}),
       };
     });
   }
@@ -362,9 +375,11 @@ export class PoiStore extends EventEmitter {
         }
       }
       const key = normalize(name);
-      const dup = [...existing, ...accepted].find((p) =>
-        normalize(p.name) === key || normalize(p.query) === normalize(query) || (p.place?.name && normalize(p.place.name) === key) ||
-        (place && p.place?.placeId === place.placeId));
+      // Deux lieux déjà identifiés par Google : même identifiant Google (deux « Station U » dans deux
+      // villes ne sont pas un doublon) ; sinon, même nom ou même recherche
+      const dup = [...existing, ...accepted].find((p) => (place?.placeId && p.place?.placeId
+        ? p.place.placeId === place.placeId
+        : normalize(p.name) === key || normalize(p.query) === normalize(query) || (p.place?.name && normalize(p.place.name) === key)));
       if (dup) {
         skipped.push({ name, reason: `déjà dans la liste (id ${dup.id || "nouveau"})` });
         continue;
@@ -377,7 +392,10 @@ export class PoiStore extends EventEmitter {
         skipped.push({ name, reason: `liste pleine (${LIMITS.selectionSize} lieux au maximum)` });
         continue;
       }
-      accepted.push({ name, query, category, reason: cleanText(raw.reason, LIMITS.reason), sources: cleanSources(raw.sources), place });
+      // Critère précis de la recherche (« dorade ») : confirmé par une source, ou seulement probable
+      const note = cleanText(raw.check_note, LIMITS.check);
+      const check = typeof raw.verified === "boolean" && note ? { status: raw.verified ? "confirmed" : "maybe", note } : (raw.check || null);
+      accepted.push({ name, query, category, reason: cleanText(raw.reason, LIMITS.reason), check, sources: cleanSources(raw.sources), place });
     }
     return { accepted, skipped };
   }
@@ -397,7 +415,10 @@ export class PoiStore extends EventEmitter {
       taskId: origin?.taskId || null,
       colorIndex: Number.isInteger(origin?.colorIndex) ? origin.colorIndex : null,
       absIndex: null,
+      // Numéro fixe affiché sur la carte, dans l'ordre d'ajout (pas pour le point de retour « B »)
+      number: p.special ? null : this.nextNumber++,
     };
+    if (!ITINERARY) poi.mapNumber = poi.number;
     this.pois.set(poi.id, poi);
     if (poi.status === "resolved") this.#assignLast(poi);
     return poi;
@@ -493,6 +514,7 @@ export class PoiStore extends EventEmitter {
   // l'itinéraire) : ils permettent au modèle de comprendre « supprime le point n° 6 ». Information
   // d'affichage : la version de la liste ne change pas.
   setMapNumbers(numbers) {
+    if (!ITINERARY) return; // numéros fixes, attribués à l'ajout
     for (const poi of this.pois.values()) {
       const n = numbers[poi.id];
       poi.mapNumber = Number.isInteger(n) && n > 0 && n < 1000 ? n : null;
@@ -537,9 +559,9 @@ export class PoiStore extends EventEmitter {
   clearPois() {
     this.candidates.clear(); // candidats proposés lors des recherches effacées
     this.trash = [];
-    this.streets = null;
     const removed = [...this.pois.values()];
     this.renumberPending = false;
+    this.nextNumber = 1;
     if (!removed.length) return 0;
     this.pois.clear();
     this.version++;
@@ -665,7 +687,7 @@ export class PoiStore extends EventEmitter {
       if (!saved) { rejected.push({ id, reason: "pas dans la corbeille" }); continue; }
       if (this.pois.size >= LIMITS.selectionSize) { rejected.push({ id, reason: `liste pleine (${LIMITS.selectionSize} lieux au maximum)` }); continue; }
       const { removedAt, ...poi } = saved;
-      Object.assign(poi, { included: true, visitedAt: null, pin: null, absIndex: null, mapNumber: null });
+      Object.assign(poi, { included: true, visitedAt: null, pin: null, absIndex: null, mapNumber: ITINERARY ? null : poi.number });
       this.pois.set(poi.id, poi);
       this.#assignLast(poi);
       this.trash = this.trash.filter((p) => p.id !== id);
@@ -678,9 +700,12 @@ export class PoiStore extends EventEmitter {
     return { status: restored.length ? "applied" : "rejected", restored, rejected, version: this.version, selection: this.selectionForModel() };
   }
 
-  // Rues colorées de la « Découverte de la ville »
-  setStreets(streets) {
-    this.streets = streets;
+  // Analyse web d'un lieu (critère de la recherche) : pending (arcs qui tournent), confirmed (bague
+  // verte), maybe (bague orange), rejected (lieu grisé) ; la carte se met à jour
+  setPoiCheck(id, check) {
+    const poi = this.pois.get(id);
+    if (!poi) return;
+    poi.check = check;
     this.version++;
     this.emit("change", { added: [], removed: [] });
   }

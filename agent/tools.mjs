@@ -4,6 +4,17 @@
 
 import { LIMITS } from "./store.mjs";
 import { MAX_TRAVEL_S, MAX_SHOWN } from "./discovery.mjs";
+import { MAX_VIEWPOINTS, AREA_KM } from "./viewpoints.mjs";
+import { GOOGLE_TYPE_LIST } from "./google-types.mjs";
+import { categoryFromTypes } from "./places.mjs";
+
+// Prix compatibles avec « pas cher » (gratuit, €, €€)
+const CHEAP_LEVELS = ["PRICE_LEVEL_FREE", "PRICE_LEVEL_INEXPENSIVE", "PRICE_LEVEL_MODERATE"];
+
+// Recherche exhaustive : tous les lieux du rayon, 20 au plus ; sans rayon donné, 15 min à pied
+const MAX_RESULTS = 20;
+const DEFAULT_RADIUS_M = 1200;
+const ANALYSIS_BATCH = 5; // analyse web : 5 lieux à la fois
 
 const RESOLUTION_WAIT_MS = 2500; // update_pois attend au plus ce délai les résultats de Google
 
@@ -14,7 +25,7 @@ function distanceM(a, b) {
   return 12742000 * Math.asin(Math.sqrt(h));
 }
 
-export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote, discovery }) {
+export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote, announce, discovery, viewpoints, verifier }) {
   // task : { addedIds, candidates, requestedCount, log(text) } — la tâche qui appelle
   async function run(name, args, task) {
     switch (name) {
@@ -102,8 +113,8 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
     }
   }
 
-  // « Découverte de la ville » : la préparation faite au « Let's Go! » (ou lancée maintenant) est
-  // affichée : lieux localisés dans Google et ajoutés au groupe de la tâche, rues colorées
+  // « Découverte de la ville » (bouton de la carte dépliée) : la préparation faite au « Let's Go! »
+  // (ou lancée maintenant) est affichée : lieux localisés dans Google et ajoutés au groupe de la tâche
   async function discover(task) {
     const position = store.context.position;
     if (!position || !store.context.positionSource) return "Ta position n'est pas encore connue : choisis d'abord ton point de départ.";
@@ -114,18 +125,9 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       const place = store.context.place?.city ? store.context.place : await resolvePoi.reverseGeocode(position);
       const entry = await (discovery.get() || discovery.start({ place, position }));
       await discovery.materialize(entry, position);
-      // Temps de trajet réels depuis le point de départ : un seul appel pour les lieux et les rues
+      // Temps de trajet réels depuis le point de départ : un seul appel pour tous les lieux
       const located = entry.candidates.filter((c) => c.location);
-      const streets = entry.streets.filter((s) => s.path?.length);
-      const nearest = (path) => {
-        let best = null, bestM = Infinity;
-        for (const [lat, lng] of path) {
-          const m = distanceM(position, { lat, lng });
-          if (m < bestM) { bestM = m; best = { lat, lng }; }
-        }
-        return best;
-      };
-      const targets = [...located.map((c) => c.location), ...streets.map((s) => nearest(s.path))];
+      const targets = located.map((c) => c.location);
       let seconds;
       try {
         const grid = targets.length ? await resolvePoi.walkMatrix([position], targets) : [[]];
@@ -137,7 +139,6 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       const reachable = (i) => seconds[i] <= MAX_TRAVEL_S;
       const room = Math.max(0, LIMITS.selectionSize - store.pois.size);
       const chosen = located.filter((c, i) => reachable(i)).slice(0, Math.min(MAX_SHOWN, room));
-      const keptStreets = streets.filter((s, i) => reachable(located.length + i));
       // Lieux déjà localisés : ajoutés tels quels (sans nouvelle recherche Google)
       const ids = store.rememberCandidates(chosen.map((c) => ({ place: { placeId: c.placeId, name: c.name, address: null, location: c.location, types: [] } })))
         .map((v) => v.candidate_id);
@@ -155,19 +156,59 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
         const poi = store.pois.get(id);
         if (poi?.place?.placeId) resolvePoi.getDetails(poi.place.placeId).then((info) => store.setPlaceInfo(id, info)).catch(() => {});
       }
-      store.setStreets({
-        taskId: task.id, colorIndex: task.ensureColor(), city: entry.city, country: entry.country,
-        items: keptStreets.map((s) => ({ name: s.name, why: s.why, paths: [s.path], tracedAt: s.tracedAt })),
-      });
       discovery.setState("shown");
       const placed = task.addedIds.filter((id) => store.pois.get(id)?.status === "resolved").length;
       const tooFar = located.length - located.filter((c, i) => reachable(i)).length;
-      return `Découverte de la ville affichée : ${placed} lieu(x) à 40 min au plus et ${keptStreets.length} rue(s) colorée(s)`
+      return `Découverte de la ville affichée : ${placed} lieu(x) à 40 min au plus`
         + (tooFar ? ` (${tooFar} lieu(x) écarté(s), à plus de 40 min).` : ".");
     } catch (err) {
       console.warn("[découverte] affichage :", err.message);
       discovery.setState("error");
       return "La découverte de la ville n'a pas pu être préparée (erreur technique).";
+    }
+  }
+
+  // « Points de vue » (bouton du bonhomme qui marche) : les points de vue préparés au « Let's Go! »
+  // (ou cherchés maintenant) sont ajoutés comme des lieux, au groupe de la tâche : 7 au plus, dans
+  // la zone de la ville (15 km), sans la règle des 40 min ; un lieu déjà sur la carte (découverte de
+  // la ville…) n'est pas ajouté une seconde fois.
+  async function showViewpoints(task) {
+    const position = store.context.position;
+    if (!position || !store.context.positionSource) return "Ta position n'est pas encore connue : choisis d'abord ton point de départ.";
+    viewpoints.setState("displaying");
+    try {
+      const place = store.context.place?.city ? store.context.place : await resolvePoi.reverseGeocode(position);
+      const entry = await (viewpoints.get() || viewpoints.start({ place, position }));
+      await viewpoints.materialize(entry, position);
+      const onMap = [...store.pois.values()].filter((p) => p.place?.location);
+      const already = (c) => onMap.some((p) => (c.placeId && p.place.placeId === c.placeId) || distanceM(p.place.location, c.location) <= 50);
+      const inZone = entry.candidates.filter((c) => c.location && distanceM(position, c.location) <= AREA_KM * 1000);
+      const room = Math.max(0, LIMITS.selectionSize - store.pois.size);
+      const chosen = inZone.filter((c) => !already(c)).slice(0, Math.min(MAX_VIEWPOINTS, room));
+      const ids = store.rememberCandidates(chosen.map((c) => ({ place: { placeId: c.placeId, name: c.name, address: null, location: c.location, types: [] } })))
+        .map((v) => v.candidate_id);
+      for (let i = 0; i < chosen.length; i += LIMITS.addPerOperation) {
+        await run("update_pois", {
+          operation: "add", base_version: store.version, op_id: `viewpoints-${i}`,
+          pois: chosen.slice(i, i + LIMITS.addPerOperation).map((c, k) => ({
+            name: c.name, query: c.query, category: "viewpoint", reason: c.reason, sources: [], candidate_id: ids[i + k],
+          })),
+          remove_ids: [], remove_category: null, area: null, requested_count: null,
+        }, task);
+      }
+      // Note, avis, prix et horaires : demandés en arrière-plan (mémoire seulement)
+      for (const id of task.addedIds) {
+        const poi = store.pois.get(id);
+        if (poi?.place?.placeId) resolvePoi.getDetails(poi.place.placeId).then((info) => store.setPlaceInfo(id, info)).catch(() => {});
+      }
+      viewpoints.setState("shown");
+      const placed = task.addedIds.filter((id) => store.pois.get(id)?.status === "resolved").length;
+      const skipped = inZone.filter(already).length;
+      return `Points de vue affichés : ${placed}` + (skipped ? ` (${skipped} déjà sur la carte).` : ".");
+    } catch (err) {
+      console.warn("[points de vue] affichage :", err.message);
+      viewpoints.setState("error");
+      return "Les points de vue n'ont pas pu être préparés (erreur technique).";
     }
   }
 
@@ -205,9 +246,11 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       if (!position) return { status: "error", message: "Aucun repère : position de l'utilisateur inconnue." };
       anchors.push({ name: "l'utilisateur", location: position });
     }
-    const found = await resolvePoi.searchNear({ textQuery: what, anchors, radius, position });
+    // Type Google exact (liste officielle) : recherche directe par type, sinon par mots
+    const googleType = GOOGLE_TYPE_LIST.includes(args.google_type) ? args.google_type : null;
+    const found = await resolvePoi.searchNear({ textQuery: what, googleType, anchors, radius, position });
     const anchorNames = anchors.map((a) => a.name).join(" et ");
-    console.log(`[places] « ${what} » près de ${anchorNames} :`, found.map((c) => `${c.place.name} (${c.direction})`).join(" | ") || "rien");
+    console.log(`[places] « ${what} »${googleType ? ` [${googleType}]` : ""} près de ${anchorNames} :`, found.map((c) => `${c.place.name} (${c.direction})`).join(" | ") || "rien");
     if (!found.length) return { status: "not_found", anchors: anchorNames, message: `Aucun résultat pour « ${what} » à moins de ${radius} m.` };
     const candidates = store.rememberCandidates(found);
     task.candidates.push(...candidates.map((c) => `${c.candidate_id} ${c.name} (${c.position})`));
@@ -217,6 +260,141 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
       candidates,
       note: "Choisis le candidat qui correspond à la tâche et ajoute-le avec update_pois (candidate_id). Si plusieurs correspondent à une description précise, propose-les (nom, position, candidate_id) et demande lequel.",
     };
+  }
+
+  // Recherche directe (canaux google et mixed, sans le modèle de calcul). La demande est découpée par
+  // le détecteur : la partie Google (type exact, formulations, ouvert, bien noté, pas cher) est
+  // cherchée tout de suite et TOUS les lieux du rayon s'affichent (20 au plus, du plus proche au plus
+  // loin) ; la partie web (check : critère concret, thème ou réputation) est vérifiée ensuite en
+  // arrière-plan sur ces lieux (analyzeInBackground). On garde les lieux du bon type ou sans type
+  // précis (Google n'a pas classé la station du Super U de Quiberon), jamais ceux classés dans un autre
+  // type (bornes de recharge, gare…) ; ceux où le type n'est que secondaire (un poké bowl classé aussi
+  // « thaï ») seulement s'il n'y a presque rien d'autre. null si rien ne convient : la tâche passe au
+  // modèle.
+  // Localisation directe (tâche locate) : chaque lieu nommé est cherché autour de l'utilisateur par
+  // paliers (10, 30 puis 60 min à pied) ; le lieu le plus pertinent pour Google au premier palier où il
+  // apparaît est placé. Un nom introuvable à 60 min, ou un lieu décrit par rapport à un repère : null,
+  // la tâche passe au modèle (recherche web, repères).
+  async function locateDirect(task) {
+    const names = task.placeNames || [];
+    const position = store.context.position;
+    if (!names.length || !position) return null;
+    const results = await Promise.all(names.map((name) => resolvePoi.findNamed(name, position).catch(() => null)));
+    if (results.some((r) => !r)) {
+      task.log(`localisation directe : ${names.filter((n, i) => !results[i]).map((n) => `« ${n} »`).join(", ")} introuvable(s) à moins de 60 min à pied`);
+      return null;
+    }
+    const chosen = results.map((r) => r.found[0]);
+    const onMap = new Set([...store.pois.values()].map((p) => p.place?.placeId).filter(Boolean));
+    const fresh = chosen.filter((c) => !onMap.has(c.place.placeId));
+    const ids = store.rememberCandidates(fresh).map((c) => c.candidate_id);
+    const meters = (m) => (m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1).replace(".", ",")} km`);
+    if (fresh.length) {
+      await run("update_pois", {
+        operation: "add", base_version: store.version, op_id: `locate-${task.id}`,
+        pois: fresh.map((c, k) => ({
+          name: c.place.name, query: [c.place.name, c.place.address].filter(Boolean).join(", "), category: categoryFromTypes(c.place.types),
+          reason: `À ${meters(c.distance_from_user_m)}${c.place.address ? `, ${c.place.address}` : ""}.`, sources: [], candidate_id: ids[k], verified: null, check_note: "",
+        })),
+        remove_ids: [], remove_category: null, area: null, requested_count: null,
+      }, task);
+    }
+    const lines = chosen.map((c, i) => `« ${names[i]} » → ${c.place.name}, à ${meters(c.distance_from_user_m)} (recherche à ${Math.round(results[i].radius / 80)} min à pied)${onMap.has(c.place.placeId) ? ", déjà sur la carte" : ""}`);
+    task.log(`localisation directe : ${lines.join(" ; ")}`);
+    return `Lieu(x) placé(s) d'après Google : ${lines.join(" ; ")}.`;
+  }
+
+  async function googleDirect(task) {
+    const g = task.google;
+    const position = store.context.position;
+    if (!g?.words?.length || !position) return null;
+    const limitM = task.maxDistanceM || DEFAULT_RADIUS_M;
+    const radius = Math.min(Math.max(limitM, 300), 10000);
+    const anchors = [{ name: "l'utilisateur", location: position }];
+    const previous = task.previousAddedIds.filter((id) => store.pois.has(id));
+    // Ajout à un groupe : le nombre demandé ; sinon, recherche exhaustive
+    const goal = task.extends ? Math.max(1, (task.requestedCount || 1) - previous.length) : MAX_RESULTS;
+    const runs = await Promise.all(g.words.slice(0, 3).map((word, i) =>
+      resolvePoi.searchNear({ textQuery: word, googleType: i === 0 ? g.type : null, anchors, radius, position, limit: 20, want: Math.min(goal, 20) }).catch(() => [])));
+    const seen = new Set();
+    const found = runs.flat().filter((c) => !seen.has(c.place.placeId) && seen.add(c.place.placeId));
+    const GENERIC = new Set(["point_of_interest", "establishment", "service", "store", "food"]);
+    // 0 : le type demandé est sa catégorie principale (ou pas de type demandé) ; 1 : lieu sans type
+    // précis ; 2 : type demandé seulement secondaire ; 3 : classé dans un autre type, écarté
+    const rank = (c) => {
+      if (!g.type || c.place.primaryType === g.type) return 0;
+      if (c.place.types.every((type) => GENERIC.has(type))) return 1;
+      return c.place.types.includes(g.type) ? 2 : 3;
+    };
+    const onMap = new Set([...store.pois.values()].map((p) => p.place?.placeId).filter(Boolean));
+    const matching = found
+      .filter((c) => rank(c) < 3)
+      .filter((c) => !onMap.has(c.place.placeId))
+      .filter((c) => !g.openNow || c.place.openNow !== false)
+      .filter((c) => !g.minRating || (c.place.rating ?? 0) >= g.minRating)
+      .filter((c) => !g.cheap || !c.place.priceLevel || CHEAP_LEVELS.includes(c.place.priceLevel))
+      .sort((a, b) => a.distance_from_user_m - b.distance_from_user_m);
+    const main = matching.filter((c) => rank(c) < 2);
+    const pool = main.length >= 3 ? main : matching;
+    // Dans le rayon ; sans rayon donné et rien dans les 15 min, les 3 plus proches que Google connaît
+    let kept = pool.filter((c) => c.distance_from_user_m <= limitM);
+    if (!kept.length && !task.maxDistanceM) kept = pool.slice(0, 3);
+    task.log(`recherche Google directe : ${g.words.map((w) => `« ${w} »`).join(", ")}${g.type ? ` [${g.type}]` : ""} → ${found.length} lieu(x), ${kept.length} retenu(s)`);
+    const chosen = kept.slice(0, goal);
+    if (!chosen.length) return null;
+    // Version précédente de la tâche (précision) : ses lieux sont remplacés ; ajout à un groupe : gardés
+    if (!task.extends && previous.length) {
+      await run("update_pois", {
+        operation: "remove", base_version: store.version, op_id: `direct-replace-${task.id}`,
+        pois: [], remove_ids: previous, remove_category: null, area: null, requested_count: null,
+      }, task);
+    }
+    const ids = store.rememberCandidates(chosen).map((c) => c.candidate_id);
+    const describe = (c) => [
+      `À ${c.distance_from_user_m < 1000 ? `${c.distance_from_user_m} m` : `${(c.distance_from_user_m / 1000).toFixed(1).replace(".", ",")} km`}`,
+      c.place.openNow === true ? "ouvert en ce moment" : c.place.openNow === false ? "fermé en ce moment" : null,
+      c.place.rating ? `noté ${String(c.place.rating).replace(".", ",")}/5` : null,
+    ].filter(Boolean).join(", ") + ".";
+    // Partie web : chaque lieu est « en cours d'analyse » (arcs autour du marqueur) jusqu'à sa réponse
+    const pending = g.check ? { status: "pending", label: g.check.label, note: "" } : null;
+    await run("update_pois", {
+      operation: "add", base_version: store.version, op_id: `direct-${task.id}`,
+      pois: chosen.map((c, k) => ({
+        name: c.place.name, query: [c.place.name, c.place.address].filter(Boolean).join(", "), category: g.category,
+        reason: describe(c), sources: [], candidate_id: ids[k], verified: null, check_note: "", check: pending,
+      })),
+      remove_ids: [], remove_category: null, area: null, requested_count: null,
+    }, task);
+    const placed = chosen.map((c) => ({ c, id: [...store.pois.values()].find((p) => p.place?.placeId === c.place.placeId)?.id })).filter((x) => x.id);
+    const what = task.groupName || task.title;
+    if (g.check && verifier) analyzeInBackground(task, g, placed, what);
+    return `${placed.length} lieu(x) trouvé(s) d'après Google, tous affichés : ${placed.map(({ c }) => c.place.name).join(", ")}.`
+      + (g.check ? ` Analyse web en cours pour « ${g.check.label} » (${g.check.kind === "reputation" ? "lesquels sont recommandés" : g.check.question}) : le résultat arrivera ensuite.` : "")
+      + (g.ignored?.length ? ` Non pris en compte (trop vague) : ${g.ignored.join(", ")}.` : "")
+      + (!task.maxDistanceM && kept.every((c) => c.distance_from_user_m > limitM) ? " Aucun à moins de 15 minutes : les plus proches connus de Google." : "");
+  }
+
+  // Partie web de la recherche, en arrière-plan : 5 lieux à la fois, du plus proche au plus loin.
+  // Chaque réponse met à jour le lieu : confirmé ou recommandé (bague verte), à vérifier (bague
+  // orange), écarté (grisé ; seulement pour un critère concret). À la fin, le guide le dit.
+  async function analyzeInBackground(task, g, placed, what) {
+    const counts = { confirmed: 0, maybe: 0, rejected: 0 };
+    for (let i = 0; i < placed.length; i += ANALYSIS_BATCH) {
+      const batch = placed.slice(i, i + ANALYSIS_BATCH).filter(({ id }) => store.pois.has(id));
+      const answers = await verifier.verify(batch.map(({ c }) => c.place), g.check);
+      batch.forEach(({ id }, k) => {
+        const { answer, note } = answers[k];
+        const status = answer === "confirmed" || answer === "recommended" ? "confirmed"
+          : answer === "no" && g.check.kind === "criterion" ? "rejected" : "maybe";
+        counts[status]++;
+        store.setPoiCheck(id, { status, label: g.check.label, note: status === "maybe" && g.check.kind === "reputation" ? "" : note });
+      });
+    }
+    const summary = g.check.kind === "reputation"
+      ? `${counts.confirmed} recommandé(s), ${counts.maybe} sans recommandation trouvée`
+      : `${counts.confirmed} confirmé(s) (« ${g.check.label} »), ${counts.maybe} à vérifier sur place, ${counts.rejected} écarté(s)`;
+    task.log(`analyse web terminée : ${summary}`);
+    announce?.(`Analyse web terminée pour « ${what} » : ${summary}. Dis-le en une phrase courte, sans citer les lieux (les bagues vertes et orange sont sur la carte).`);
   }
 
   // Distance et temps de marche entre des lieux de la liste ou l'utilisateur (« user ») : trajet à
@@ -308,5 +486,5 @@ export function createTools({ store, resolvePoi, broadcast, uiConnected, appNote
   // Lieu à relocaliser (coordonnées de plus de 30 jours après rechargement d'un compte)
   const relocate = (id) => resolveAndStore(id, null);
 
-  return { run, enforceDistance, relocate, placeBackPoint, discover };
+  return { run, enforceDistance, relocate, placeBackPoint, discover, showViewpoints, googleDirect, locateDirect };
 }

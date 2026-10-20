@@ -250,6 +250,8 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
     console.log(`[tâches] ${task.id} ${type} « ${task.title} »${type === "done" || type === "failed" ? ` : ${task.result}` : ""}`);
     broadcast({ type: "agent", state: board().searchRunning().length ? "searching" : summary.startsWith("Plus aucune") ? "idle" : "working" });
     if (!s || s.closing) return;
+    // Boutons de la carte (découverte de la ville, points de vue) : hors de la conversation, le guide n'en dit rien
+    if (task.kind === "discover" || task.kind === "viewpoints") return;
     if (type === "question") {
       // Question d'affinage avant une recherche : le guide la pose tout de suite
       send(s, {
@@ -263,9 +265,9 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
     } else if (type === "done" || type === "failed") {
       // Recherche, localisation, point de retour : le guide dit seulement que c'est fait ; question
       // sur un lieu ou modification de la liste : il donne la réponse
-      const brief = type === "done" && ["search", "locate", "self", "discover"].includes(task.kind);
+      const brief = type === "done" && ["search", "locate", "self"].includes(task.kind);
       const content = brief
-        ? `[APP] Tâche terminée — « ${task.title} ». Dis seulement, en une phrase courte, que c'est fait, sans détailler les lieux (pour toi seulement : ${task.result})`
+        ? `[APP] Tâche terminée — « ${task.title} ». Dis en une phrase courte combien de lieux sont affichés, sans les détailler ; si une analyse web est en cours, dis ce que tu vérifies (« J'ai trouvé 12 restaurants thaïs, je vérifie lesquels servent du poisson ») ; si des termes n'ont pas été pris en compte (trop vagues), dis-le en quelques mots (« je ne peux pas savoir s'ils sont petits »). Pour toi : ${task.result}`
         : `[APP] ${type === "done" ? "Tâche terminée" : "Tâche échouée"} — « ${task.title} » : ${task.result}`;
       send(s, {
         type: "session.commentary.append", event_id: `task_${task.id}_${Date.now()}`, delegation_id: null,
@@ -352,12 +354,20 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
     broadcast({ type: "voice", state: "closed", reason });
   }
 
+  // Information à dire à l'utilisateur maintenant (fin de l'analyse web d'une recherche…)
+  function announce(text) {
+    const s = session;
+    if (!s || s.closing) return;
+    send(s, { type: "session.commentary.append", event_id: `announce_${Date.now()}`, delegation_id: null, content: `[APP] ${text}`.slice(0, 1400) });
+  }
+
   return {
     create,
     close,
     typed,
     clearConversation,
     appNote,
+    announce,
     positionChanged,
     onTaskEvent,
     active: () => Boolean(session && !session.closing),

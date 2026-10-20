@@ -9,7 +9,7 @@ import {
   BACKEND_MODEL, BACKEND_REASONING, BACKEND_INSTRUCTIONS, BACKEND_TOOLS,
   EXTRACTOR_MODEL, EXTRACTOR_INSTRUCTIONS, EXTRACTOR_SCHEMA,
 } from "./prompts.mjs";
-import { normalize } from "./store.mjs";
+import { normalize, CATEGORIES } from "./store.mjs";
 
 const API = "https://api.openai.com/v1/responses";
 const MAX_PARALLEL = 3;
@@ -23,14 +23,16 @@ const EXTRACTOR_REASONING = process.env.EXTRACTOR_REASONING || "low"; // « none
 const FOCUS_TTL_MS = 15 * 60 * 1000; // bulle ouverte depuis plus longtemps : elle ne compte plus
 const MAX_QUESTIONS = 3;           // questions d'affinage posées au plus avant une recherche
 const MAX_DIMENSIONS = 6;
-const COUNT_DIMENSION = "nombre de suggestions"; // toujours demandé, en dernier, sauf nombre déjà dit
+const COUNT_DIMENSION = "nombre de suggestions"; // plus demandé : recherche exhaustive (voir initialDimensions)
 const DEFAULT_COUNT = 3;
 const QUESTION_GRACE_MS = 2000;    // une prise de parole finie avant ce délai ne répond pas à la question
 const ACTIVE = ["clarifying", "pending", "running"];
 // Types de tâches : recherche, localisation d'un lieu précis, auto-localisation (point de retour),
-// question sur les lieux (data), organisation de la liste
-const KINDS = ["search", "locate", "self", "info", "quick", "discover"];
+// question sur les lieux (data), organisation de la liste ; découverte de la ville et points de vue : créés
+// seulement par les boutons de la carte (jamais par le détecteur)
+const KINDS = ["search", "locate", "self", "info", "quick", "discover", "viewpoints"];
 const DISCOVER_GROUP = "Découverte de la ville";
+const VIEWPOINTS_GROUP = "Points de vue";
 const LOCATE_GROUP = "Lieux placés"; // toutes les localisations partagent ce groupe (une couleur)
 
 // Noms des couleurs des groupes (même ordre que la palette de la page)
@@ -39,6 +41,27 @@ const COLOR_NAMES = ["orange", "bleu", "vert", "magenta", "bleu-vert", "violet",
 const DIMENSION_WORDS = {
   to_ask: "à demander", asked: "question posée, réponse attendue", skipped: "peu importe",
   unanswered: "sans réponse", not_asked: "non demandée",
+};
+// Canal de recherche : google (Google seul), mixed (Google fait la liste, le web vérifie) ou web
+const channelOf = (value, fallback = "web") => (["google", "mixed", "web"].includes(value) ? value : fallback);
+const clip = (value, max) => String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
+// Paramètres de la recherche Google directe (canaux google et mixed), validés ; null si inutilisables
+const googleOf = (g, fallback = null) => {
+  if (!g || typeof g !== "object") return fallback;
+  const words = (Array.isArray(g.words) ? g.words : []).map((w) => clip(w, 60)).filter(Boolean).slice(0, 3);
+  if (!words.length) return fallback;
+  const check = g.check && ["criterion", "reputation"].includes(g.check.kind)
+    ? { kind: g.check.kind, question: clip(g.check.question, 120), label: clip(g.check.label, 40) || "Critère" }
+    : null;
+  return {
+    type: typeof g.type === "string" ? g.type : null, words,
+    category: CATEGORIES.includes(g.category) ? g.category : "other",
+    openNow: Boolean(g.open_now ?? g.openNow),
+    minRating: Number.isFinite(g.min_rating ?? g.minRating) ? Math.min(5, Math.max(0, g.min_rating ?? g.minRating)) : null,
+    cheap: Boolean(g.cheap),
+    check: check && (check.kind === "reputation" || check.question) ? check : null,
+    ignored: (Array.isArray(g.ignored) ? g.ignored : []).map((w) => clip(w, 30)).filter(Boolean).slice(0, 5),
+  };
 };
 const colorName = (i) => (Number.isInteger(i) ? COLOR_NAMES[i] || `couleur n° ${i + 1}` : null);
 
@@ -66,7 +89,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       requestedCount: t.requestedCount, placedCount: placedCount(t), criteria: t.criteria, maxDistanceM: t.maxDistanceM,
       colorIndex: t.colorIndex, extends: t.extends,
       relatedIds: [...t.relatedIds].filter((id) => store.pois.has(id)), // lieux concernés par une question
-      dimensions: t.dimensions, groupName: t.groupName,
+      dimensions: t.dimensions, groupName: t.groupName, channel: t.channel, google: t.google,
     };
   }
 
@@ -76,9 +99,11 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
 
   // État résumé pour le guide vocal et le détecteur
   function summary() {
-    const running = list().filter((t) => t.status === "running");
-    const pending = list().filter((t) => t.status === "pending");
-    const clarifying = list().filter((t) => t.status === "clarifying");
+    // Les boutons de la carte (découverte, points de vue) ne concernent pas la conversation
+    const conversational = list().filter((t) => t.kind !== "discover" && t.kind !== "viewpoints");
+    const running = conversational.filter((t) => t.status === "running");
+    const pending = conversational.filter((t) => t.status === "pending");
+    const clarifying = conversational.filter((t) => t.status === "clarifying");
     if (!running.length && !pending.length && !clarifying.length) return "Plus aucune tâche en cours : tout ce qui a été demandé est fait.";
     const parts = [];
     if (clarifying.length) parts.push(`à préciser avant la recherche : ${clarifying.map((t) => `« ${t.title} »`).join(", ")}`);
@@ -170,7 +195,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     }
     for (const id of out.cancel || []) cancel(id, "annulée par l'utilisateur");
     for (const c of out.clarify || []) clarify(c, text);
-    for (const r of out.refine || []) refine(r.task_id, r.request, text, r.count, r.criteria);
+    for (const r of out.refine || []) refine(r.task_id, r.request, text, r.count, r.criteria, r.channel, r.google);
     for (const e of out.extend || []) extend(e.task_id, e.additional_count, e.request, e.criteria, text);
     for (const t of out.new_tasks || []) {
       // Garde-fou : une demande qui nomme la couleur d'un groupe existant complète ce groupe
@@ -179,7 +204,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         extend(group.id, t.count || 1, t.request, t.criteria?.length ? t.criteria : null, text);
         continue;
       }
-      add({ title: t.title, groupName: t.group_name, request: t.request, kind: t.kind, utterance: text, count: t.count, countGiven: t.count_given, criteria: t.criteria, dimensions: t.dimensions });
+      add({ title: t.title, groupName: t.group_name, request: t.request, kind: t.kind, channel: t.channel, google: t.google, placeNames: t.place_names, utterance: text, count: t.count, countGiven: t.count_given, criteria: t.criteria, dimensions: t.dimensions });
     }
     if (out.new_tasks?.length || out.refine?.length || out.extend?.length || out.cancel?.length || out.clarify?.length) {
       console.log(`[tâches] « ${text.slice(0, 80)} » →`, JSON.stringify(out));
@@ -285,7 +310,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     if (!t) return null;
     if (t.status !== "clarifying") {
       // Déjà lancée : c'est une précision ordinaire
-      return ACTIVE.includes(t.status) ? refine(t.id, c.request, utterance, c.count, c.criteria) : null;
+      return ACTIVE.includes(t.status) ? refine(t.id, c.request, utterance, c.count, c.criteria, c.channel, c.google) : null;
     }
     for (const a of c.answers || []) {
       const name = String(a.dimension || "").slice(0, 40);
@@ -301,6 +326,8 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     if (c.request) t.request = String(c.request).slice(0, 600);
     if (Number.isInteger(c.count) && c.count > 0 && c.count <= 15) t.requestedCount = c.count;
     if (Array.isArray(c.criteria) && c.criteria.length) setCriteria(t, c.criteria);
+    t.channel = channelOf(c.channel, t.channel);
+    t.google = googleOf(c.google, t.google);
     if (c.launch_now) {
       for (const d of t.dimensions) if (d.status === "to_ask" || d.status === "asked") d.status = "skipped";
     }
@@ -334,7 +361,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         result: t.result, replaces: t.replaces, replacedBy: t.replacedBy, addedIds: t.addedIds,
         previousAddedIds: t.previousAddedIds, requestedCount: t.requestedCount, criteria: t.criteria,
         maxDistanceM: t.maxDistanceM, extends: t.extends, continuations: t.continuations, colorIndex: t.colorIndex,
-        relatedIds: [...t.relatedIds], dimensions: t.dimensions, groupName: t.groupName,
+        relatedIds: [...t.relatedIds], dimensions: t.dimensions, groupName: t.groupName, channel: t.channel, google: t.google, placeNames: t.placeNames,
       })),
     };
   }
@@ -371,26 +398,24 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   // manquent) ou non demandées
   // Le nombre de suggestions est toujours demandé en dernier (en plus des MAX_QUESTIONS), sauf si
   // l'utilisateur l'a déjà dit ; une recherche sans caractéristique (lieu précis nommé) n'en a pas
-  function initialDimensions(list, count, countGiven) {
+  // Recherche exhaustive (tous les lieux du rayon, 20 au plus) : plus de question sur le nombre de
+  // suggestions ; le rayon est toujours demandé en premier si la demande ne le donne pas
+  function initialDimensions(list) {
     let toAsk = 0;
-    const dims = (Array.isArray(list) ? list : []).slice(0, MAX_DIMENSIONS)
-      .filter((d) => normalize(d.name) !== normalize(COUNT_DIMENSION))
-      .map((d) => {
-        const known = typeof d.known_value === "string" && d.known_value.trim() ? d.known_value.trim().slice(0, 80) : null;
-        const status = known ? "known" : toAsk++ < MAX_QUESTIONS ? "to_ask" : "not_asked";
-        return { name: String(d.name || "").slice(0, 40), value: known, question: String(d.question || "").slice(0, 200), status, askedAt: null };
-      });
-    if (!dims.length) return dims;
-    const given = countGiven && Number.isInteger(count) && count > 0;
-    dims.push({
-      name: COUNT_DIMENSION, value: given ? String(count) : null,
-      question: "Combien de suggestions veux-tu : par exemple 3, 5 ou 10 ?",
-      status: given ? "known" : "to_ask", askedAt: null,
+    const raw = (Array.isArray(list) ? list : []).filter((d) => normalize(d.name) !== normalize(COUNT_DIMENSION));
+    const isDistance = (d) => /distance|rayon|temps de marche/.test(normalize(d.name));
+    if (raw.length && !raw.some(isDistance)) {
+      raw.unshift({ name: "distance", known_value: null, question: "Jusqu'à combien de minutes à pied ? Par exemple 5, 10 ou 15 minutes." });
+    }
+    const ordered = [...raw.filter(isDistance), ...raw.filter((d) => !isDistance(d))].slice(0, MAX_DIMENSIONS);
+    return ordered.map((d) => {
+      const known = typeof d.known_value === "string" && d.known_value.trim() ? d.known_value.trim().slice(0, 80) : null;
+      const status = known ? "known" : isDistance(d) || toAsk++ < MAX_QUESTIONS ? "to_ask" : "not_asked";
+      return { name: String(d.name || "").slice(0, 40), value: known, question: String(d.question || "").slice(0, 200), status, askedAt: null };
     });
-    return dims;
   }
 
-  function add({ title, groupName = null, request, kind, utterance, replaces = null, previousAddedIds = [], count = null, countGiven = false, criteria = [], extends: extending = false, dimensions = [] }) {
+  function add({ title, groupName = null, request, kind, channel = "web", google = null, placeNames = [], utterance, replaces = null, previousAddedIds = [], count = null, countGiven = false, criteria = [], extends: extending = false, dimensions = [] }) {
     const t = {
       id: `t${nextId++}`, title: (title || "Tâche").slice(0, 60), request: (request || "").slice(0, 600),
       kind: KINDS.includes(kind) ? kind : "search", utterance: (utterance || "").slice(0, 400),
@@ -400,6 +425,11 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       requestedCount: Number.isInteger(count) && count > 0 && count <= 15 ? count : null, // nombre de lieux exigé
       extends: extending, // complète un groupe : ses lieux existants sont gardés tels quels
       continuations: 0, conversation: lastConversation,
+      // Canal de recherche : google (Places seulement, sans recherche web) ou web
+      channel: channelOf(channel),
+      google: googleOf(google),
+      // Lieux nommés à placer (tâche locate) : cherchés d'abord autour de l'utilisateur
+      placeNames: (Array.isArray(placeNames) ? placeNames : []).map((n) => clip(n, 80)).filter(Boolean).slice(0, 5),
     };
     // Couleur des lieux de la tâche : une tâche relancée garde celle de la tâche qu'elle remplace ;
     // une tâche qui doit ajouter des lieux la reçoit dès sa création (la 1re est orange) ; les autres
@@ -409,7 +439,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     t.groupName = (typeof groupName === "string" && groupName.trim() ? groupName.trim().slice(0, 60) : null)
       ?? (replaces ? tasks.get(replaces)?.groupName ?? null : null);
     // Nouvelle recherche : « à préciser » tant qu'il reste des questions à poser
-    t.dimensions = t.kind === "search" && !replaces ? initialDimensions(dimensions, count, countGiven) : [];
+    t.dimensions = t.kind === "search" && !replaces ? initialDimensions(dimensions) : [];
     if (t.dimensions.some((d) => d.status === "to_ask")) t.status = "clarifying";
     t.colorIndex = replaces ? tasks.get(replaces)?.colorIndex ?? null : null;
     if (t.kind === "locate") {
@@ -419,6 +449,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       t.groupName = LOCATE_GROUP;
     }
     if (t.kind === "discover") t.groupName = DISCOVER_GROUP;
+    if (t.kind === "viewpoints") t.groupName = VIEWPOINTS_GROUP;
     if (t.colorIndex === null && t.requestedCount && t.kind === "search") t.colorIndex = nextColor++;
     hydrate(t);
     tasks.set(t.id, t);
@@ -450,21 +481,23 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
 
   // Précision sur une tâche : en cours ou en attente → arrêtée puis relancée ; terminée → nouvelle
   // tâche qui ajuste son résultat (lieux déjà ajoutés transmis)
-  function refine(id, request, utterance, count = null, criteria = null) {
+  function refine(id, request, utterance, count = null, criteria = null, channel = null, google = null) {
     const old = tasks.get(id);
-    if (!old) return add({ title: "Précision", request, kind: "search", utterance, count, criteria: criteria || [] });
+    if (!old) return add({ title: "Précision", request, kind: "search", channel: channelOf(channel), google, utterance, count, criteria: criteria || [] });
     if (old.status === "clarifying") {
       // Pas encore lancée : la demande est simplement mise à jour
       if (request) old.request = String(request).slice(0, 600);
       if (Number.isInteger(count) && count > 0 && count <= 15) old.requestedCount = count;
       if (criteria?.length) setCriteria(old, criteria);
+      old.channel = channelOf(channel, old.channel);
+      old.google = googleOf(google, old.google);
       log(old, "demande précisée");
       return old;
     }
     const wasActive = ["pending", "running"].includes(old.status);
     if (wasActive) cancel(id, "arrêtée : demande précisée, relancée");
     const next = add({
-      title: old.title, request, kind: old.kind, utterance, replaces: old.id,
+      title: old.title, request, kind: old.kind, channel: channelOf(channel, old.channel), google: googleOf(google, old.google), utterance, replaces: old.id,
       previousAddedIds: [...old.previousAddedIds, ...old.addedIds].filter((pid) => store.pois.has(pid)),
       count: count ?? old.requestedCount,
       criteria: criteria?.length ? criteria : old.criteria.map((c) => ({ type: c.type, value: c.value, strict: c.strict, max_walk_minutes: c.maxWalkMinutes })),
@@ -499,11 +532,11 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     const more = Number.isInteger(additional) && additional > 0 ? Math.min(additional, 10) : 1;
     if (ACTIVE.includes(old.status)) {
       // Groupe encore en cours de recherche (ou à préciser) : objectif plus grand
-      return refine(old.id, request, utterance, (old.requestedCount || 0) + more, criteria);
+      return refine(old.id, request, utterance, (old.requestedCount || 0) + more, criteria, old.channel, old.google);
     }
     const kept = groupPlaces(old).map((p) => p.id);
     const next = add({
-      title: old.title, request, kind: "search", utterance, replaces: old.id,
+      title: old.title, request, kind: "search", channel: old.channel, google: old.google, utterance, replaces: old.id,
       previousAddedIds: kept, count: kept.length + more,
       criteria: criteria?.length ? criteria : old.criteria.map((c) => ({ type: c.type, value: c.value, strict: c.strict, max_walk_minutes: c.maxWalkMinutes })),
       extends: true,
@@ -553,6 +586,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     const sel = store.selectionForModel();
     const lines = [
       `[APP] Tâche ${t.id} (${t.kind}).`,
+      ...(t.kind === "search" ? [`Canal : ${{ google: "google (Google Places seulement, pas de recherche web)", mixed: "mixed (find_places_near d'abord pour la liste, le web seulement pour vérifier un critère concret)", web: "web" }[t.channel] || "web"}.`] : []),
       ...(t.criteria.length ? [`Critères : ${t.criteria.map((c) => `${c.value} (${c.type}, ${c.strict ? "strict" : "souple"})`).join(" ; ")}.`] : []),
       ...(t.requestedCount ? [`Nombre de lieux à trouver : ${t.requestedCount}.`] : []),
       ...(t.dimensions.length ? [`Caractéristiques : ${t.dimensions.map((d) => `${d.name} = ${d.value ?? (d.status === "skipped" ? "peu importe pour l'utilisateur" : "non précisé")}`).join(" ; ")}.`] : []),
@@ -580,15 +614,34 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       log(t, result);
       return result;
     }
-    // Découverte de la ville : préparée au « Let's Go! », affichée maintenant (sans modèle)
-    if (t.kind === "discover") {
-      const result = await tools.discover(t);
+    // Découverte de la ville et points de vue : préparés au « Let's Go! », affichées maintenant (sans modèle)
+    if (t.kind === "discover" || t.kind === "viewpoints") {
+      const result = await (t.kind === "discover" ? tools.discover(t) : tools.showViewpoints(t));
       log(t, result);
       return result;
     }
     // Tâche précisée : les lieux de la version précédente devenus trop loin sont retirés d'emblée
     // (pas quand on complète un groupe : ses lieux existants restent tels quels)
     if (!t.extends) for (const id of t.previousAddedIds) tools.enforceDistance(t, id);
+    // Lieu nommé : cherché d'abord autour de l'utilisateur (10, 30 puis 60 min à pied), sans le modèle
+    if (t.kind === "locate" && t.placeNames?.length) {
+      const result = await tools.locateDirect(t);
+      if (result) {
+        log(t, result);
+        return result;
+      }
+      log(t, "localisation directe sans résultat : le modèle prend le relais");
+    }
+    // Canaux google et mixed : recherche directe (Google fait la liste ; canal mixed : le web vérifie
+    // un critère concret ou la réputation) ; rien trouvé → le modèle prend le relais
+    if (t.kind === "search" && (t.channel === "google" || t.channel === "mixed") && t.google) {
+      const result = await tools.googleDirect(t);
+      if (result) {
+        log(t, result);
+        return result;
+      }
+      log(t, "recherche directe sans résultat : le modèle prend le relais");
+    }
     let previous = null;
     let input = [
       { role: "developer", content: taskContext(t) },
@@ -669,7 +722,8 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       body: JSON.stringify({
         model: BACKEND_MODEL,
         instructions: BACKEND_INSTRUCTIONS,
-        tools: BACKEND_TOOLS,
+        // Canal google : pas de recherche web (plus rapide, lieux déjà localisés par Google)
+        tools: t.kind === "search" && t.channel === "google" ? BACKEND_TOOLS.filter((tool) => tool.type !== "web_search") : BACKEND_TOOLS,
         tool_choice: "auto",
         parallel_tool_calls: false,
         reasoning: { effort: BACKEND_REASONING },

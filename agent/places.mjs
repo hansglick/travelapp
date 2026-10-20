@@ -22,6 +22,7 @@ const FIELD_MASK = [
   "places.userRatingCount",
   "places.priceLevel",
   "places.regularOpeningHours.weekdayDescriptions",
+  "places.currentOpeningHours.openNow",
 ].join(",");
 
 const PRICE_LEVELS = {
@@ -35,13 +36,16 @@ function googleInfo(p) {
     rating: p.rating ?? null,
     ratingCount: p.userRatingCount ?? null,
     price: PRICE_LEVELS[p.priceLevel] || null,
+    priceLevel: p.priceLevel || null,
     hours: p.regularOpeningHours?.weekdayDescriptions || null,
+    openNow: p.currentOpeningHours?.openNow ?? null,
   };
 }
 
 const TIMEOUT_MS = 6000;
 const MAX_PARALLEL = 4;
 const BIAS_RADIUS_M = 10000;     // recherche orientée autour de l'utilisateur
+const NAMED_RADII_M = [800, 2400, 4800]; // lieu nommé : 10, 30 puis 60 min à pied (80 m par minute)
 const MAX_DISTANCE_KM = 50;      // au-delà, sans zone indiquée, ce n'est pas le bon lieu
 
 // Types Google attendus pour chaque catégorie (un type qui se termine par « _restaurant » compte aussi)
@@ -96,30 +100,18 @@ function nameSimilarity(a, b) {
   return Math.max(coverage(wa, wb), coverage(wb, wa));
 }
 
+// Catégorie de la carte d'après les types Google d'un lieu (« other » si aucune ne correspond)
+export function categoryFromTypes(types = []) {
+  for (const category of ["restaurant", "museum", "parking", "garden", "viewpoint", "monument"]) {
+    if (categoryMatch(category, types)) return category;
+  }
+  return "other";
+}
+
 function categoryMatch(category, types = []) {
   const expected = CATEGORY_TYPES[category];
   if (!expected) return 1;
   return types.some((t) => expected.includes(t) || (category === "restaurant" && t.endsWith("_restaurant")) || (category === "museum" && t.endsWith("_museum"))) ? 1 : 0;
-}
-
-// Décodage d'un tracé encodé de Google (« encoded polyline ») en points [lat, lng]
-function decodePolyline(encoded) {
-  const points = [];
-  let index = 0, lat = 0, lng = 0;
-  while (index < encoded.length) {
-    for (const axis of [0, 1]) {
-      let result = 0, shift = 0, byte;
-      do {
-        byte = encoded.charCodeAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-      const delta = result & 1 ? ~(result >> 1) : result >> 1;
-      if (axis === 0) lat += delta; else lng += delta;
-    }
-    points.push([lat / 1e5, lng / 1e5]);
-  }
-  return points;
 }
 
 function distanceKm(a, b) {
@@ -215,21 +207,39 @@ export function createResolver({ apiKey, metrics }) {
   // Lieux correspondant à une recherche (« parking ») autour d'un ou deux repères, avec leur position
   // relative à chacun (« 460 m au sud de la forteresse, 130 m au nord-est du stade ») : le modèle
   // choisit, ou fait choisir l'utilisateur. La recherche est centrée sur le premier repère.
-  async function searchNear({ textQuery, anchors, radius, position }) {
+  // Recherche autour d'un repère, par mots et, si un type Google est donné (liste google-types.mjs),
+  // aussi par type, en même temps : le type trouve tous les lieux classés ainsi (du plus proche au
+  // plus loin, rayon élargi jusqu'à 10 km s'il n'y a rien) ; les mots rattrapent ceux que Google a
+  // mal classés (la station du Super U de Quiberon n'est pas une « gas_station » pour Google)
+  // want : nombre de lieux du type voulus avant d'arrêter d'élargir le rayon
+  async function searchNear({ textQuery, googleType, anchors, radius, position, limit = 8, want = 1 }) {
     const anchor = anchors[0].location;
-    const body = {
-      textQuery, languageCode: "fr", maxResultCount: 10,
-      locationBias: { circle: { center: { latitude: anchor.lat, longitude: anchor.lng }, radius } },
+    const circle = (r) => ({ circle: { center: { latitude: anchor.lat, longitude: anchor.lng }, radius: r } });
+    const call = async (endpoint, body, metric) => {
+      const response = await fetch(`https://places.googleapis.com/v1/places:${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": FIELD_MASK },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      metrics.count(metric);
+      if (!response.ok) throw new Error(`Places ${endpoint} ${response.status}`);
+      return (await response.json()).places || [];
     };
-    const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": FIELD_MASK },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    metrics.count("google_text_search");
-    if (!response.ok) throw new Error(`Places Text Search ${response.status}`);
-    return ((await response.json()).places || [])
+    const byType = async () => {
+      for (let reach = radius; ; reach = Math.min(reach * 4, 10000)) {
+        const found = await call("searchNearby", { includedTypes: [googleType], languageCode: "fr", maxResultCount: 10, rankPreference: "DISTANCE", locationRestriction: circle(reach) }, "google_nearby_search");
+        if (found.length >= want || reach >= 10000) return { found, reach };
+      }
+    };
+    const [typed, worded] = await Promise.all([
+      googleType ? byType().catch(() => ({ found: [], reach: radius })) : { found: [], reach: radius },
+      call("searchText", { textQuery, languageCode: "fr", maxResultCount: 10, locationBias: circle(radius) }, "google_text_search"),
+    ]);
+    const reach = Math.max(radius, typed.reach);
+    const seen = new Set();
+    const places = [...typed.found, ...worded].filter((p) => !seen.has(p.id) && seen.add(p.id));
+    return places
       .filter((p) => p.location && p.businessStatus !== "CLOSED_PERMANENTLY")
       .map((p) => {
         const location = { lat: p.location.latitude, lng: p.location.longitude };
@@ -240,7 +250,8 @@ export function createResolver({ apiKey, metrics }) {
             name: p.displayName?.text || "",
             address: p.formattedAddress || null,
             location,
-            types: (p.types || []).slice(0, 5),
+            types: p.types || [], // tous : le tri de la recherche directe en dépend
+            primaryType: p.primaryType || null,
             ...googleInfo(p),
           },
           distance_m: meters,
@@ -250,9 +261,9 @@ export function createResolver({ apiKey, metrics }) {
           ...(position ? { distance_from_user_m: Math.round(distanceKm(position, location) * 1000) } : {}),
         };
       })
-      .filter((c) => c.distance_m <= Math.max(radius * 1.5, 300))
+      .filter((c) => c.distance_m <= Math.max(reach * 1.5, 300))
       .sort((a, b) => a.distance_m - b.distance_m)
-      .slice(0, 6);
+      .slice(0, limit);
   }
 
   // Coordonnées d'un lieu décrit par son nom (repère qui n'est pas dans la liste) : premier résultat
@@ -368,58 +379,42 @@ export function createResolver({ apiKey, metrics }) {
   resolve.searchNear = searchNear;
   resolve.locate = locate;
   resolve.getDetails = getDetails;
-  // Tracé d'une rue (« Découverte de la ville ») : Google Geocoding donne la rue et son étendue (ses
-  // deux extrémités, jamais affichées) ; Google Routes trace un trajet à pied d'une extrémité à
-  // l'autre en passant par le milieu de la rue ; seule la partie située dans l'étendue de la rue est
-  // gardée. null si la voie n'est pas trouvée.
-  async function traceStreet({ name, city, country, near }) {
-    const params = new URLSearchParams({ address: [name, city, country].filter(Boolean).join(", "), language: "fr", key: apiKey });
-    const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
-    metrics.count("google_geocode");
-    const street = ((await response.json()).results || []).find((r) => r.types?.includes("route"));
-    if (!street) return null;
-    const box = street.geometry.bounds || street.geometry.viewport;
-    const center = street.geometry.location;
-    if (near && distanceKm(near, center) > 10) return null; // homonyme dans une autre ville
-    const sw = box.southwest, ne = box.northeast;
-    if (distanceKm(sw, ne) < 0.03) return null; // étendue inconnue : rien à tracer
-    // Les deux diagonales de l'étendue : on garde celle qui suit le mieux la rue
-    const ends = [[sw, ne], [{ lat: sw.lat, lng: ne.lng }, { lat: ne.lat, lng: sw.lng }]];
-    const paths = await Promise.all(ends.map(([a, b]) => walkPath(a, center, b).catch(() => null)));
-    const margin = 0.00015; // ≈ 15 m autour de l'étendue de la rue
-    const inside = ([lat, lng]) => lat >= sw.lat - margin && lat <= ne.lat + margin && lng >= sw.lng - margin && lng <= ne.lng + margin;
-    let best = null, bestKm = 0;
-    for (const path of paths.filter(Boolean)) {
-      // Plus longue suite de points dans l'étendue de la rue
-      let run = [];
-      for (const p of [...path, null]) {
-        if (p && inside(p)) { run.push(p); continue; }
-        const km = run.reduce((sum, q, i) => (i ? sum + distanceKm({ lat: run[i - 1][0], lng: run[i - 1][1] }, { lat: q[0], lng: q[1] }) : 0), 0);
-        if (km > bestKm) { bestKm = km; best = run; }
-        run = [];
-      }
+  // Lieu désigné par son nom (« place Chez Ama sur la carte ») : cherché autour de l'utilisateur par
+  // paliers (10, 30 puis 60 min à pied) ; au premier palier où Google trouve des lieux de ce nom, ils
+  // sont renvoyés dans l'ordre de pertinence de Google. null si rien à 60 min : le modèle prend le relais.
+  async function findNamed(name, position) {
+    const anchor = position;
+    for (const radius of NAMED_RADII_M) {
+      const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": FIELD_MASK },
+        body: JSON.stringify({ textQuery: name, languageCode: "fr", maxResultCount: 5, locationBias: { circle: { center: { latitude: anchor.lat, longitude: anchor.lng }, radius } } }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      metrics.count("google_text_search");
+      if (!response.ok) throw new Error(`Places Text Search ${response.status}`);
+      const found = ((await response.json()).places || [])
+        .filter((p) => p.location && p.businessStatus !== "CLOSED_PERMANENTLY")
+        .map((p) => {
+          const location = { lat: p.location.latitude, lng: p.location.longitude };
+          const meters = Math.round(distanceKm(anchor, location) * 1000);
+          return {
+            place: {
+              placeId: p.id, name: p.displayName?.text || "", address: p.formattedAddress || null, location,
+              types: p.types || [], primaryType: p.primaryType || null, ...googleInfo(p),
+            },
+            distance_m: meters, distance_from_user_m: meters,
+            direction: `${meters} m ${direction(anchor, location)} de l'utilisateur`,
+          };
+        })
+        .filter((c) => c.distance_m <= radius);
+      if (found.length) return { radius, found };
     }
-    if (!best || bestKm < 0.03) return null;
-    return { name: street.address_components?.[0]?.long_name || name, path: best.map(([lat, lng]) => [Math.round(lat * 1e5) / 1e5, Math.round(lng * 1e5) / 1e5]) };
+    return null;
   }
 
-  // Trajet à pied a → (par le milieu de la rue) → b : liste de points [lat, lng]
-  async function walkPath(a, via, b) {
-    const point = (p) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
-    const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": "routes.polyline.encodedPolyline" },
-      body: JSON.stringify({ origin: point(a), destination: point(b), intermediates: [{ ...point(via), via: true }], travelMode: "WALK" }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    metrics.count("google_compute_routes");
-    if (!response.ok) throw new Error(`Routes ${response.status}`);
-    const encoded = (await response.json()).routes?.[0]?.polyline?.encodedPolyline;
-    return encoded ? decodePolyline(encoded) : null;
-  }
-
+  resolve.findNamed = findNamed;
   resolve.walkMatrix = walkMatrix;
-  resolve.traceStreet = traceStreet;
   resolve.reverseGeocode = (position) => reverseGeocode(apiKey, position);
   resolve.reverseAddress = (position) => reverseAddress(apiKey, position);
   return resolve;

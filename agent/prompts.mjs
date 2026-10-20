@@ -3,7 +3,8 @@
 // - le détecteur de tâches : à chaque prise de parole, met à jour le tableau des tâches ;
 // - le modèle de calcul (Responses) : exécute une tâche, avec web_search et les fonctions de l'appli.
 
-import { CATEGORIES, LIMITS } from "./store.mjs";
+import { CATEGORIES, LIMITS, ITINERARY } from "./store.mjs";
+import { GOOGLE_TYPE_LIST, GOOGLE_FIELDS } from "./google-types.mjs";
 
 export const LIVE_MODEL = "gpt-live-1";
 export const BACKEND_MODEL = "gpt-6-luna"; // le moins cher
@@ -54,13 +55,12 @@ Les messages qui commencent par [APP] viennent de l'application : tiens-en compt
 
 export const EXTRACTOR_INSTRUCTIONS = `Tu tiens le tableau des tâches d'un guide touristique vocal. À chaque prise de parole de l'utilisateur, tu décides quelles tâches créer, corriger ou annuler. Tu ne réponds jamais à l'utilisateur.
 
-Une tâche est une action que l'application doit exécuter. Six types :
+Une tâche est une action que l'application doit exécuter. Cinq types :
 - search (recherche) : trouver des lieux selon des critères, sans savoir lesquels à l'avance (« je cherche une boulangerie à 5 min à pied », « des restaurants de poisson »), ou chercher une information sur le web ;
 - locate (localisation) : placer sur la carte un ou plusieurs lieux précis que l'utilisateur désigne par leur nom (« place le Nike Store sur la carte », « place l'hôtel King Salomon près de la plage », « ajoute la forteresse Fortezza »). count = le nombre de lieux nommés ; criteria et dimensions vides ; request cite chaque nom avec ses repères (« près de la plage ») ;
-- discover (découverte de la ville) : faire découvrir la ville ou le quartier dans son ensemble (« fais-moi découvrir la ville », « montre-moi l'essentiel de Quiberon », « les coins sympas et les incontournables ») : lieux emblématiques et rues colorées, déjà préparés ; count, criteria et dimensions vides ;
 - self (auto-localisation) : placer un point à la position actuelle de l'utilisateur (« place un point à ma position », « marque l'endroit où je suis », « retiens ma position pour revenir ») : count, criteria et dimensions vides ;
-- quick (organisation) : modifier la liste sans recherche web (retirer des lieux, remettre un lieu supprimé récemment, garder seulement une catégorie, figer l'ordre des étapes, montrer la bulle d'un lieu, enregistrer une préférence, ajouter un candidat déjà proposé) ;
-- info (data) : question sur les lieux déjà dans la liste ou sur l'itinéraire, sans rien modifier (« à quelle heure ferme le n° 4 ? », « à quelle heure ferme Mona Lisa ? », « c'est ouvert le dimanche ? ») : distance ou temps de marche entre deux lieux ou depuis l'utilisateur (« à combien est le musée de mon parking ? »), lequel est le plus proche, ordre et suite du parcours (« qu'est-ce qu'il y a après le musée ? »), durée totale, ouvert ? horaires ? prix ? téléphone ? avis ?
+- quick (organisation) : modifier la liste sans recherche web (retirer des lieux, remettre un lieu supprimé récemment, garder seulement une catégorie, montrer la bulle d'un lieu, enregistrer une préférence, ajouter un candidat déjà proposé) ;
+- info (data) : question sur les lieux déjà dans la liste, sans rien modifier (« à quelle heure ferme le n° 4 ? », « à quelle heure ferme Mona Lisa ? », « c'est ouvert le dimanche ? ») : distance ou temps de marche entre deux lieux ou depuis l'utilisateur (« à combien est le musée de mon parking ? »), lequel est le plus proche, ordre et suite du parcours (« qu'est-ce qu'il y a après le musée ? »), durée totale, ouvert ? horaires ? prix ? téléphone ? avis ?
 
 Règles :
 - Ne crée pas de tâche pour la conversation : salutations, remerciements, questions sur la météo ou les événements (le guide y répond lui-même), « tu en es où ? ».
@@ -69,10 +69,23 @@ Règles :
 - Une question sans nom de lieu (« à quelle heure ferme-t-il ? », « à quelle distance suis-je de ce point ? », « c'est cher ? ») porte sur le « lieu visé » indiqué : crée une tâche info dont la request nomme ce lieu (nom, numéro et identifiant poi_…). Son title reprend la question en quelques mots (« Musée ↔ parking à pied ») ; sa request cite les lieux concernés par leur nom (et leur numéro s'il a été dit).
 - Une phrase peut contenir plusieurs tâches (« trouve mon parking, et aussi un gyros pas cher ») : crée-en une par demande.
 - Une tâche de recherche se définit par un ensemble de critères et un nombre de lieux à trouver.
-- count : le nombre de lieux demandé pour une tâche qui ajoute des lieux ; « des … » ou « quelques … » sans nombre → 3 ; un seul lieu précis → 1 ; tâche qui n'ajoute rien → null.
+- count : tâche search : null (la recherche est exhaustive : tous les lieux du rayon) ; ajout à un groupe (extend) : le nombre de lieux à ajouter ; locate : le nombre de lieux nommés ; tâche qui n'ajoute rien → null.
 - criteria : un critère par contrainte entendue. Types : place_type (type de lieu, cuisine, produit vendu), budget, distance (temps de marche ou distance ; max_walk_minutes, 1 km ≈ 12 min), diet (régime, interdit alimentaire), schedule (horaire, ouvert maintenant), ambiance, other.
   strict : true pour place_type, distance et diet ; false pour budget, schedule, ambiance et other, sauf si l'utilisateur insiste (« absolument », « pas plus de », « surtout pas ») → true.
   Exemple : « 4 gyros au poulet pas chers, à 10 minutes à pied max, je ne mange pas de porc » → place_type « gyros au poulet » strict, budget « petit budget » souple, distance « 10 min à pied » strict (max_walk_minutes 10), diet « pas de porc » strict ; count 4.
+- channel (tâche search) : comment chercher. La demande est toujours découpée en deux : la partie Google (le type de lieu, la distance, ouvert maintenant, bien noté, pas cher) est cherchée tout de suite et TOUS les lieux du rayon s'affichent ; la partie web (un critère concret, un thème ou la réputation, voir check) est vérifiée ensuite, en arrière-plan, sur ces lieux.
+  google : rien à vérifier sur le web (besoins pratiques : station essence, pharmacie, parking, distributeur, supermarché… ; ou seulement un type de lieu : « des restaurants thaïs », « un café ouvert »).
+  mixed : il y a une partie web (check non null) : « un restaurant thaï qui sert du poisson », « un musée sur la Résistance » (musée + thème la Résistance), « une église romane » (église + style roman), « le meilleur thaï du quartier » (réputation).
+  web : jamais pour une nouvelle tâche (secours de l'application).
+- google (canaux google et mixed, sinon null) :
+  type = le type Google exact de la liste (null si aucun ne correspond) ; words = 2 ou 3 formulations courtes comme dans Google Maps (« station essence », « station-service », « carburant » ; « restaurant thaï », « thaïlandais ») ; category ;
+  open_now : true si l'utilisateur veut un lieu ouvert maintenant ; min_rating : 4.2 seulement si l'utilisateur demande explicitement un lieu bien noté (« bien noté », « avec de bonnes notes »), sinon null ; cheap : true si « pas cher », « petit prix », « petit budget ».
+  check (la partie web ; canal mixed seulement, sinon null) :
+    criterion : un critère concret ou un thème qu'on peut vérifier sur le web pour un lieu donné : un thème ou un style (« consacré à la Résistance », « de style roman »), un plat ou un produit (« poisson », « dorade », « gyros au poulet »), un régime (« sans gluten », « halal », « vegan »), « fait maison », « vue sur la mer », « terrasse au soleil ». question = ce que le lieu doit faire ou être, en commençant par un verbe (« sert du poisson », « propose des plats sans gluten », « est consacré à la Résistance ») ; label = le critère en un ou deux mots (« Poisson », « Sans gluten »).
+    reputation : seulement si la demande porte explicitement sur la réputation (« le meilleur », « réputé », « recommandé », « incontournable », « que les guides conseillent ») ; question vide ; label « Recommandé ».
+    Sans critère concret ni réputation : check null (Google seul, du plus proche au plus loin).
+  ignored : les préférences trop vagues pour être vérifiées, ignorées pour la recherche (« sympa », « bon », « petit », « cosy », « calme », « animé », « authentique », « mignon ») ; vide s'il n'y en a pas. Ne les transforme jamais en note minimale ni en critère à vérifier.
+  L'application lance alors la recherche elle-même.
 - Une précision met à jour la liste complète des critères (refine) : « plutôt poulet » change le critère place_type ; « moins de 10 min » change le critère distance.
 - Groupes : les lieux d'une même tâche forment un groupe, d'une même couleur sur la carte (le tableau donne la couleur et les lieux de chaque tâche, même d'une conversation précédente). Une demande de lieux EN PLUS pour un groupe existant → extend, jamais une nouvelle tâche :
   « rajoute un restaurant de poisson » (une tâche « restaurants de poisson » existe), « ajoute un lieu au groupe bleu », « un autre comme le n° 3 », « encore deux, mais à moins de 5 minutes ».
@@ -83,7 +96,7 @@ Règles :
 - Les numéros (« supprime le point 6 », « montre le 3 ») désignent des lieux de la carte, jamais des tâches : crée une tâche quick, n'annule rien.
 - « Laisse tomber les pâtisseries » → cancel de la tâche concernée si elle n'est pas terminée ; si elle est terminée, crée plutôt une tâche quick pour retirer ses lieux.
 - Réponse à une question posée par une tâche terminée (« lequel ? » → « le premier ») → nouvelle tâche quick qui reprend le choix exact (nom et candidate_id cités dans le résultat de cette tâche).
-- Caractéristiques (dimensions) d'une nouvelle tâche search : imagine les 3 à 6 caractéristiques qui comptent le plus pour choisir ce type de lieu, la plus importante en premier, et adaptées à ce type :
+- Caractéristiques (dimensions) d'une nouvelle tâche search : la distance d'abord (toujours, avec sa valeur si la demande la donne), puis imagine les 2 à 5 autres caractéristiques qui comptent le plus pour choisir ce type de lieu, la plus importante en premier, et adaptées à ce type :
   restaurant → distance, budget, type de cuisine, ouvert maintenant, fréquentation ; musée → thème, durée de visite, prix, distance, fréquentation ; parking → distance de la destination, prix, gratuit ou payant…
   known_value : la valeur déjà donnée dans la demande ou la conversation, ou déduite des préférences enregistrées ; sinon null. question : ce que le guide demandera à l'oral si la valeur manque.
   Les tâches quick et info, et les ajouts à un groupe (extend), n'ont pas de caractéristiques.
@@ -94,7 +107,6 @@ Règles :
   launch_now true si l'utilisateur veut lancer sans répondre au reste (« lance », « vas-y », « cherche », « peu importe le reste »).
   Une réponse peut porter sur une autre caractéristique que la question posée : « pas trop cher » répond à budget même si la question portait sur la distance ; rattache chaque information à la bonne caractéristique, et n'en oublie aucune.
   « Peu importe » seul répond seulement à pending_question.
-  Réponse à la caractéristique « nombre de suggestions » (« 5 », « trois ou quatre », « une dizaine ») : mets ce nombre dans count (le plus grand si c'est une fourchette) et dans answers.
 - Une réponse courte (« pas trop cher », « grec », « non », « 10 minutes ») alors qu'une question d'affinage est en attente est complète : jamais wait_for_more.
 - Phrase visiblement inachevée (coupée au milieu d'une demande) → wait_for_more true, sans tâche.
 - Les transcriptions contiennent des erreurs (« gyrons » = gyros) : corrige le sens, pas les mots.`;
@@ -127,6 +139,35 @@ const dimensionSchema = {
   },
 };
 
+// Recherche directe du canal google (sans le modèle de calcul) : type Google exact, formulations,
+// catégorie de la carte et critères que Google connaît
+const googleSearchSchema = {
+  type: ["object", "null"],
+  additionalProperties: false,
+  required: ["type", "words", "category", "open_now", "min_rating", "cheap", "check", "ignored"],
+  description: "Canaux google et mixed (sinon null) : de quoi lancer la recherche Google directement.",
+  properties: {
+    type: { type: ["string", "null"], enum: [...GOOGLE_TYPE_LIST, null], description: "Le type Google exact (station essence → gas_station, pharmacie → pharmacy, distributeur → atm, restaurant → restaurant), null si aucun ne correspond." },
+    words: { type: "array", items: { type: "string" }, description: "2 ou 3 formulations courtes, comme on les taperait dans Google Maps, la plus courante d'abord (« station essence », « station-service », « carburant »)." },
+    category: { type: "string", enum: CATEGORIES, description: "Catégorie du lieu sur la carte." },
+    open_now: { type: "boolean", description: "true si l'utilisateur veut un lieu ouvert maintenant." },
+    min_rating: { type: ["number", "null"], description: "4.2 seulement si l'utilisateur demande explicitement un lieu bien noté, sinon null." },
+    cheap: { type: "boolean", description: "true si « pas cher », « petit prix », « petit budget »." },
+    check: {
+      type: ["object", "null"],
+      additionalProperties: false,
+      required: ["kind", "question", "label"],
+      description: "Canal mixed : ce que le web doit vérifier sur chaque candidat Google (voir les règles), sinon null.",
+      properties: {
+        kind: { type: "string", enum: ["criterion", "reputation"] },
+        question: { type: "string", description: "criterion : ce que le lieu doit faire, en commençant par un verbe (« sert du poisson »). reputation : vide." },
+        label: { type: "string", description: "Le critère en un ou deux mots (« Poisson », « Sans gluten », « Recommandé »)." },
+      },
+    },
+    ignored: { type: "array", items: { type: "string" }, description: "Préférences trop vagues, ignorées pour la recherche (« sympa », « petit »…)." },
+  },
+};
+
 export const EXTRACTOR_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -137,12 +178,15 @@ export const EXTRACTOR_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "group_name", "request", "kind", "count", "count_given", "criteria", "dimensions"],
+        required: ["title", "group_name", "request", "kind", "channel", "google", "place_names", "count", "count_given", "criteria", "dimensions"],
         properties: {
           title: { type: "string", description: "Titre court (3 à 6 mots) pour l'écran des tâches." },
           group_name: { type: "string", description: "Tâche search : nom des lieux trouvés, au pluriel et sans verbe, pour la légende de la carte (« Restaurants de poisson », « Musées d'histoire », « Pâtisseries »). Vide sinon." },
           request: { type: "string", description: "Demande complète et autonome, avec tous les critères." },
-          kind: { type: "string", enum: ["search", "locate", "self", "info", "quick", "discover"] },
+          kind: { type: "string", enum: ["search", "locate", "self", "info", "quick"] },
+          channel: { type: "string", enum: ["google", "mixed", "web"], description: "Tâche search : canal de recherche (voir les règles). Autres tâches : web." },
+          google: googleSearchSchema,
+          place_names: { type: "array", items: { type: "string" }, description: "Tâche locate : le nom de chaque lieu tel que dit (« Chez Ama »), sans ville ni repère ; l'application le cherche d'abord autour de l'utilisateur. Vide si un lieu est décrit par rapport à un repère (« le parking près du stade ») et pour les autres tâches." },
           count: { type: ["integer", "null"], description: "Nombre de lieux à ajouter demandé (« 4 gyros » → 4, « un parking » → 1, « des pâtisseries » → 3), sinon null." },
           count_given: { type: "boolean", description: "true seulement si l'utilisateur a dit un nombre explicite (« 4 gyros », « deux musées », « un seul », « trois ou quatre ») ; false pour « un restaurant », « des pâtisseries », « quelques bars »." },
           criteria: { type: "array", items: criterionSchema, description: "Critères des lieux à trouver (tâche search) ; vide sinon." },
@@ -155,9 +199,11 @@ export const EXTRACTOR_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["task_id", "request", "count", "criteria"],
+        required: ["task_id", "request", "count", "criteria", "channel", "google"],
         properties: {
           task_id: { type: "string" },
+          channel: { type: ["string", "null"], enum: ["google", "mixed", "web", null], description: "Canal de recherche s'il change (« peu importe, le plus proche » → google), sinon null." },
+          google: { ...googleSearchSchema, description: "Paramètres de la recherche Google mis à jour (canaux google et mixed), sinon null (inchangés)." },
           request: { type: "string", description: "Demande complète mise à jour avec la précision." },
           count: { type: ["integer", "null"], description: "Nombre de lieux demandé, mis à jour, sinon null." },
           criteria: { type: "array", items: criterionSchema, description: "Liste complète des critères mise à jour (anciens + précision)." },
@@ -185,9 +231,11 @@ export const EXTRACTOR_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["task_id", "answers", "request", "count", "criteria", "launch_now"],
+        required: ["task_id", "answers", "request", "count", "criteria", "launch_now", "channel", "google"],
         properties: {
           task_id: { type: "string" },
+          channel: { type: ["string", "null"], enum: ["google", "mixed", "web", null], description: "Canal de recherche s'il change (« peu importe, le plus proche » → google), sinon null." },
+          google: { ...googleSearchSchema, description: "Paramètres de la recherche Google mis à jour (canaux google et mixed), sinon null (inchangés)." },
           answers: {
             type: "array",
             items: {
@@ -240,7 +288,7 @@ Ne propose pas un lieu déjà dans la liste, ni un lieu excluded_by_user ou visi
 - Le type de lieu : « des commerces qui vendent une pâtisserie à emporter » → pâtisseries ou boulangeries, jamais un restaurant.
 - La distance : un temps de marche maximal se convertit en distance à vol d'oiseau (environ 80 m par minute : 10 min ≈ 800 m, 15 min ≈ 1 200 m). Écarte tout lieu plus loin de l'utilisateur (distance_from_user_m de find_places_near, ou position dans get_selection).
 - La fréquentation (calme, animé, pas trop touristique) : aucune donnée exacte n'existe ; juge-la sur le nombre d'avis Google (rating_count) et sur ce qu'en disent les sources web, et présente-la comme une estimation.
-- Le budget, le régime (« pas de porc »), l'horaire : écarte ce qui contredit clairement un critère (prix trop élevés, seulement du porc…). Quand une source ne permet pas de confirmer un critère (prix exact, menu du jour), ajoute quand même le lieu s'il est plausible, et précise ce qui reste à vérifier.
+- Le budget, le régime (« pas de porc »), l'horaire : écarte ce qui contredit clairement un critère (prix trop élevés, seulement du porc…). Quand une source ne permet pas de confirmer un critère (prix exact, menu du jour), voir « Critère précis à vérifier » ci-dessous.
 - Une tâche de recherche te donne un ensemble de critères, chacun strict ou souple, et un nombre de lieux à trouver.
 - Critères stricts : jamais contredits. Un lieu dont la spécialité contredit un critère de régime est exclu (« pas de porc » → pas d'enseigne spécialisée dans le porc). La distance maximale est contrôlée par l'application : un lieu trop loin de l'utilisateur est retiré automatiquement (removed_too_far).
 - Critères souples : respecte-les autant que possible ; tu ne peux en assouplir un qu'en dernier recours, pour atteindre le nombre, et tu dois dire lequel.
@@ -248,7 +296,16 @@ Ne propose pas un lieu déjà dans la liste, ni un lieu excluded_by_user ou visi
 - Si le nombre est impossible à atteindre sans contredire un critère strict, arrête-toi : dis combien de lieux tu as trouvés sur combien, et quel critère strict empêche d'en trouver plus. N'ajoute jamais un lieu douteux pour compléter.
 
 ## Trouver des lieux
-- Cherche sur le web pour découvrir des lieux qui répondent aux critères, puis ajoute-les.
+Le canal de la tâche (google, mixed ou web) est indiqué dans le contexte.
+- Canal mixed (secours : la recherche directe de l'application n'a rien donné) : commence par find_places_near avec le type Google exact pour avoir la liste des lieux autour de l'utilisateur ; n'utilise le web que pour vérifier un critère concret ou la réputation. Préférences vagues (« sympa », « petit », « cosy ») : ignore-les. Du plus proche au plus loin.
+- Canal google : tu n'as pas la recherche web. Un seul find_places_near suffit en général : google_type = le type Google exact (gas_station, pharmacy, atm, parking, supermarket, bakery, restaurant…), autour de l'utilisateur ou du repère ; radius_m selon la distance demandée (2000 sans préférence : la recherche s'élargit seule s'il n'y a rien). Les candidats arrivent du plus proche au plus loin, avec ce que Google sait d'eux : ${GOOGLE_FIELDS}. Choisis ceux qui respectent les critères, le plus proche d'abord sauf demande contraire, et ajoute-les ensemble (un seul update_pois) avec leur candidate_id.
+- Canal web : cherche sur le web (guides, avis, articles, menus) les lieux qui répondent aux critères, puis ajoute-les.
+- Critère précis à vérifier (canaux web et mixed) : un plat ou une spécialité (« dorade »), le fait maison, un régime (« sans gluten »), une ambiance ou une vue. Pour chaque lieu ajouté :
+  - confirmé : une source le dit pour ce lieu → verified true, check_note court qui cite la source (« Dorade à la carte selon Ouest-France ») ;
+  - probable : lieu du bon type et bien considéré, mais aucune source ne confirme le critère → verified false, check_note « Dorade non confirmée, à vérifier sur place ».
+  Ajoute d'abord les lieux confirmés ; les probables seulement pour atteindre le nombre demandé. Dans ta réponse, dis combien sont confirmés et combien restent à vérifier.
+  Aucun lieu, même probable : n'ajoute rien ; dis-le clairement et propose une alternative proche (« les restaurants de poisson les mieux notés ») sans l'ajouter.
+  Sans critère de ce genre (et toujours sur le canal google) : verified null, check_note vide.
 - find_places_near cherche autour d'un repère : what = le type de lieu seul (« parking »), anchor_poi_id pour un repère de la liste, anchor_place pour un repère hors liste ; sans repère, autour de l'utilisateur. Chaque candidat est situé par rapport aux repères et à l'utilisateur.
   - Un lieu décrit par rapport à un repère (« le parking au sud de la forteresse, près du terrain de foot ») : vérifie la direction et la proximité (« près de » : moins de 200 m). Un seul candidat convient → ajoute-le avec son candidate_id. Plusieurs → n'ajoute rien, propose 2 ou 3 candidats (nom, position en quelques mots, et candidate_id dans ta réponse) et demande lequel.
   - Pour ajouter un lieu dont tu connais déjà le nom précis, n'utilise pas find_places_near : ajoute-le directement avec une query précise.
@@ -258,13 +315,12 @@ Ne propose pas un lieu déjà dans la liste, ni un lieu excluded_by_user ou visi
 - Localisation (tâche locate) : l'utilisateur nomme le lieu ; ajoute-le directement avec une query précise (nom + repère cité + ville + pays), sans recherche web sauf pour le retrouver. Plusieurs lieux possibles (deux magasins de ce nom) → n'ajoute rien, propose-les (nom, position) et demande lequel.
 - Questions sur les lieux de la liste (tâche info) : réponds sans modifier la liste et, en général, sans recherche web.
   - Distance, temps de marche, lequel est le plus proche, durée d'un parcours → measure_walk (« user » pour l'utilisateur ; une paire par portion pour un parcours). Ne donne jamais une distance ou un temps estimé de mémoire. Si le résultat est seulement à vol d'oiseau, dis-le.
-  - Ordre du parcours : map_number = place parmi les étapes restantes (1 = la prochaine) ; itinerary_step = numéro dans l'itinéraire complet, visités compris ; visited = déjà visité ; excluded_by_user = hors de l'itinéraire.
+  - map_number = le numéro affiché du lieu sur la carte (fixe, dans l'ordre d'ajout ; ce n'est pas un ordre de visite). L'itinéraire (ordre des étapes) n'est pas proposé pour l'instant : à une question sur l'ordre du parcours, réponds que ce n'est pas encore disponible.
   - La sélection donne déjà, pour chaque lieu, la note (rating), le nombre d'avis (rating_count), le prix et les horaires (opening_hours) : pour comparer des lieux (le plus populaire, le mieux noté, celui qui ferme le plus tard…) ou donner un horaire, utilise-les directement, sans autre appel.
   - Ouvert en ce moment ? téléphone ? site web ? ou donnée absente de la sélection → get_place_details, puis réponds en précisant que les données viennent de Google ; pour un numéro, indique que l'icône téléphone de la bulle permet d'appeler.
   - Réponse : directe, avec les chiffres (« 650 m, environ 8 minutes à pied »), en citant les lieux par leur nom.
 - Montrer un lieu → show_place (poi_id null pour fermer la bulle).
 - Remettre un lieu supprimé (« remets la plage », « finalement je garde le n° 2 ») → restore_pois avec son id pris dans recently_deleted ; ne le recherche pas à nouveau.
-- Ordre des étapes → pin_steps : "first", "last" (restent première / dernière même si des lieux sont ajoutés) ou "index" ; unpin_ids pour libérer. Un lieu exclu par l'utilisateur est remis dans l'itinéraire quand tu le figes : dis-le.
 - Préférences durables (« je ne veux plus de musées », « je ne mange pas de porc ») → update_preferences. Une envie ponctuelle n'est pas une préférence durable.
 - Si la tâche indique des lieux déjà ajoutés par une version précédente de cette tâche, garde ceux qui respectent les nouveaux critères, retire les autres, puis complète.
 
@@ -287,7 +343,7 @@ export function greetingMessage(contextLine) {
 const poiItemSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["name", "query", "category", "reason", "sources", "candidate_id"],
+  required: ["name", "query", "category", "reason", "sources", "candidate_id", "verified", "check_note"],
   properties: {
     candidate_id: { type: ["string", "null"], description: "Identifiant cand_… d'un candidat de find_places_near (lieu déjà localisé), sinon null." },
     name: { type: "string", description: "Nom exact du lieu." },
@@ -295,10 +351,13 @@ const poiItemSchema = {
     category: { type: "string", enum: CATEGORIES },
     reason: { type: "string", description: "Une phrase factuelle sur l'intérêt du lieu pour l'utilisateur." },
     sources: { type: "array", items: { type: "string" }, description: "URL https des sources consultées (peut être vide)." },
+    verified: { type: ["boolean", "null"], description: "Critère précis de la recherche (plat, spécialité, régime, ambiance) : true si une source le confirme pour ce lieu, false s'il est seulement probable, null s'il n'y a pas de tel critère." },
+    check_note: { type: "string", description: "Si verified n'est pas null : mention courte affichée dans la bulle (« Dorade à la carte selon Ouest-France » ou « Dorade non confirmée, à vérifier sur place »). Sinon vide." },
   },
 };
 
-export const BACKEND_TOOLS = [
+// Outils du modèle de calcul ; pin_steps (cadenas de l'itinéraire) est retiré tant que l'itinéraire est mis de côté
+const ALL_BACKEND_TOOLS = [
   { type: "web_search" },
   {
     type: "function",
@@ -336,9 +395,10 @@ export const BACKEND_TOOLS = [
     parameters: {
       type: "object",
       additionalProperties: false,
-      required: ["what", "anchor_poi_id", "anchor_place", "radius_m"],
+      required: ["what", "google_type", "anchor_poi_id", "anchor_place", "radius_m"],
       properties: {
         what: { type: "string", description: "Seulement le type de lieu cherché (ex. « parking », « boulangerie »), sans aucun repère ni lieu : les repères vont dans anchor_poi_id et anchor_place." },
+        google_type: { type: ["string", "null"], enum: [...GOOGLE_TYPE_LIST, null], description: "Le type Google exact qui correspond (station essence → gas_station, pharmacie → pharmacy, restaurant de poisson → seafood_restaurant) : recherche directe par type, la plus rapide et la plus sûre. null seulement si aucun type ne correspond (recherche par mots)." },
         anchor_poi_id: { type: ["string", "null"], description: "Repère pris dans la liste (poi_…), sinon null. Peut s'ajouter à anchor_place." },
         anchor_place: { type: ["string", "null"], description: "Repère hors de la liste, par son nom et sa ville (ex. « stade municipal de Réthymnon, Grèce ») ; la recherche est centrée dessus. Sinon null." },
         radius_m: { type: ["integer", "null"], description: "Rayon de recherche en mètres (100 à 2000, 400 par défaut)." },
@@ -462,3 +522,4 @@ export const BACKEND_TOOLS = [
     },
   },
 ];
+export const BACKEND_TOOLS = ALL_BACKEND_TOOLS.filter((tool) => ITINERARY || tool.name !== "pin_steps");

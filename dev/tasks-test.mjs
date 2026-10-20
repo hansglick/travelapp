@@ -70,6 +70,7 @@ for (const t of [...tasks].reverse()) {
   console.log(`\n${t.id} [${t.status}, ${t.kind}, ${d}${goal}] ${t.title}${t.replaces ? ` (${t.extends ? "complète" : "remplace"} ${t.replaces})` : ""}`);
   console.log(`   entendu : ${t.utterance}`);
   console.log(`   compris : ${t.request}`);
+  if (t.kind === "search") console.log(`   canal : ${t.channel}`);
   if (t.criteria?.length) console.log(`   critères : ${t.criteria.map((c) => `${c.value} [${c.type}${c.strict ? ", strict" : ""}]`).join(" · ")}${t.maxDistanceM ? ` · ≤ ${t.maxDistanceM} m` : ""}`);
   for (const a of t.actions) console.log(`   - ${a.text}`);
   if (t.result) console.log(`   → ${t.result}`);

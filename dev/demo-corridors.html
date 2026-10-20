@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zones animées</title>
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; background: #fff; }
+  #map { position: absolute; inset: 0; }
+  .bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; gap: 6px;
+         background: #fff; padding: 6px; border-radius: 22px; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  .bar button { border: 0; border-radius: 16px; padding: 8px 12px; background: #eee; cursor: pointer; font-size: 13px; }
+  .bar button.on { background: #e4572e; color: #fff; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button data-mode="app">Style de l'appli</button>
+  <button data-mode="google">Google par défaut</button>
+  <button data-mode="boost">Zones renforcées</button>
+  <button data-mode="vector">Vectoriel (DEMO_MAP_ID)</button>
+</div>
+<div id="map"></div>
+<script>
+  // Style actuel de l'appli (copie de MAP_STYLE dans index.html)
+  const APP_STYLE = [
+    { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+    { elementType: "labels.text.fill", stylers: [{ color: "#3a3a3a" }] },
+    { elementType: "labels.text.stroke", stylers: [{ color: "#ffffff" }, { weight: 3 }] },
+    { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#f4f1e8" }] },
+    { featureType: "poi", stylers: [{ visibility: "off" }] },
+    { featureType: "poi.park", elementType: "geometry", stylers: [{ visibility: "on" }, { color: "#8fcf7e" }] },
+    { featureType: "transit", stylers: [{ visibility: "off" }] },
+    { featureType: "administrative", elementType: "geometry", stylers: [{ visibility: "off" }] },
+    { featureType: "road", elementType: "geometry.fill", stylers: [{ color: "#2f3540" }] },
+    { featureType: "road", elementType: "geometry.stroke", stylers: [{ visibility: "off" }] },
+    { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#ffffff" }] },
+    { featureType: "road", elementType: "labels.text.stroke", stylers: [{ color: "#2f3540" }] },
+    { featureType: "water", elementType: "geometry", stylers: [{ color: "#5aa9e6" }] },
+  ];
+  // Zones renforcées : on ne force pas de couleur sur le bâti (sinon les zones disparaissent),
+  // on pousse saturation et contraste pour que le jaune ressorte du gris
+  const BOOST_STYLE = [
+    ...APP_STYLE,
+    { featureType: "landscape.man_made", elementType: "geometry", stylers: [{ saturation: 100 }, { lightness: -8 }, { gamma: 0.7 }] },
+  ];
+
+  let map;
+  const center = { lat: 47.4836, lng: -3.1197 }; // Quiberon centre
+  async function setMode(mode) {
+    document.querySelectorAll(".bar button").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+    const { Map } = await google.maps.importLibrary("maps");
+    const keep = map ? { center: map.getCenter(), zoom: map.getZoom() } : { center, zoom: 15 };
+    const opts = { ...keep, disableDefaultUI: true, zoomControl: true, clickableIcons: false };
+    if (mode === "app") opts.styles = APP_STYLE;
+    if (mode === "boost") opts.styles = BOOST_STYLE;
+    if (mode === "vector") opts.mapId = new URLSearchParams(location.search).get("mapId") || "DEMO_MAP_ID";
+    map = new Map(document.getElementById("map"), opts);
+  }
+  document.querySelectorAll(".bar button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+  window.initMap = () => setMode(new URLSearchParams(location.search).get("mode") || "google");
+
+  fetch("/api/config").then((r) => r.json()).then(({ googleMapsKey }) => {
+    const s = document.createElement("script");
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${googleMapsKey}&loading=async&callback=initMap&v=weekly`;
+    s.async = true;
+    document.head.append(s);
+  });
+</script>
+</body>
+</html>

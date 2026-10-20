@@ -1,14 +1,15 @@
-// « Découverte de la ville » : préparée en arrière-plan au « Let's Go! », affichée quand
-// l'utilisateur la demande (bouton de la carte ou demande vocale).
+// « Découverte de la ville » : les lieux emblématiques, préparés en arrière-plan au « Let's Go! »,
+// affichés quand l'utilisateur touche le bouton de la carte dépliée (les points de vue ont leur
+// propre bouton : viewpoints.mjs).
 //
 // 1. Sélection (une seule passe du petit modèle, avec recherche web) : une réserve de 30 lieux
-//    emblématiques variés, classés du plus au moins incontournable, et jusqu'à 10 rues, autour du
-//    point de départ (quartier et ville donnés au modèle, avec la consigne des 40 min).
+//    emblématiques variés, classés du plus au moins incontournable, autour du point de départ
+//    (quartier et ville donnés au modèle, avec la consigne des 40 min).
 // 2. Base commune à tous les comptes, par quartier (ou ville) : la sélection et les identifiants
-//    Google sont gardés (sélection refaite au bout de 3 mois) ; les coordonnées et les tracés des
-//    rues, données Google, 30 jours au plus, puis redemandés.
-// 3. Affichage (tools.discover) : localisation et tracé de ce qui manque ou a expiré, temps de trajet
-//    réels depuis le point de départ (un seul appel), puis les 15 premiers lieux à 40 min au plus.
+//    Google sont gardés (sélection refaite au bout de 3 mois) ; les coordonnées, données Google,
+//    30 jours au plus, puis redemandées.
+// 3. Affichage (tools.discover) : localisation de ce qui manque ou a expiré, temps de trajet réels
+//    depuis le point de départ (un seul appel), puis les 15 premiers lieux à 40 min au plus.
 
 import { EXTRACTOR_MODEL } from "./prompts.mjs";
 import { CATEGORIES } from "./store.mjs";
@@ -16,19 +17,18 @@ import { CATEGORIES } from "./store.mjs";
 export const MAX_TRAVEL_S = 40 * 60;       // contrainte de temps de trajet (à pied pour l'instant)
 export const MAX_SHOWN = 15;               // lieux affichés au plus
 const MAX_CANDIDATES = 30;                 // réserve de candidats
-const MAX_STREETS = 10;
 const SELECTION_TTL_MS = 90 * 86400000;    // sélection refaite au bout de 3 mois
-const GOOGLE_TTL_MS = 30 * 86400000;       // coordonnées et tracés Google : 30 jours au plus
+const GOOGLE_TTL_MS = 30 * 86400000;       // coordonnées Google : 30 jours au plus
+const SELECTION_VERSION = 9;               // 9 : lieux seulement (refaire les anciennes sélections)
 
 const INSTRUCTIONS = `Tu prépares la « découverte » d'un lieu pour un voyageur qui y arrive : de quoi en saisir l'essentiel, sans parcours imposé. Le voyageur part du point de départ indiqué et se déplace à pied : ne retiens que ce qui est à 40 minutes de marche au plus de ce point (environ 3 km), dans le quartier indiqué et ses abords.
-1. places : jusqu'à ${MAX_CANDIDATES} lieux emblématiques, les plus variés possible, du plus incontournable au moins incontournable : points de vue, monuments, départs de balade, port ou plage emblématique, place animée, musée très réputé, enseigne ou adresse célèbre (comme le NBA Store de la 5e Avenue à New York), marché. Évite deux lieux du même genre à la suite. Pour chacun : name (nom exact), query (nom + adresse ou quartier + ville + pays, pour Google), category (${CATEGORIES.join(", ")}), reason (une phrase factuelle).
-2. streets : jusqu'à ${MAX_STREETS} rues, quais ou promenades incontournables à la même distance (rue commerçante ou piétonne, front de mer, quai du port, rue de la vieille ville, avenue célèbre). name : le nom exact de la voie tel qu'il figure sur la carte (« Rue de Verdun »), sans numéro. why : une phrase courte (« rue piétonne commerçante, crêperies et boutiques »).
+places : jusqu'à ${MAX_CANDIDATES} lieux emblématiques, les plus variés possible, du plus incontournable au moins incontournable : points de vue, monuments, départs de balade, port ou plage emblématique, place animée, musée très réputé, enseigne ou adresse célèbre (comme le NBA Store de la 5e Avenue à New York), marché. Évite deux lieux du même genre à la suite. Pour chacun : name (nom exact), query (nom + adresse ou quartier + ville + pays, pour Google), category (${CATEGORIES.join(", ")}), reason (une phrase factuelle).
 Vérifie par une recherche web (office de tourisme, guides) ; n'invente rien. Vise ${MAX_CANDIDATES} lieux : une réserve large est utile (certains seront écartés s'ils sont à plus de 40 minutes). N'en propose moins que si le lieu manque vraiment de choses intéressantes, jamais des lieux sans intérêt pour atteindre le nombre. Sans lien ni markdown dans les textes.`;
 
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["places", "streets"],
+  required: ["places"],
   properties: {
     places: {
       type: "array",
@@ -40,15 +40,6 @@ const SCHEMA = {
           name: { type: "string" }, query: { type: "string" },
           category: { type: "string", enum: CATEGORIES }, reason: { type: "string" },
         },
-      },
-    },
-    streets: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["name", "why"],
-        properties: { name: { type: "string" }, why: { type: "string" } },
       },
     },
   },
@@ -73,14 +64,14 @@ export function createDiscovery({ apiKey, metrics, storage, resolvePoi }) {
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: EXTRACTOR_MODEL,
-        reasoning: { effort: "low" },
+        reasoning: { effort: "medium" }, // sélection gardée 3 mois : la qualité prime sur la vitesse
         instructions: INSTRUCTIONS,
         input: `Quartier : ${neighborhood || "aucun"}. Ville : ${city || "inconnue"}. Pays : ${country || "inconnu"}. Point de départ : ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}.`,
         tools: [{ type: "web_search" }],
         text: { format: { type: "json_schema", name: "discovery", strict: true, schema: SCHEMA } },
         store: false,
       }),
-      signal: AbortSignal.timeout(180000),
+      signal: AbortSignal.timeout(300000), // réflexion « medium » + recherche web : parfois plus de 3 min
     });
     if (!response.ok) throw new Error(`découverte ${response.status}`);
     const data = await response.json();
@@ -93,7 +84,6 @@ export function createDiscovery({ apiKey, metrics, storage, resolvePoi }) {
         name: cleanText(p.name, 120), query: cleanText(p.query, 200),
         category: CATEGORIES.includes(p.category) ? p.category : "other", reason: cleanText(p.reason, 300),
       })).filter((p) => p.name && p.query),
-      streets: (out.streets || []).slice(0, MAX_STREETS).map((s) => ({ name: cleanText(s.name, 80), why: cleanText(s.why, 160) })).filter((s) => s.name),
     };
   }
 
@@ -102,21 +92,21 @@ export function createDiscovery({ apiKey, metrics, storage, resolvePoi }) {
     const key = discoveryKey(place || {});
     if (!key) return Promise.reject(new Error("lieu inconnu"));
     const saved = storage.get(key);
-    if (saved && fresh(saved.selectedAt, SELECTION_TTL_MS)) return Promise.resolve(saved);
+    if (saved && saved.version === SELECTION_VERSION && fresh(saved.selectedAt, SELECTION_TTL_MS)) return Promise.resolve(saved);
     if (pending.has(key)) return pending.get(key);
     const request = (async () => {
       const started = Date.now();
-      const { candidates, streets } = await select(place, position);
-      const entry = { key, city: place.city || place.neighborhood, country: place.country, candidates, streets, selectedAt: Date.now() };
+      const { candidates } = await select(place, position);
+      const entry = { key, version: SELECTION_VERSION, city: place.city || place.neighborhood, country: place.country, candidates, selectedAt: Date.now() };
       storage.set(key, entry);
-      console.log(`[découverte] ${key} : ${candidates.length} candidats, ${streets.length} rues en ${Date.now() - started} ms`);
+      console.log(`[découverte] ${key} : ${candidates.length} candidats en ${Date.now() - started} ms`);
       return entry;
     })().finally(() => pending.delete(key));
     pending.set(key, request);
     return request;
   }
 
-  // Coordonnées des candidats et tracés des rues : réutilisés s'ils ont moins de 30 jours, sinon
+  // Coordonnées des candidats : réutilisées s'ils ont moins de 30 jours, sinon
   // redemandés à Google (plusieurs à la fois), puis gardés dans la base commune
   async function materialize(entry, position) {
     const near = position;
@@ -129,13 +119,6 @@ export function createDiscovery({ apiKey, metrics, storage, resolvePoi }) {
         Object.assign(c, { location: null, locatedAt: Date.now() }); // introuvable : on ne réessaie qu'à l'expiration
       }
     }));
-    for (let i = 0; i < entry.streets.length; i += 3) {
-      await Promise.all(entry.streets.slice(i, i + 3).map(async (s) => {
-        if (fresh(s.tracedAt, GOOGLE_TTL_MS)) return;
-        const shape = await resolvePoi.traceStreet({ name: s.name, city: entry.city, country: entry.country, near }).catch(() => null);
-        Object.assign(s, { path: shape?.path || null, tracedAt: Date.now() });
-      }));
-    }
     storage.set(entry.key, entry);
     return entry;
   }
