@@ -5,9 +5,15 @@
 // transcription ; à chaque fin de prise de parole, le tableau des tâches (tasks.mjs) détecte et lance
 // les tâches, puis le serveur informe le guide de leur avancement et lui transmet les résultats.
 // Le navigateur porte l'audio (micro et haut-parleur) ; il ne peut envoyer que session.close.
+//
+// Conversation écrite (bouton bulle) : mêmes tâches, mêmes questions et mêmes résumés dans le chat ;
+// seuls les messages qui ne sont pas des demandes reçoivent une réponse du guide écrit
+// (text-guide.mjs). Une seule conversation, orale ou écrite, à la fois ; la transcription est
+// commune aux deux, pour passer de l'une à l'autre sans perdre le fil.
 
 import WebSocket from "ws";
-import { LIVE_MODEL, LIVE_INSTRUCTIONS, greetingMessage } from "./prompts.mjs";
+import { LIVE_MODEL, LIVE_INSTRUCTIONS, greetingMessage, textGreeting } from "./prompts.mjs";
+import { createTextGuide } from "./text-guide.mjs";
 
 const API = "https://api.openai.com/v1";
 const IDLE_CLOSE_MS = 3 * 60 * 1000;       // personne ne parle depuis 3 min : on ferme (coût)
@@ -17,6 +23,8 @@ const APP_NOTE_DELAY_MS = 800;             // regroupe les informations [APP] ra
 const MOVE_NOTICE_M = 300;                 // déplacement signalé au guide au-delà de cette distance
 const TURN_END_MS = 1300;                  // silence qui marque la fin d'une prise de parole
 const CONVERSATION_KEEP = 20;              // répliques gardées comme contexte pour les tâches
+const DISCUSSION_KEEP = 40;                // échanges hors tâche gardés pour l'onglet « Discussion »
+const GUIDE_REPLY_WINDOW_MS = 20000;       // à l'oral : réponse du guide rattachée à un échange
 
 
 export function distanceM(a, b) {
@@ -30,6 +38,26 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
   let session = null; // une seule conversation à la fois (prototype mono-utilisateur)
   // Conversation transcrite (contexte des tâches), gardée d'une session à l'autre
   const conversation = [];
+  // Conversation écrite en cours : { startedAt } ou null
+  let text = null;
+  const textGuide = apiKey ? createTextGuide({ apiKey, metrics }) : null;
+  // Échanges hors tâche (salutations, remerciements…) : onglet « Discussion » du chat, à l'oral comme
+  // à l'écrit. { id, at, mode: voice | text, user, guide } ; guide null : réponse attendue
+  const discussion = [];
+  let discussionId = 0;
+
+  function addDiscussion(item) {
+    const entry = { id: `d${++discussionId}`, at: Date.now(), user: null, guide: null, ...item };
+    discussion.push(entry);
+    if (discussion.length > DISCUSSION_KEEP) discussion.shift();
+    broadcast({ type: "discussion", items: discussion });
+    return entry;
+  }
+
+  function answerDiscussion(entry, guide) {
+    entry.guide = guide;
+    broadcast({ type: "discussion", items: discussion });
+  }
 
   function describePlace(place) {
     if (!place) return null;
@@ -50,6 +78,7 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
 
   async function create({ sdp }) {
     if (session) await close("replaced");
+    if (text) endText("passage à l'oral");
     const body = {
       session: {
         model: LIVE_MODEL,
@@ -109,6 +138,9 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
       announcedPosition: store.context.position,
       timers: [],
       closing: false,
+      greeted: false,               // première réplique du guide : l'accueil
+      lastGuide: null,              // dernière réplique terminée du guide : { text, at }
+      awaitingGuide: null,          // échange hors tâche qui attend la réponse du guide : { entry, at }
     };
   }
 
@@ -222,7 +254,15 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
       if (!text) return;
       console.log("[utilisateur]", text);
       remember(`Utilisateur : ${text}`);
-      board().handleUserTurn(text, conversation.slice(-10));
+      const spokeAt = Date.now() - TURN_END_MS;
+      board().handleUserTurn(text, conversation.slice(-10)).then((outcome) => {
+        // Pas une demande : l'échange va dans l'onglet « Discussion », avec la réponse du guide (souvent
+        // déjà terminée quand la détection finit)
+        if (outcome !== "none" || session !== s) return;
+        const entry = addDiscussion({ mode: "voice", user: text });
+        if (s.lastGuide && s.lastGuide.at > spokeAt) answerDiscussion(entry, s.lastGuide.text);
+        else s.awaitingGuide = { entry, at: Date.now() };
+      });
     }, TURN_END_MS);
   }
 
@@ -235,6 +275,14 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
       if (!text) return;
       console.log("[guide]", text);
       remember(`Guide : ${text}`);
+      s.lastGuide = { text, at: Date.now() };
+      if (!s.greeted) {
+        s.greeted = true;
+        addDiscussion({ mode: "voice", guide: text });
+      } else if (s.awaitingGuide && Date.now() - s.awaitingGuide.at < GUIDE_REPLY_WINDOW_MS) {
+        answerDiscussion(s.awaitingGuide.entry, text);
+        s.awaitingGuide = null;
+      }
     }, TURN_END_MS);
   }
 
@@ -307,11 +355,79 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
   // phrase en cours de transcription
   function clearConversation() {
     conversation.length = 0;
+    discussion.length = 0;
+    broadcast({ type: "discussion", items: discussion });
     const s = session;
     if (s) {
       clearTimeout(s.userTimer);
       s.userTurn = "";
     }
+  }
+
+  // ---- Conversation écrite ----
+
+  // Bouton bulle : la conversation écrite commence, avec un message d'accueil du guide
+  async function startText() {
+    if (session) await close("replaced_by_text");
+    if (text) return;
+    text = { startedAt: Date.now() };
+    broadcast({ type: "text", state: "active" });
+    console.log("[écrit] conversation ouverte");
+    const entry = addDiscussion({ mode: "text" });
+    guideReply(entry, textGreeting(contextLine()), "Bonjour ! Qu'est-ce qui vous ferait envie ?");
+  }
+
+  // Message écrit : traité comme une prise de parole ; le guide écrit ne répond qu'à ce qui n'est pas
+  // une demande (les demandes s'affichent dans le chat par leurs tâches). Résultat : task, held ou none
+  async function sendText(message) {
+    if (!text) {
+      // Serveur redémarré pendant la conversation : elle reprend, sans nouvel accueil
+      text = { startedAt: Date.now() };
+      broadcast({ type: "text", state: "active" });
+    }
+    console.log("[utilisateur, écrit]", message);
+    remember(`Utilisateur : ${message}`);
+    const outcome = (await board().handleUserTurn(message, conversation.slice(-10))) || "none";
+    if (outcome !== "none") return outcome;
+    const entry = addDiscussion({ mode: "text", user: message });
+    // Les dernières demandes et leur résultat : le guide sait ce qui a été fait
+    const STATUS = { clarifying: "à préciser", pending: "en attente", running: "en cours", done: "terminée", failed: "échouée", cancelled: "annulée" };
+    const recent = board().snapshot().filter((t) => t.kind !== "discover").slice(0, 6)
+      .map((t) => `« ${t.title} » : ${STATUS[t.status] || t.status}${t.result ? ` — ${String(t.result).slice(0, 200)}` : ""}`);
+    guideReply(entry, [
+      contextLine(),
+      `[APP] État des tâches : ${board().summary()}`,
+      `[APP] Dernières demandes, de la plus récente à la plus ancienne : ${recent.join(" ; ") || "aucune"}`,
+      "Fin de la conversation :", conversation.slice(-10).join("\n"),
+      `Message de l'utilisateur, auquel tu réponds : ${message}`,
+    ].join("\n"), "Je n'ai pas pu répondre, pouvez-vous reformuler ?");
+    return outcome;
+  }
+
+  // Réponse du guide écrit, ajoutée à l'échange quand elle arrive
+  function guideReply(entry, input, fallback) {
+    const reply = textGuide ? textGuide.reply(input) : Promise.reject(new Error("clé OpenAI absente"));
+    reply
+      .then((answer) => answer || fallback)
+      .catch((err) => {
+        console.warn("[écrit] guide :", err.message);
+        return fallback;
+      })
+      .then((answer) => {
+        console.log("[guide, écrit]", answer);
+        remember(`Guide : ${answer}`);
+        answerDiscussion(entry, answer);
+      });
+  }
+
+  // Croix du chat (ou passage à l'oral) : fin de la conversation écrite. Plus personne pour répondre
+  // aux questions d'affinage : les recherches partent avec ce qu'on sait.
+  function endText(reason = "fin") {
+    if (!text) return;
+    text = null;
+    console.log(`[écrit] conversation fermée (${reason})`);
+    broadcast({ type: "text", state: "closed" });
+    board().launchClarifying("fin de la conversation écrite");
   }
 
   // Demande tapée (tests sans micro) : traitée comme une prise de parole de l'utilisateur
@@ -349,7 +465,8 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
     }
     session = null;
     // Plus personne pour répondre aux questions d'affinage : les recherches partent avec ce qu'on sait
-    board().launchClarifying("fin de la conversation");
+    // (sauf si la conversation continue par écrit)
+    if (!text) board().launchClarifying("fin de la conversation");
     console.log("[live] bilan de la session", JSON.stringify(metrics.summary()));
     broadcast({ type: "voice", state: "closed", reason });
   }
@@ -371,5 +488,10 @@ export function createLiveManager({ apiKey, store, metrics, broadcast, board }) 
     positionChanged,
     onTaskEvent,
     active: () => Boolean(session && !session.closing),
+    startText,
+    sendText,
+    endText,
+    textState: () => ({ type: "text", state: text ? "active" : "closed" }),
+    discussionState: () => ({ type: "discussion", items: discussion }),
   };
 }

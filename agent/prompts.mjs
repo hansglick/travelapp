@@ -4,7 +4,7 @@
 // - le modèle de calcul (Responses) : exécute une tâche, avec web_search et les fonctions de l'appli.
 
 import { CATEGORIES, LIMITS, ITINERARY } from "./store.mjs";
-import { GOOGLE_TYPE_LIST, GOOGLE_FIELDS } from "./google-types.mjs";
+import { GOOGLE_TYPE_LIST, GOOGLE_FIELDS, FOOD_TYPES } from "./google-types.mjs";
 
 export const LIVE_MODEL = "gpt-live-1";
 export const BACKEND_MODEL = "gpt-6-luna"; // le moins cher
@@ -78,7 +78,8 @@ Règles :
   mixed : il y a une partie web (check non null) : « un restaurant thaï qui sert du poisson », « un musée sur la Résistance » (musée + thème la Résistance), « une église romane » (église + style roman), « le meilleur thaï du quartier » (réputation).
   web : jamais pour une nouvelle tâche (secours de l'application).
 - google (canaux google et mixed, sinon null) :
-  type = le type Google exact de la liste (null si aucun ne correspond) ; words = 2 ou 3 formulations courtes comme dans Google Maps (« station essence », « station-service », « carburant » ; « restaurant thaï », « thaïlandais ») ; category ;
+  dish = le plat ou le produit que l'utilisateur veut manger quand il ne précise pas de type de lieu (« un couscous », « manger une dorade », « des gyros », « une pizza ») : son nom simple et usuel, sans article ni adjectif ni garniture (« un bon couscous royal » → « couscous », « une pita gyros au poulet » → « gyros ») ; l'application cherche alors dans tous les types de restaurant qui peuvent le servir, du plus probable au moins probable. null pour un type de lieu ou de cuisine (« un restaurant thaï », « une boulangerie »), même si un plat est cité (« un thaï qui sert du poisson » : dish null, le plat va dans check). Un plat demandé va aussi dans check (critère, canal mixed : « sert du couscous »).
+  types = le ou les types Google exacts de la liste (un seul pour un type de lieu ; ["restaurant"] pour un plat) ; vide si aucun ne correspond ; words = 2 ou 3 formulations courtes comme dans Google Maps (« station essence », « station-service », « carburant » ; « restaurant thaï », « thaïlandais ») ; category ;
   open_now : true si l'utilisateur veut un lieu ouvert maintenant ; min_rating : 4.2 seulement si l'utilisateur demande explicitement un lieu bien noté (« bien noté », « avec de bonnes notes »), sinon null ; cheap : true si « pas cher », « petit prix », « petit budget ».
   check (la partie web ; canal mixed seulement, sinon null) :
     criterion : un critère concret ou un thème qu'on peut vérifier sur le web pour un lieu donné : un thème ou un style (« consacré à la Résistance », « de style roman »), un plat ou un produit (« poisson », « dorade », « gyros au poulet »), un régime (« sans gluten », « halal », « vegan »), « fait maison », « vue sur la mer », « terrasse au soleil ». question = ce que le lieu doit faire ou être, en commençant par un verbe (« sert du poisson », « propose des plats sans gluten », « est consacré à la Résistance ») ; label = le critère en un ou deux mots (« Poisson », « Sans gluten »).
@@ -98,6 +99,7 @@ Règles :
 - Réponse à une question posée par une tâche terminée (« lequel ? » → « le premier ») → nouvelle tâche quick qui reprend le choix exact (nom et candidate_id cités dans le résultat de cette tâche).
 - Caractéristiques (dimensions) d'une nouvelle tâche search : la distance d'abord (toujours, avec sa valeur si la demande la donne), puis 1 à 3 autres caractéristiques, seulement si elles changent vraiment la recherche, la plus importante en premier :
   restaurant → distance, type de cuisine ; musée → distance, thème ; parking → distance de la destination, gratuit ou payant…
+  Un plat (google.dish non null) : la distance seulement ; jamais le type de cuisine ni de restaurant (l'application cherche dans tous ceux qui peuvent servir le plat).
   Ne pose JAMAIS de question sur le budget, le prix, l'ambiance, la fréquentation, le calme, l'animation, ni sur l'ouverture ou les horaires : la recherche reste large et exhaustive, c'est l'utilisateur qui fera son tri. Un budget, une ambiance ou « ouvert maintenant » dits spontanément restent des critères, mais ne se demandent pas.
   known_value : la valeur déjà donnée dans la demande ou la conversation, ou déduite des préférences enregistrées ; sinon null. question : ce que le guide demandera à l'oral si la valeur manque.
   Les tâches quick et info, et les ajouts à un groupe (extend), n'ont pas de caractéristiques.
@@ -145,10 +147,11 @@ const dimensionSchema = {
 const googleSearchSchema = {
   type: ["object", "null"],
   additionalProperties: false,
-  required: ["type", "words", "category", "open_now", "min_rating", "cheap", "check", "ignored"],
+  required: ["dish", "types", "words", "category", "open_now", "min_rating", "cheap", "check", "ignored"],
   description: "Canaux google et mixed (sinon null) : de quoi lancer la recherche Google directement.",
   properties: {
-    type: { type: ["string", "null"], enum: [...GOOGLE_TYPE_LIST, null], description: "Le type Google exact (station essence → gas_station, pharmacie → pharmacy, distributeur → atm, restaurant → restaurant), null si aucun ne correspond." },
+    dish: { type: ["string", "null"], description: "Le plat voulu, sans type de lieu précisé : nom simple et usuel (« couscous », « dorade », « gyros »). null pour un type de lieu ou de cuisine." },
+    types: { type: "array", items: { type: "string", enum: GOOGLE_TYPE_LIST }, description: "Types Google exacts (station essence → gas_station, pharmacie → pharmacy, restaurant thaï → thai_restaurant ; un plat → restaurant). Vide si aucun ne correspond." },
     words: { type: "array", items: { type: "string" }, description: "2 ou 3 formulations courtes, comme on les taperait dans Google Maps, la plus courante d'abord (« station essence », « station-service », « carburant »)." },
     category: { type: "string", enum: CATEGORIES, description: "Catégorie du lieu sur la carte." },
     open_now: { type: "boolean", description: "true si l'utilisateur veut un lieu ouvert maintenant." },
@@ -341,6 +344,25 @@ export function greetingMessage(contextLine) {
   return `Salue l'utilisateur maintenant, en français, en une phrase courte, et demande-lui ce qui lui ferait envie. Puis écoute.\n${contextLine}`;
 }
 
+// Guide écrit (conversation par texte) : il ne répond qu'aux messages qui ne sont pas des demandes.
+// Les demandes (recherches, questions sur les lieux, modifications de la liste) sont traitées par
+// l'application, qui affiche elle-même questions, résumés et réponses dans le chat.
+export const TEXT_GUIDE_MODEL = "gpt-6-luna";
+
+export const TEXT_GUIDE_INSTRUCTIONS = `Tu es le guide de l'application « Que fait-on ? », en conversation écrite. Tu aides l'utilisateur, souvent en train de marcher dans la rue, à choisir quoi visiter, où manger et quoi faire autour de lui.
+Écris en français, sauf si l'utilisateur écrit dans une autre langue. Ton chaleureux, naturel et direct. Une ou deux phrases courtes, sans markdown, sans liste, sans lien.
+
+L'application traite elle-même toutes les demandes (chercher des lieux, placer un lieu, questions sur les lieux de la carte, modifier la liste) et affiche dans le chat ses questions, ses résumés et ses réponses. Tu ne réponds qu'aux messages qui ne sont pas des demandes : salutations, remerciements, conversation, « tu en es où ? ».
+- « Tu en es où ? », « c'est fini ? » : réponds d'après l'état des tâches donné. S'il n'y a plus aucune tâche en cours, dis que tout est fait.
+- Tu n'as pas la météo ni l'actualité en direct : l'écran les affiche (bouton « i » de la carte).
+- Ne propose aucun lieu de toi-même et ne réponds jamais de mémoire sur un lieu, une distance, un horaire ou un prix : invite l'utilisateur à le demander, l'application cherchera.
+- Pas de remplissage : ne parle ni de la météo, ni des événements, ni de la ville si on ne te le demande pas.
+- Si le message ressemble quand même à une demande, dis seulement que c'est noté.`;
+
+export function textGreeting(contextLine) {
+  return `L'utilisateur ouvre la conversation écrite. Salue-le en une phrase courte et demande-lui ce qui lui ferait envie.\n${contextLine}`;
+}
+
 const poiItemSchema = {
   type: "object",
   additionalProperties: false,
@@ -524,3 +546,90 @@ const ALL_BACKEND_TOOLS = [
   },
 ];
 export const BACKEND_TOOLS = ALL_BACKEND_TOOLS.filter((tool) => ITINERARY || tool.name !== "pin_steps");
+
+// ---- Sélections (chat écrit, restaurants seulement) ----
+// Le modèle classe chaque message écrit dans une sélection et en extrait les changements de filtres ;
+// l'application applique elle-même (recherche Google, vérification web, ajouts, suppressions).
+
+export const SELECTION_MODEL = "gpt-6-luna";
+
+export const SELECTION_INSTRUCTIONS = `Tu interprètes les messages écrits d'un utilisateur dans une « sélection » de restaurants : tous les établissements où l'on consomme sur place (restaurants, fast-foods, snacks, cafés, bars, boulangeries et pâtisseries avec place assise, glaciers…). Tu ne réponds pas toi-même, sauf pour les types chat et offscope. On te donne les filtres actuels, les restaurants de la sélection (avec leur numéro), la question en attente et les derniers échanges.
+
+Un seul type par message :
+- search : ajouter, retirer ou modifier des filtres (type de restaurant ou de cuisine, plat, distance, critère vérifiable, ouvert maintenant, bien noté, pas cher), ou répondre à la question de distance. « Parmi eux, un qui sert X », « lesquels proposent X », « je veux du X » : c'est un filtre (search), jamais une question.
+- add : ajouter un ou des restaurants désignés par leur nom (« ajoute Chez Ama »).
+- remove : retirer des restaurants de la sélection, par numéro, nom ou description (« enlève les pizzerias » → leurs numéros d'après la liste).
+- question : question sur les restaurants de la sélection (lequel est le plus proche, note, horaires, téléphone, prix, ce qu'ils servent…).
+- offscope : ne concerne pas les restaurants (pharmacie, musée, hôtel, météo, transport…).
+- chat : salutation, remerciement, bavardage.
+
+Filtres (type search) :
+- cuisine : le type de lieu ou de cuisine, seulement quand l'utilisateur désigne le lieu (« un fast-food », « un asiatique », « une pizzeria », « un restaurant de sushis », « un grec », « un bar », « un café », « une boulangerie »). set : types Google exacts (1 à 4, du plus précis au plus large), label court en français avec une majuscule (« Fast-food », « Asiatique »), words : 2 ou 3 formulations comme dans Google Maps (« restaurant asiatique », « asiatique »). remove : « type indifférent », « plus de fast-food », « n'importe quel restaurant ». keep : inchangé.
+- dishes : les plats ou produits précis que l'utilisateur veut manger (« gyros », « riz loc-lac », « dorade », « couscous »), nom simple et usuel au singulier, sans article ni adjectif. Mets dans names TOUS les plats cités, même plus de deux : l'application n'en garde que deux et le dit à l'utilisateur. C'est un plat même si Google a un type de lieu qui porte son nom : « une pizza », « des sushis », « un burger », « un kebab », « des ramens », « des tacos », « une crêpe » → dishes, pas cuisine (cuisine seulement pour « une pizzeria », « un restaurant de sushis »…). Un plat n'est jamais dans checks.
+  action : set (remplace les plats par names), add (ajoute names aux plats actuels), remove (retire names ; names vide : tous les plats), keep.
+  mode, quand il y a deux plats : and (« un risotto et une pizza » : les deux au même endroit, le cas par défaut), or (« un risotto ou une pizza », « l'un ou l'autre », « peu importe lequel »), ask seulement si la phrase est vraiment ambiguë ; keep si inchangé ou un seul plat. Réponse à la question « les deux au même endroit, ou l'un ou l'autre ? » : mode and ou or, action keep.
+- add_checks : critères concrets vérifiables sur le web qui ne sont pas un plat (terrasse, fait maison, végétarien, vegan, sans gluten, halal, vue sur la mer, poisson frais…) : label en un ou deux mots avec une majuscule, question commençant par un verbe (« a une terrasse », « propose des plats végétariens »). remove_checks : labels exacts de filtres existants à retirer.
+- distance_minutes : la nouvelle distance à pied si elle est donnée (« 10 min » → 10, « un quart d'heure » → 15, « 500 m » → 6), sinon null.
+- open_now, top_rated, cheap : on, off ou keep (« ouvert maintenant », « bien noté », « pas cher »).
+- « plus de X », « peu importe X », « sans X » : retirer ce filtre. « Plutôt Y » : modifier (set).
+- Préférences vagues (« sympa », « bon », « cosy », « petit ») : ignorées.
+
+Autres champs :
+- add_names : noms des restaurants à ajouter (type add).
+- remove_numbers : numéros des restaurants à retirer (type remove), d'après la liste fournie.
+- question_numbers : numéros concernés par la question (vide : tous) ; needs_details : true si la réponse demande le téléphone, le site web ou une description.
+- reply : seulement pour chat (une phrase courte et chaleureuse) ; vide sinon.`;
+
+const KEEP_SET_REMOVE = { type: "string", enum: ["keep", "set", "remove"] };
+const ON_OFF_KEEP = { type: "string", enum: ["keep", "on", "off"] };
+
+export const SELECTION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "cuisine", "dishes", "add_checks", "remove_checks", "distance_minutes", "open_now", "top_rated", "cheap", "add_names", "remove_numbers", "question_numbers", "needs_details", "reply"],
+  properties: {
+    type: { type: "string", enum: ["search", "add", "remove", "question", "offscope", "chat"] },
+    cuisine: {
+      type: "object",
+      additionalProperties: false,
+      required: ["action", "types", "label", "words"],
+      properties: {
+        action: KEEP_SET_REMOVE,
+        types: { type: "array", items: { type: "string", enum: FOOD_TYPES } },
+        label: { type: "string" },
+        words: { type: "array", items: { type: "string" } },
+      },
+    },
+    dishes: {
+      type: "object",
+      additionalProperties: false,
+      required: ["action", "names", "mode"],
+      properties: {
+        action: { type: "string", enum: ["keep", "set", "add", "remove"] },
+        names: { type: "array", items: { type: "string" } },
+        mode: { type: "string", enum: ["keep", "and", "or", "ask"] },
+      },
+    },
+    add_checks: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label", "question"],
+        properties: { label: { type: "string" }, question: { type: "string" } },
+      },
+    },
+    remove_checks: { type: "array", items: { type: "string" } },
+    distance_minutes: { type: ["integer", "null"] },
+    open_now: ON_OFF_KEEP,
+    top_rated: ON_OFF_KEEP,
+    cheap: ON_OFF_KEEP,
+    add_names: { type: "array", items: { type: "string" } },
+    remove_numbers: { type: "array", items: { type: "integer" } },
+    question_numbers: { type: "array", items: { type: "integer" } },
+    needs_details: { type: "boolean" },
+    reply: { type: "string" },
+  },
+};
+
+export const SELECTION_ANSWER_INSTRUCTIONS = `Tu réponds à une question écrite sur les restaurants d'une sélection, uniquement d'après les données fournies (Google, plats relevés sur le web, temps de marche). Français, une à trois phrases courtes, sans markdown ni liste. Cite les restaurants par leur numéro et leur nom (« le n° 3, Chez Ama »). Si l'information manque, dis-le simplement ; n'invente rien.`;

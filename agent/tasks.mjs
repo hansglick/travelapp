@@ -56,7 +56,10 @@ const googleOf = (g, fallback = null) => {
     ? { kind: g.check.kind, question: clip(g.check.question, 120), label: clip(g.check.label, 40) || "Critère" }
     : null;
   return {
-    type: typeof g.type === "string" ? g.type : null, words,
+    // Plat voulu (« couscous ») : recherche par types de restaurant probables (tools.mjs, searchDish)
+    dish: clip(g.dish, 40) || null,
+    // Types Google demandés ; ancien format : un seul type
+    types: (Array.isArray(g.types) ? g.types : typeof g.type === "string" ? [g.type] : []).filter((x) => typeof x === "string").slice(0, 6), words,
     category: CATEGORIES.includes(g.category) ? g.category : "other",
     openNow: Boolean(g.open_now ?? g.openNow),
     minRating: Number.isFinite(g.min_rating ?? g.minRating) ? Math.min(5, Math.max(0, g.min_rating ?? g.minRating)) : null,
@@ -93,6 +96,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       relatedIds: [...t.relatedIds].filter((id) => store.pois.has(id)), // lieux concernés par une question
       addedIds: t.addedIds.filter((id) => store.pois.has(id)), // lieux ajoutés (chat : « Lieux placés »)
       dimensions: t.dimensions, groupName: t.groupName, channel: t.channel, google: t.google,
+      dishTrace: t.dishTrace || null, // suivi de la recherche par plat (temporaire)
     };
   }
 
@@ -124,7 +128,9 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
 
   // ---- Détection des tâches ----
 
-  // Appelée à chaque fin de prise de parole ; les détections passent l'une après l'autre
+  // Appelée à chaque fin de prise de parole ; les détections passent l'une après l'autre. Résultat :
+  // « task » (une tâche créée, précisée ou annulée), « held » (phrase inachevée, en attente de la
+  // suite) ou « none » (simple conversation : le guide y répond lui-même)
   function handleUserTurn(text, conversation) {
     const turnAt = Date.now();
     extracting = extracting.then(() => detect(text, conversation, turnAt)).catch((err) => console.warn("[tâches] détection", err.message));
@@ -194,7 +200,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     }
     if (out.wait_for_more && !out.new_tasks?.length && !out.refine?.length) {
       heldUtterance = { text, at: Date.now() };
-      return;
+      return "held";
     }
     for (const id of out.cancel || []) cancel(id, "annulée par l'utilisateur");
     for (const c of out.clarify || []) clarify(c, text);
@@ -209,9 +215,8 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       }
       add({ title: t.title, groupName: t.group_name, request: t.request, kind: t.kind, channel: t.channel, google: t.google, placeNames: t.place_names, utterance: text, count: t.count, countGiven: t.count_given, criteria: t.criteria, dimensions: t.dimensions });
     }
-    if (out.new_tasks?.length || out.refine?.length || out.extend?.length || out.cancel?.length || out.clarify?.length) {
-      console.log(`[tâches] « ${text.slice(0, 80)} » →`, JSON.stringify(out));
-    }
+    const acted = Boolean(out.new_tasks?.length || out.refine?.length || out.extend?.length || out.cancel?.length || out.clarify?.length);
+    if (acted) console.log(`[tâches] « ${text.slice(0, 80)} » →`, JSON.stringify(out));
     // Question posée avant cette prise de parole et restée sans réponse : on passe à la suivante
     for (const t of list().filter((x) => x.status === "clarifying")) {
       for (const d of t.dimensions) {
@@ -222,6 +227,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
       }
     }
     askNext();
+    return acted ? "task" : "none";
   }
 
   // Lieu visé par une question sans nom : la bulle ouverte à l'écran, sinon le dernier lieu ajouté
@@ -346,6 +352,11 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
     t.relatedIds = new Set(Array.isArray(t.relatedIds) ? t.relatedIds : []); // lieux consultés par la tâche
     t.dimensions ||= [];
     t.log = (text) => log(t, text); // utilisé par les fonctions de l'appli (lieu retiré car trop loin…)
+    // Suivi de la recherche par plat, affiché dans le chat (temporaire, voir searchDish)
+    t.setDishTrace = (trace) => {
+      t.dishTrace = trace;
+      changed();
+    };
     t.ensureColor = () => {
       if (t.colorIndex === null) t.colorIndex = nextColor++;
       return t.colorIndex;
@@ -354,6 +365,14 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
   }
 
   // ---- Enregistrement (compte) ----
+
+  // Suivi de la recherche par plat enregistré sans le nom des lieux (règles de Google : seul
+  // l'identifiant se garde) ; il reste affiché tant que le serveur tourne
+  function withoutNames(trace) {
+    if (!trace) return null;
+    const strip = (s) => (s?.places ? { ...s, places: s.places.map(({ name, ...rest }) => rest) } : s);
+    return { ...trace, steps: (trace.steps || []).map(strip), byName: strip(trace.byName) };
+  }
 
   function toJSON() {
     return {
@@ -364,7 +383,7 @@ export function createTaskBoard({ apiKey, store, tools, metrics, onChange, notif
         result: t.result, replaces: t.replaces, replacedBy: t.replacedBy, addedIds: t.addedIds,
         previousAddedIds: t.previousAddedIds, requestedCount: t.requestedCount, criteria: t.criteria,
         maxDistanceM: t.maxDistanceM, extends: t.extends, continuations: t.continuations, colorIndex: t.colorIndex,
-        relatedIds: [...t.relatedIds], dimensions: t.dimensions, groupName: t.groupName, channel: t.channel, google: t.google, placeNames: t.placeNames,
+        relatedIds: [...t.relatedIds], dimensions: t.dimensions, groupName: t.groupName, channel: t.channel, google: t.google, placeNames: t.placeNames, dishTrace: withoutNames(t.dishTrace),
       })),
     };
   }

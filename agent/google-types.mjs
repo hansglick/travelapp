@@ -29,6 +29,9 @@ export const GOOGLE_TYPES = {
 // Liste à plat (schéma de l'outil find_places_near)
 export const GOOGLE_TYPE_LIST = [...new Set(Object.values(GOOGLE_TYPES).flatMap((s) => s.split(" ")))];
 
+// Restauration (où l'on mange ou boit) : les types notés pour un plat (dishes.mjs)
+export const FOOD_TYPES = GOOGLE_TYPES.manger_boire.split(" ");
+
 // Ce que Google renvoie pour chaque lieu trouvé (critères vérifiables sans recherche web)
 export const GOOGLE_FIELDS = "distance, note et nombre d'avis, niveau de prix (€ à €€€€), ouvert en ce moment, horaires de la semaine";
 

@@ -212,8 +212,9 @@ export function createResolver({ apiKey, metrics }) {
   // plus loin, rayon élargi jusqu'à 10 km s'il n'y a rien) ; les mots rattrapent ceux que Google a
   // mal classés (la station du Super U de Quiberon n'est pas une « gas_station » pour Google)
   // want : nombre de lieux du type voulus avant d'arrêter d'élargir le rayon
-  // googleType : un type Google, ou une famille de types (tableau)
-  async function searchNear({ textQuery, googleType, anchors, radius, position, limit = 8, want = 1 }) {
+  // googleType : un type Google, ou une famille de types (tableau) ; sans textQuery, par type seulement
+  // max : lieux demandés à Google par type (20 au plus)
+  async function searchNear({ textQuery, googleType, anchors, radius, position, limit = 8, want = 1, max = 10 }) {
     const includedTypes = (Array.isArray(googleType) ? googleType : [googleType]).filter(Boolean);
     const anchor = anchors[0].location;
     const circle = (r) => ({ circle: { center: { latitude: anchor.lat, longitude: anchor.lng }, radius: r } });
@@ -230,13 +231,13 @@ export function createResolver({ apiKey, metrics }) {
     };
     const byType = async () => {
       for (let reach = radius; ; reach = Math.min(reach * 4, 10000)) {
-        const found = await call("searchNearby", { includedTypes, languageCode: "fr", maxResultCount: 10, rankPreference: "DISTANCE", locationRestriction: circle(reach) }, "google_nearby_search");
+        const found = await call("searchNearby", { includedTypes, languageCode: "fr", maxResultCount: max, rankPreference: "DISTANCE", locationRestriction: circle(reach) }, "google_nearby_search");
         if (found.length >= want || reach >= 10000) return { found, reach };
       }
     };
     const [typed, worded] = await Promise.all([
       includedTypes.length ? byType().catch(() => ({ found: [], reach: radius })) : { found: [], reach: radius },
-      call("searchText", { textQuery, languageCode: "fr", maxResultCount: 10, locationBias: circle(radius) }, "google_text_search"),
+      textQuery ? call("searchText", { textQuery, languageCode: "fr", maxResultCount: 10, locationBias: circle(radius) }, "google_text_search") : [],
     ]);
     const reach = Math.max(radius, typed.reach);
     const seen = new Set();
@@ -321,6 +322,7 @@ export function createResolver({ apiKey, metrics }) {
     const fields = [
       "rating", "userRatingCount", "priceLevel", "currentOpeningHours.openNow", "regularOpeningHours.weekdayDescriptions",
       "nationalPhoneNumber", "internationalPhoneNumber", "websiteUri", "editorialSummary", "formattedAddress", "businessStatus",
+      "types", "primaryType",
     ].join(",");
     const response = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?languageCode=fr`, {
       headers: { "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": fields },
@@ -340,6 +342,8 @@ export function createResolver({ apiKey, metrics }) {
       website: p.websiteUri || null,
       google_summary: p.editorialSummary?.text || null,
       address: p.formattedAddress || null,
+      types: p.types || [],
+      primary_type: p.primaryType || null,
       ...(p.businessStatus && p.businessStatus !== "OPERATIONAL" ? { business_status: p.businessStatus } : {}),
     };
   }
@@ -379,9 +383,47 @@ export function createResolver({ apiKey, metrics }) {
     return grid;
   }
 
+  // Un lieu par son identifiant Google (lieu écarté remis sur la carte, nom à réafficher après un
+  // redémarrage) : même forme qu'un candidat de searchNear ; position : pour la distance
+  async function placeById(placeId, position = null) {
+    const fields = FIELD_MASK.split(",").map((f) => f.replace(/^places\./, "")).join(",");
+    const response = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?languageCode=fr`, {
+      headers: { "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": fields },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    metrics.count("google_place_details");
+    if (!response.ok) throw new Error(`Place Details ${response.status}`);
+    const p = await response.json();
+    const location = p.location ? { lat: p.location.latitude, lng: p.location.longitude } : null;
+    return {
+      place: {
+        placeId: p.id || placeId, name: p.displayName?.text || "", address: p.formattedAddress || null, location,
+        types: p.types || [], primaryType: p.primaryType || null, ...googleInfo(p),
+      },
+      ...(position && location ? { distance_from_user_m: Math.round(distanceKm(position, location) * 1000) } : {}),
+    };
+  }
+
+  // Nom et position seulement (palier Google le moins cher) : écran « Menus connus »
+  async function placeLocation(placeId) {
+    const response = await withSlot(() => fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}?languageCode=fr`, {
+      headers: { "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": "id,displayName,location" },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    }));
+    metrics.count("google_place_location");
+    if (!response.ok) throw new Error(`Place Details ${response.status}`);
+    const p = await response.json();
+    return {
+      name: p.displayName?.text || null,
+      location: p.location ? { lat: p.location.latitude, lng: p.location.longitude } : null,
+    };
+  }
+
   resolve.searchNear = searchNear;
   resolve.locate = locate;
   resolve.getDetails = getDetails;
+  resolve.placeById = placeById;
+  resolve.placeLocation = placeLocation;
   // Lieu désigné par son nom (« place Chez Ama sur la carte ») : cherché autour de l'utilisateur par
   // paliers (10, 30 puis 60 min à pied) ; au premier palier où Google trouve des lieux de ce nom, ils
   // sont renvoyés dans l'ordre de pertinence de Google. null si rien à 60 min : le modèle prend le relais.

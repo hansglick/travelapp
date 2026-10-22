@@ -65,6 +65,16 @@ export function openDatabase(path) {
       data TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS menus (
+      place_id TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS dishes (
+      dish TEXT PRIMARY KEY COLLATE NOCASE,
+      data TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS phrasebooks (
       country TEXT PRIMARY KEY COLLATE NOCASE,
       data TEXT NOT NULL,
@@ -99,6 +109,99 @@ export function createPhrasebookStorage(db) {
       return row ? JSON.parse(row.data) : null;
     },
     set: (country, data) => put.run(country, JSON.stringify(data), Date.now()),
+  };
+}
+
+// Plats (« couscous », « dorade ») et probabilité de chaque type de restaurant Google de les servir,
+// communs à tous les comptes : calculés une fois par plat, sans expiration (ce ne sont pas des
+// données Google)
+export function createDishStorage(db) {
+  const get = db.prepare("SELECT data FROM dishes WHERE dish = ?");
+  const put = db.prepare("INSERT OR REPLACE INTO dishes (dish, data, created_at) VALUES (?, ?, ?)");
+  return {
+    get: (dish) => {
+      const row = get.get(dish);
+      return row ? JSON.parse(row.data) : null;
+    },
+    set: (dish, data) => put.run(dish, JSON.stringify(data), Date.now()),
+  };
+}
+
+// Menus des restaurants relevés par l'analyse web, communs à tous les comptes : par identifiant Google,
+// les plats vus avec leur groupe (entrées, plats, desserts…, au choix du modèle), les régimes repérés
+// (végétarien, vegan, sans gluten, halal), les verdicts des critères vérifiés (« poisson » : oui ou
+// non) et le nom du lieu tel que l'analyse l'a lu sur le web (pas celui de Google) ; jamais le menu
+// recopié. Valables 6 mois : au-delà, le restaurant est revérifié. Coordonnées Google : 30 jours au
+// plus (règles de Google), pour l'écran des menus autour de l'utilisateur.
+export const MENU_VALID_MS = 182 * 24 * 3600 * 1000;
+export const MENU_LOCATION_MS = 30 * 24 * 3600 * 1000;
+const MENU_MAX_DISHES = 120;
+export const EXTERNAL_GROUP = "Source ext."; // plats confirmés ailleurs que sur la carte relevée (avis, presse…)
+const menuKey = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+export function createMenuStorage(db) {
+  const get = db.prepare("SELECT data, updated_at FROM menus WHERE place_id = ?");
+  const put = db.prepare("INSERT OR REPLACE INTO menus (place_id, data, updated_at) VALUES (?, ?, ?)");
+  // { dishes: [{ name, group }], diets, source, verdicts: { clé: { label, answer, note, at } } } d'un
+  // restaurant, relevé il y a moins de 6 mois ; sinon null. Anciens relevés : plats sans groupe.
+  const fresh = (placeId) => {
+    const row = get.get(placeId);
+    if (!row || Date.now() - row.updated_at > MENU_VALID_MS) return null;
+    const data = JSON.parse(row.data);
+    const dishes = (data.dishes || []).map((d) => (typeof d === "string" ? { name: d, group: null } : d));
+    const verdicts = Object.fromEntries(Object.entries(data.verdicts || {}).filter(([, v]) => Date.now() - v.at <= MENU_VALID_MS));
+    const location = data.location && Date.now() - data.locatedAt <= MENU_LOCATION_MS ? data.location : null;
+    return { dishes, diets: data.diets || [], source: data.source || null, verdicts, name: data.name || null, location, updatedAt: row.updated_at };
+  };
+  return {
+    get: fresh,
+    // Nouveau relevé : ajouté à celui encore valable (une vérification ne voit souvent qu'une partie
+    // de la carte), la date repart de maintenant. verdict : { label, answer: yes | no, note } ; name :
+    // nom lu sur le web ; location : coordonnées Google (datées, 30 jours au plus)
+    // confirmedDish : le plat confirmé par une vérification ; ajouté seulement si la carte relevée ne le
+    // contient pas déjà sous un nom qui le comprend (« pizza margherita »), dans la rubrique
+    // « Source ext. » avec le lien de la page qui le cite (confirmedUrl)
+    add: (placeId, { dishes = [], diets = [], source = null, verdict = null, name = null, location = null, confirmedDish = null, confirmedUrl = null }) => {
+      if (!dishes.length && !diets.length && !verdict && !confirmedDish) return;
+      const old = fresh(placeId) || { dishes: [], diets: [], verdicts: {} };
+      const saved = get.get(placeId);
+      const before = saved ? JSON.parse(saved.data) : {};
+      // Un plat déjà connu garde son groupe, sauf s'il n'en avait pas
+      const byName = new Map(old.dishes.map((d) => [menuKey(d.name), d]));
+      for (const d of dishes) {
+        const known = byName.get(menuKey(d.name));
+        if (!known) byName.set(menuKey(d.name), d);
+        else if (!known.group && d.group) known.group = d.group;
+      }
+      const external = confirmedDish && byName.get(menuKey(confirmedDish));
+      if (external?.group === EXTERNAL_GROUP && !external.url && confirmedUrl) external.url = confirmedUrl; // lien trouvé depuis
+      else if (confirmedDish && ![...byName.values()].some((d) => menuKey(d.name).includes(menuKey(confirmedDish)))) {
+        byName.set(menuKey(confirmedDish), { name: confirmedDish, group: EXTERNAL_GROUP, url: confirmedUrl || null });
+      }
+      const verdicts = { ...old.verdicts };
+      if (verdict) verdicts[menuKey(verdict.label)] = { ...verdict, at: Date.now() };
+      const data = {
+        dishes: [...byName.values()].slice(0, MENU_MAX_DISHES),
+        diets: [...new Set([...old.diets, ...diets])],
+        source: source || old.source || null,
+        verdicts,
+        name: name || old.name || before.name || null,
+        location: location || before.location || null,
+        locatedAt: location ? Date.now() : before.locatedAt || null,
+      };
+      put.run(placeId, JSON.stringify(data), Date.now());
+    },
+    // Tous les menus encore valables (écran « Menus connus ») : { placeId, ...menu }
+    list: () => db.prepare("SELECT place_id FROM menus WHERE updated_at > ?").all(Date.now() - MENU_VALID_MS)
+      .map((r) => ({ placeId: r.place_id, ...fresh(r.place_id) })),
+    // Coordonnées redemandées à Google (menu relevé sans elles, ou trop vieilles) : la date du relevé
+    // ne change pas
+    setLocation: (placeId, location) => {
+      const row = get.get(placeId);
+      if (!row) return;
+      const data = { ...JSON.parse(row.data), location, locatedAt: Date.now() };
+      put.run(placeId, JSON.stringify(data), row.updated_at);
+    },
   };
 }
 

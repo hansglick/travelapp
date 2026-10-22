@@ -11,7 +11,8 @@ import { fileURLToPath } from "node:url";
 import { createResolver, reverseGeocode } from "./agent/places.mjs";
 import { distanceM } from "./agent/live.mjs";
 import { createMetrics } from "./agent/metrics.mjs";
-import { openDatabase, createAccounts, createWorkspaceStorage, createTripStorage, createPhrasebookStorage, createDiscoveryStorage } from "./agent/db.mjs";
+import { openDatabase, createAccounts, createWorkspaceStorage, createTripStorage, createPhrasebookStorage, createDiscoveryStorage, createDishStorage, createMenuStorage } from "./agent/db.mjs";
+import { createDishes } from "./agent/dishes.mjs";
 import { createPractical } from "./agent/practical.mjs";
 import { createDiscovery } from "./agent/discovery.mjs";
 import { createNamer } from "./agent/naming.mjs";
@@ -69,9 +70,35 @@ const sharedMetrics = createMetrics(); // Google et météo, communs à tous les
 const resolvePoi = createResolver({ apiKey: GOOGLE_API_KEY, metrics: sharedMetrics });
 const trips = createTripStorage(db);
 const discovery = OPENAI_API_KEY ? createDiscovery({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createDiscoveryStorage(db), resolvePoi }) : null;
-const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, storage: createWorkspaceStorage(db), trips, discovery });
+const dishes = OPENAI_API_KEY ? createDishes({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createDishStorage(db) }) : null;
+const menus = createMenuStorage(db); // menus relevés par l'analyse web, communs à tous les comptes
+const workspaces = createWorkspaces({ apiKey: OPENAI_API_KEY, resolvePoi, storage: createWorkspaceStorage(db), trips, discovery, dishes, menus });
 const suggestNames = OPENAI_API_KEY ? createNamer({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics }) : null;
 const practical = createPractical({ apiKey: OPENAI_API_KEY, metrics: sharedMetrics, storage: createPhrasebookStorage(db) });
+
+// Carte d'un restaurant pour la page : plats par rubrique, régimes, critères vérifiés
+function menuView(menu) {
+  // Carte relevée avant les rubriques : une seule liste, « Plats relevés » plutôt que « Autres »
+  const grouped = menu.dishes.some((d) => d.group);
+  const groups = new Map();
+  const links = {};
+  for (const d of menu.dishes) {
+    const group = d.group || (grouped ? "Autres" : "Plats relevés");
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(d.name);
+    if (d.url) links[d.name] = d.url;
+  }
+  return {
+    groups: [...groups].map(([name, dishes]) => ({ name, dishes })),
+    links, // plat → page qui le cite (rubrique « Source ext. »)
+    diets: menu.diets,
+    verdicts: Object.values(menu.verdicts).map(({ label, answer }) => ({ label, answer })),
+    source: menu.source,
+    updatedAt: menu.updatedAt,
+  };
+}
+const MENUS_RADIUS_M = 30 * 80;  // « Menus connus » : 30 min à pied
+const MENUS_LOOKUPS = 40;        // coordonnées redemandées à Google au plus, par ouverture
 
 // ---- HTTP ----
 
@@ -157,6 +184,8 @@ const routes = {
     res.write(`data: ${JSON.stringify(ws.voiceState())}\n\n`);
     res.write(`data: ${JSON.stringify({ type: "tasks", tasks: ws.board.snapshot() })}\n\n`);
     res.write(`data: ${JSON.stringify({ type: "itinerary", current: ws.linked() })}\n\n`);
+    res.write(`data: ${JSON.stringify(ws.live.textState())}\n\n`);
+    res.write(`data: ${JSON.stringify(ws.live.discussionState())}\n\n`);
     ws.clients.add(res);
     ws.watchClients();
     const ping = setInterval(() => res.write(": ping\n\n"), 25000);
@@ -190,6 +219,125 @@ const routes = {
       console.log(`[live ${ws.user.pseudo}] le navigateur abandonne : ${clip(info.reason)} (connexion ${clip(info.connection)}, ICE ${clip(info.ice)}, canal ${clip(info.channel)})`);
     }
     await ws.live.close(info.reason ? "browser_gave_up" : "close_requested");
+    json(res, 200, { ok: true });
+  },
+
+  // Carte d'un restaurant relevée par l'analyse web (icône « menu » de la fiche) : plats par rubrique,
+  // régimes, critères vérifiés ; { menu: null } si rien de récent
+  "GET /api/menu": (req, res) => {
+    const placeId = new URL(req.url, "http://localhost").searchParams.get("place") || "";
+    if (!/^[\w-]{10,300}$/.test(placeId)) return json(res, 400, { error: "Lieu invalide." });
+    const menu = menus.get(placeId);
+    json(res, 200, { menu: menu ? menuView(menu) : null });
+  },
+
+  // Écran « Menus connus » : les restaurants dont la carte est dans la base, à 30 min à pied au plus
+  // de la position (2,4 km à vol d'oiseau), du plus proche au plus loin. Coordonnées manquantes ou de
+  // plus de 30 jours : redemandées à Google (40 au plus par ouverture) et gardées 30 jours ; nom pas
+  // encore lu sur le web : celui de Google, affiché seulement
+  "GET /api/menus/nearby": async (req, res, ws) => {
+    const position = ws.store.context.position;
+    if (!position) return json(res, 200, { located: false, restaurants: [] });
+    const all = menus.list();
+    await Promise.all(all.filter((m) => !m.location).slice(0, MENUS_LOOKUPS).map(async (m) => {
+      const found = await resolvePoi.placeLocation(m.placeId).catch(() => null);
+      if (!found?.location) return;
+      menus.setLocation(m.placeId, found.location);
+      m.location = found.location;
+      m.googleName = found.name;
+    }));
+    const near = all
+      .filter((m) => m.location)
+      .map((m) => ({ ...m, distance: Math.round(distanceM(position, m.location)) }))
+      .filter((m) => m.distance <= MENUS_RADIUS_M)
+      .sort((a, b) => a.distance - b.distance);
+    await Promise.all(near.filter((m) => !m.name && !m.googleName).map(async (m) => {
+      m.googleName = (await resolvePoi.placeLocation(m.placeId).catch(() => null))?.name || null;
+    }));
+    json(res, 200, {
+      located: true,
+      unlocated: all.filter((m) => !m.location).length,
+      restaurants: near.map((m) => ({
+        placeId: m.placeId, name: m.name || m.googleName || null, nameFrom: m.name ? "web" : "google",
+        distance: m.distance, minutes: Math.max(1, Math.round(m.distance / 80)), dishes: m.dishes.length, ...menuView(m),
+      })),
+    });
+  },
+
+  // ---- Sélections de restaurants (chat écrit) ----
+  "POST /api/selections": async (req, res, ws) => {
+    const sel = ws.selections.create();
+    json(res, 201, { id: sel.id });
+  },
+
+  // Message écrit dans une sélection : répond une fois traité (la page suit le fil par le flux)
+  "POST /api/selections/message": async (req, res, ws) => {
+    if (!OPENAI_API_KEY) return json(res, 503, { error: "Clé OpenAI absente sur le serveur." });
+    const { id, text } = await readJson(req);
+    if (typeof id !== "string" || typeof text !== "string" || !text.trim()) return json(res, 400, { error: "Message vide." });
+    const result = await ws.selections.message(id, text.slice(0, 500));
+    json(res, result.error ? 404 : 200, result);
+  },
+
+  // « Réflexion » d'une demande de recherche : la logique suivie (en mémoire seulement)
+  "GET /api/selections/reflection": (req, res, ws) => {
+    const params = new URL(req.url, "http://localhost").searchParams;
+    const reflection = ws.selections.reflection(params.get("id") || "", params.get("message") || "");
+    json(res, 200, { reflection });
+  },
+
+  // Case d'un filtre cochée ou décochée
+  "POST /api/selections/filter": async (req, res, ws) => {
+    const { id, filterId, enabled } = await readJson(req);
+    if (typeof id !== "string" || typeof filterId !== "string") return json(res, 400, { error: "Filtre manquant." });
+    const result = await ws.selections.setFilter(id, filterId, Boolean(enabled));
+    json(res, result.error ? 404 : 200, result);
+  },
+
+  // Écran « Restaurants retirés » : remettre un restaurant dans sa sélection
+  "POST /api/selections/restore": async (req, res, ws) => {
+    const { id, placeId } = await readJson(req);
+    if (typeof id !== "string" || typeof placeId !== "string") return json(res, 400, { error: "Restaurant manquant." });
+    try {
+      const result = await ws.selections.restore(id, placeId);
+      json(res, result.error ? 404 : 200, result);
+    } catch {
+      json(res, 502, { error: "Google ne répond pas : réessayez." });
+    }
+  },
+
+  // Écran « Lieux écartés » : remettre sur la carte un lieu écarté par l'analyse web
+  "POST /api/excluded/restore": async (req, res, ws) => {
+    const { key } = await readJson(req);
+    if (typeof key !== "string" || !key) return json(res, 400, { error: "Lieu manquant." });
+    try {
+      const result = await ws.tools.restoreExcluded(key);
+      if (result.status === "error") return json(res, 409, { error: result.message });
+      json(res, 200, { ok: true });
+    } catch (err) {
+      json(res, 502, { error: "Google ne répond pas : réessayez." });
+    }
+  },
+
+  // Conversation écrite : ouverture (accueil du guide), message, fermeture
+  "POST /api/text/start": async (req, res, ws) => {
+    if (!OPENAI_API_KEY) return json(res, 503, { error: "Clé OpenAI absente sur le serveur." });
+    await ws.live.startText();
+    json(res, 200, { ok: true });
+  },
+
+  // Répond une fois le message compris : task (la demande s'affiche par sa tâche), held (phrase
+  // inachevée) ou none (échange de l'onglet « Discussion »)
+  "POST /api/text/send": async (req, res, ws) => {
+    if (!OPENAI_API_KEY) return json(res, 503, { error: "Clé OpenAI absente sur le serveur." });
+    const { text } = await readJson(req);
+    if (typeof text !== "string" || !text.trim()) return json(res, 400, { error: "Message vide." });
+    const outcome = await ws.live.sendText(text.replace(/\s+/g, " ").trim().slice(0, 500));
+    json(res, 200, { outcome });
+  },
+
+  "POST /api/text/end": async (req, res, ws) => {
+    ws.live.endText("fermée par l'utilisateur");
     json(res, 200, { ok: true });
   },
 
@@ -261,6 +409,8 @@ const routes = {
   "POST /api/pois/remove": async (req, res, ws) => {
     const { id } = await readJson(req);
     if (typeof id !== "string") return json(res, 400, { error: "id manquant." });
+    // Restaurant d'une sélection : retrait manuel, définitif pour la sélection
+    if (ws.selections.removeByUser(id)) return json(res, 200, { ok: true });
     const poi = ws.store.removeByUser(id);
     if (!poi) return json(res, 404, { error: "Lieu introuvable." });
     ws.live.appNote(`L'utilisateur a supprimé « ${poi.place?.name || poi.name} » depuis l'écran (bouton poubelle). Le lieu est dans la corbeille : il peut être remis tel quel s'il change d'avis.`);

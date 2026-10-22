@@ -94,6 +94,15 @@ export class PoiStore extends EventEmitter {
     this.version = 0;
     this.practical = { weather: null, phrasebook: null, facts: null, news: null, place: null }; // menu ☰ et icône « i »
     this.trash = [];            // lieux supprimés récemment (20 au plus) : restaurables sans nouvelle recherche
+    // Lieux écartés par l'analyse web (ne répondent pas au critère) : écran « Lieux écartés », 100 au plus
+    this.excluded = [];
+    this.nextExcluded = 1;
+    this.analysis = new Map();  // analyses web en cours : id de tâche → { title, label, total, done }
+    // Sélections de restaurants (chat écrit, selections.mjs) : filtres, ajouts et retraits manuels,
+    // verdicts, fil des demandes. Les champs en « _ » restent en mémoire (lieux Google, retirés)
+    this.selections = [];
+    this.nextSelection = 1;
+    this.nextSelectionColor = 0;
     this.renumberPending = false; // numéros absolus à recalculer (après une suppression ou un cadenas)
     this.pois = new Map();      // id → POI, dans l'ordre d'ajout
     this.nextId = 1;
@@ -128,6 +137,13 @@ export class PoiStore extends EventEmitter {
       version: this.version,
       renumberPending: this.renumberPending,
       preferences: this.preferences,
+      // Lieux écartés : identifiant Google, tâche et raison ; pas le nom (donnée Google)
+      nextExcluded: this.nextExcluded,
+      selectionsFormat: 1, // carte des sélections (les cartes d'avant ne sont pas rechargées)
+      nextSelection: this.nextSelection,
+      nextSelectionColor: this.nextSelectionColor,
+      selections: this.selections.map((s) => Object.fromEntries(Object.entries(s).filter(([k]) => !k.startsWith("_")))),
+      excluded: this.excluded.map(({ name, candidate, ...rest }) => rest),
       pois: [...this.pois.values()].map((p) => ({
         id: p.id, number: p.number || null, name: p.name, query: p.query, category: p.category, sources: p.sources,
         reason: p.special ? null : p.reason, // adresse du point de retour : donnée Google, non gardée
@@ -158,6 +174,11 @@ export class PoiStore extends EventEmitter {
     this.renumberPending = Boolean(data.renumberPending);
     if (data.preferences) this.preferences = { ...this.preferences, ...data.preferences };
     if (data.practical) this.practical = { ...this.practical, ...data.practical };
+    this.excluded = Array.isArray(data.excluded) ? data.excluded.map((e) => ({ ...e, name: null })) : [];
+    this.selections = Array.isArray(data.selections) ? data.selections : [];
+    this.nextSelection = Number.isInteger(data.nextSelection) ? data.nextSelection : this.selections.length + 1;
+    this.nextSelectionColor = Number.isInteger(data.nextSelectionColor) ? data.nextSelectionColor : this.selections.length;
+    this.nextExcluded = Number.isInteger(data.nextExcluded) ? data.nextExcluded : this.excluded.length + 1;
     const stale = [];
     for (const p of data.pois || []) {
       if (p.special === "back" && p.ownLocation) {
@@ -221,6 +242,13 @@ export class PoiStore extends EventEmitter {
       pois: [...this.pois.values()].map((p) => this.poiView(p)),
       preferences: this.preferences,
       practical: this.practical,
+      excluded: this.excluded.map(({ candidate, colorIndex, category, ...rest }) => rest),
+      analysis: [...this.analysis].map(([taskId, a]) => ({ taskId, ...a })),
+      selections: this.selections.map((s) => ({
+        id: s.id, title: s.title, colorIndex: s.colorIndex, createdAt: s.createdAt, filters: s.filters,
+        messages: s.messages, pendingQuestion: s.pendingQuestion || null, busy: Boolean(s._busy),
+        manualIds: (s.manualAdds || []).map((m) => m.placeId), removed: s._removed || [],
+      })),
       // La page doit renvoyer son ordre pour renuméroter (demande en cours ou numéro manquant)
       renumber_pending: this.renumberPending ||
         [...this.pois.values()].some((p) => p.status === "resolved" && p.included && !p.visitedAt && !p.absIndex),
@@ -578,6 +606,9 @@ export class PoiStore extends EventEmitter {
   clearPois() {
     this.candidates.clear(); // candidats proposés lors des recherches effacées
     this.trash = [];
+    this.excluded = [];
+    this.analysis.clear();
+    this.selections = [];
     const removed = [...this.pois.values()];
     this.renumberPending = false;
     this.nextNumber = 1;
@@ -734,8 +765,9 @@ export class PoiStore extends EventEmitter {
     this.emit("change", { added: [], removed: [] });
   }
 
-  // Analyse web d'un lieu (critère de la recherche) : pending (arcs qui tournent), confirmed (bague
-  // verte), maybe (bague orange), rejected (lieu grisé) ; la carte se met à jour
+  // Analyse web d'un lieu (critère de la recherche) : pending (en cours, icône normale), confirmed
+  // (bague verte), maybe (lieu grisé : rien de sûr) ; un lieu qui ne répond pas au critère quitte la
+  // carte (excludePoi). La carte se met à jour
   setPoiCheck(id, check) {
     const poi = this.pois.get(id);
     if (!poi) return;
@@ -752,6 +784,8 @@ export class PoiStore extends EventEmitter {
       rating: info.rating ?? null, ratingCount: info.rating_count ?? null,
       price: info.price || null, priceLevel: info.price_level || null, hours: info.opening_hours || null,
     });
+    // Types Google (fiche du lieu) : redemandés aussi après un rechargement
+    if (info.types?.length && !poi.place.types?.length) Object.assign(poi.place, { types: info.types, primaryType: info.primary_type || null });
     // La fiche affiche note, prix et horaires : la page doit les recevoir
     this.version++;
     this.emit("change", { added: [], removed: [] });
@@ -790,6 +824,93 @@ export class PoiStore extends EventEmitter {
     this.version++;
     this.emit("change", { added: moved ? [] : [poi], removed: [] });
     return { poi, moved };
+  }
+
+  // ---- Sélections : lieux ajoutés ou retirés directement (sans les règles du modèle) ----
+
+  // Changement d'une sélection (filtres, fil des demandes) : la page et l'enregistrement suivent
+  touchSelections() {
+    this.version++;
+    this.emit("change", { added: [], removed: [] });
+  }
+
+  // Restaurant d'une sélection : un même lieu peut être dans deux sélections (deux icônes)
+  insertSelectionPoi(selection, c, check = null) {
+    const place = c.place;
+    const poi = this.#insert({
+      name: cleanText(place.name, LIMITS.name) || "Restaurant",
+      query: cleanText([place.name, place.address].filter(Boolean).join(", "), LIMITS.query),
+      category: "restaurant", reason: place.address ? `${place.address}.` : "", check, sources: [], place,
+    }, null, { taskId: selection.id, colorIndex: selection.colorIndex });
+    this.version++;
+    this.emit("change", { added: [poi], removed: [] });
+    return poi;
+  }
+
+  // Retire des lieux de la carte sans corbeille (la sélection garde elle-même ses retraits)
+  removePoisQuiet(ids) {
+    const removed = ids.map((id) => this.pois.get(id)).filter(Boolean);
+    if (!removed.length) return;
+    for (const poi of removed) this.pois.delete(poi.id);
+    this.#needRenumber();
+    this.version++;
+    this.history.push({ version: this.version, removedNames: new Set(), replaced: false });
+    this.emit("change", { added: [], removed });
+  }
+
+  // ---- Lieux écartés par l'analyse web ----
+
+  // entry : { placeId, name, category, taskId, taskTitle, colorIndex, label, reason, candidate } ;
+  // candidate (lieu Google) reste en mémoire seulement : il permet de remettre le lieu sans le
+  // redemander à Google
+  addExcluded(entry) {
+    this.excluded = this.excluded.filter((e) => !(e.placeId === entry.placeId && e.taskId === entry.taskId));
+    this.excluded.push({ key: `x${this.nextExcluded++}`, at: Date.now(), ...entry });
+    if (this.excluded.length > 100) this.excluded = this.excluded.slice(-100);
+    this.version++;
+    this.emit("change", { added: [], removed: [] });
+  }
+
+  // Lieu déjà sur la carte que l'analyse écarte : il quitte la carte (pas la corbeille) pour la liste
+  excludePoi(id, { label, reason, taskTitle, candidate = null }) {
+    const poi = this.pois.get(id);
+    if (!poi) return null;
+    this.pois.delete(id);
+    this.#needRenumber();
+    this.history.push({ version: this.version + 1, removedNames: new Set(), replaced: false });
+    this.addExcluded({
+      placeId: poi.place?.placeId || null, name: poi.place?.name || poi.name, category: poi.category,
+      taskId: poi.taskId, taskTitle, colorIndex: poi.colorIndex, label, reason, candidate,
+    });
+    this.emit("change", { added: [], removed: [poi] });
+    return poi;
+  }
+
+  // Retire un lieu de la liste des écartés (il est remis sur la carte) ; renvoie son entrée
+  takeExcluded(key) {
+    const entry = this.excluded.find((e) => e.key === key);
+    if (!entry) return null;
+    this.excluded = this.excluded.filter((e) => e !== entry);
+    this.version++;
+    this.emit("change", { added: [], removed: [] });
+    return entry;
+  }
+
+  // Nom redemandé à Google après un rechargement (mémoire seulement)
+  setExcludedName(key, name, candidate = null) {
+    const entry = this.excluded.find((e) => e.key === key);
+    if (!entry) return;
+    entry.name = name;
+    if (candidate) entry.candidate = candidate;
+    this.version++;
+    this.emit("change", { added: [], removed: [] });
+  }
+
+  // Avancement d'une analyse web (icône « tête en ébullition ») ; null : terminée
+  setAnalysis(taskId, value) {
+    if (value) this.analysis.set(taskId, value);
+    else this.analysis.delete(taskId);
+    this.emit("change", { added: [], removed: [] });
   }
 
   // Lieu résolu sur le même établissement qu'un lieu déjà présent : on retire le doublon

@@ -9,10 +9,11 @@ import { createMetrics } from "./metrics.mjs";
 import { createTools } from "./tools.mjs";
 import { createTaskBoard } from "./tasks.mjs";
 import { createVerifier } from "./verify.mjs";
+import { createSelections } from "./selections.mjs";
 
 const SAVE_DELAY_MS = 1000;
 
-export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery }) {
+export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery, dishes, menus }) {
   const spaces = new Map(); // id du compte → espace
 
   function open(user) {
@@ -55,7 +56,7 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery
     };
     // Canal mixte : vérification sur le web des candidats Google (critère concret ou réputation)
     const verifier = apiKey ? createVerifier({ apiKey, metrics }) : null;
-    const tools = createTools({ store, resolvePoi, broadcast, uiConnected: () => clients.size > 0, appNote: (text) => live.appNote(text), announce: (text) => live.announce(text), discovery: discoveryApi, verifier });
+    const tools = createTools({ store, resolvePoi, broadcast, uiConnected: () => clients.size > 0, appNote: (text) => live.appNote(text), announce: (text) => live.announce(text), discovery: discoveryApi, verifier, dishes, menus });
     let tasksTimer = null;
     board = createTaskBoard({
       apiKey, store, tools, metrics,
@@ -68,14 +69,22 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery
     });
 
     // Restauration de l'espace enregistré ; les lieux trop anciens sont relocalisés
-    const saved = storage.load(user.id);
+    // Carte d'avant les sélections : on repart d'une carte vide (les préférences sont gardées)
+    let saved = storage.load(user.id);
+    if (saved?.store && !saved.store.selectionsFormat) {
+      console.log(`[compte ${user.pseudo}] carte d'avant les sélections : on repart d'une carte vide`);
+      saved = { store: { preferences: saved.store.preferences, practical: saved.store.practical } };
+    }
     const stale = store.load(saved?.store);
     board.load(saved?.board);
+    // Sélections de restaurants (chat écrit)
+    const selections = createSelections({ apiKey, store, tools, resolvePoi, verifier, menus, dishes, metrics });
     // Itinéraire ouvert ou enregistré : son avancement y est enregistré à chaque changement
     let linked = saved?.linked || null; // { id, name, tripName }
     if (stale.length) console.log(`[compte ${user.pseudo}] ${stale.length} lieu(x) à relocaliser`);
     stale.forEach((id) => tools.relocate(id));
     refreshPlaceInfo();
+    selections.resume();
 
     // Lieux rechargés (compte ou itinéraire) : note, avis, prix et horaires ne sont pas enregistrés
     // (règles de Google) ; ils sont redemandés en arrière-plan
@@ -83,6 +92,13 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery
       for (const poi of store.pois.values()) {
         if (poi.status !== "resolved" || !poi.place?.placeId || poi.place.rating !== undefined) continue;
         resolvePoi.getDetails(poi.place.placeId).then((info) => store.setPlaceInfo(poi.id, info)).catch(() => {});
+      }
+      // Lieux écartés : leur nom non plus n'est pas enregistré (écran « Lieux écartés »)
+      for (const entry of store.excluded) {
+        if (entry.name || !entry.placeId) continue;
+        resolvePoi.placeById(entry.placeId, store.context.position)
+          .then((c) => store.setExcludedName(entry.key, c.place.name, c))
+          .catch(() => {});
       }
     }
 
@@ -170,7 +186,7 @@ export function createWorkspaces({ apiKey, resolvePoi, storage, trips, discovery
     }
 
     return {
-      user, store, board, live, tools, metrics, clients, sentAt,
+      user, store, board, live, tools, metrics, clients, sentAt, selections,
       startDiscovery: discoveryApi.start,
       lastGeocoded: null,
       broadcast,

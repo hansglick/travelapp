@@ -27,6 +27,8 @@
     }
     /* Taille adaptée à la largeur de l'écran, pour que le titre reste centré */
     h1 { grid-column: 2; margin: 0; font-size: clamp(1.3rem, 6.2vw, 2.2rem); text-align: center; white-space: nowrap; }
+    /* Titre de la carte, plus long : un peu plus petit pour tenir sur une ligne entre les deux boutons */
+    header h1 { font-size: clamp(1.05rem, 4.9vw, 2rem); }
     /* Retour à l'écran zéro (flèche gris clair), à gauche ; le titre reste centré entre les deux */
     #back-btn {
       grid-column: 1; grid-row: 1; justify-self: start;
@@ -77,6 +79,11 @@
     }
     /* Grisé tant qu'aucune conversation n'est en cours (il ouvre quand même l'historique) */
     #chat-btn.idle { background: #4a4a4a; color: #b5b5b5; }
+    /* Pour l'instant : chat écrit seulement (sélections de restaurants), le haut-parleur est masqué et
+       le bouton chat prend sa place, au centre */
+    .voice-row #voice-btn, .voice-row #mute-btn { display: none; }
+    .voice-row #chat-btn { grid-column: 2; justify-self: center; width: 60px; height: 60px; }
+    .voice-row #chat-btn svg { width: 28px; height: 28px; }
 
     /* Chat par-dessus la carte : fond noir légèrement transparent, volet qui descend à l'ouverture */
     #chat {
@@ -101,6 +108,76 @@
     .chat-block { padding: 2px 0 2px 10px; border-left: 3px solid #e4572e; }
     .chat-block.question { border-left-color: #4a90d9; }
     .chat-block.action { border-left-color: #6b7280; }
+    .chat-block.discussion { border-left-color: #9b7fd4; }
+    /* Sélections : liste, en-tête, filtres à cocher, onglets de vue, fil coloré par type de demande */
+    .chat-head-title { flex: 1; min-width: 0; font-weight: 600; font-size: 0.95rem; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-new { flex: none; border: 0; background: #e4572e; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    .chat-new.big { display: block; margin: 18px auto 22px; padding: 14px 28px; border-radius: 26px; font-size: 1.05rem; box-shadow: 0 2px 10px rgba(228, 87, 46, 0.35); }
+    .chat-new.small { margin: 4px 0 8px; padding: 4px 11px; border-radius: 14px; font-size: 0.76rem; }
+    .chat-head-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; padding-top: 6px; }
+    .chat-head-col .chat-head-title { max-width: 100%; }
+    .chat-back { flex: none; width: 30px; height: 30px; border: 0; background: none; color: #fff; font-size: 26px; line-height: 26px; cursor: pointer; }
+    #chat-head { min-height: 46px; }
+    #chat-tabs { align-items: center; gap: 10px; }
+    .sel-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; }
+    .sel-count { flex: none; color: #9aa6b5; font-size: 0.8rem; }
+    .sel-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 10px; border: 0; border-bottom: 1px solid #262626; background: none; color: #fff; font: inherit; text-align: left; cursor: pointer; }
+    .sel-row:hover { background: rgba(255, 255, 255, 0.04); }
+    .sel-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .sel-title { font-weight: 600; }
+    .sel-sum { color: #9aa6b5; font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #chat-sub { flex: none; padding: 8px 12px 0; border-bottom: 1px solid #2a2a2a; }
+    #chat-sub[hidden] { display: none; }
+    #chat-sub > * { max-width: 640px; margin-left: auto; margin-right: auto; }
+    .filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 6px; border: 1px solid #444; border-radius: 16px; background: none; color: #9aa6b5; font: inherit; font-size: 0.8rem; cursor: pointer; }
+    .filter-chip.on { border-color: #e4572e; color: #fff; background: rgba(228, 87, 46, 0.14); }
+    .filter-chip.fixed { border-color: #6b7280; color: #fff; background: rgba(255, 255, 255, 0.06); }
+    .filter-chip:disabled { opacity: 0.55; cursor: default; }
+    .filter-box { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1.5px solid currentColor; border-radius: 4px; font-size: 0.7rem; line-height: 1; }
+    .filter-chip.fixed .filter-box { border: 0; font-size: 0.85rem; }
+    .view-tabs { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; }
+    .view-tab { flex: none; padding: 6px 0 8px; border: 0; border-bottom: 2px solid transparent; background: none; color: #9aa6b5; font: inherit; font-size: 0.82rem; cursor: pointer; }
+    .view-tab.active { color: #fff; border-bottom-color: #e4572e; }
+    .chat-block { margin: 0 0 12px; }
+    .chat-block.t-search { border-left-color: #e4572e; }
+    .chat-block.t-add { border-left-color: #2ecc71; }
+    .chat-block.t-remove { border-left-color: #e74c3c; }
+    .chat-block.t-question { border-left-color: #4a90d9; }
+    .chat-block.t-offscope, .chat-block.t-chat, .chat-block.t-pending { border-left-color: #6b7280; }
+    .msg-type { display: block; font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase; color: #8b949e; }
+    .chat-block.t-search .msg-type { color: #f0a35e; }
+    .chat-block.t-add .msg-type { color: #7ee2a8; }
+    .chat-block.t-remove .msg-type { color: #f1948a; }
+    .chat-block.t-question .msg-type { color: #8ec0f5; }
+    .chat-line.note { color: #8b949e; font-style: italic; font-size: 0.82rem; text-align: right; }
+    .excluded-group { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; font-weight: 600; }
+    /* Écran « Menus connus » */
+    .known-sub { margin: 0 0 10px; color: #9aa6b5; font-size: 0.8rem; text-align: center; }
+    .known-item { border-top: 1px solid #2a2a2a; }
+    .known-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 2px; border: 0; background: none; color: #fff; font: inherit; text-align: left; cursor: pointer; }
+    .known-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .known-name { font-weight: 600; }
+    .known-meta { color: #9aa6b5; font-size: 0.78rem; }
+    .known-arrow { flex: none; color: #9aa6b5; transition: transform 0.2s; }
+    .known-item.open .known-arrow { transform: rotate(90deg); }
+    .known-item .poi-menu-panel { margin: 0 0 10px; max-height: none; }
+    #known-body > .poi-menu-panel { margin: 0; max-height: none; border-top: 0; }
+    .chat-block.pending { border-left-color: #444; }
+    /* Conversation écrite : champ de saisie en bas du chat */
+    #chat-form { flex: none; display: flex; align-items: flex-end; gap: 8px; padding: 8px 10px 10px; border-top: 1px solid #2a2a2a; }
+    #chat-form[hidden] { display: none; }
+    #chat-text {
+      flex: 1; min-height: 40px; max-height: 120px; resize: none; padding: 9px 12px; border: 1px solid #3a3a3a; border-radius: 20px;
+      background: #141414; color: #fff; font: inherit; font-size: 16px; line-height: 1.35; outline: none; overflow-y: hidden;
+    }
+    #chat-text:focus { border-color: #e4572e; }
+    #chat-send {
+      flex: none; display: flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%;
+      background: #e4572e; color: #fff; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    #chat-send:disabled { background: #4a4a4a; color: #9a9a9a; cursor: default; }
     .chat-line { margin: 6px 0; font-size: 0.9rem; line-height: 1.4; }
     .chat-line.user { text-align: right; color: #fff; }
     .chat-line.guide { color: #b9c0c9; }
@@ -110,8 +187,21 @@
     .chat-synth-row { margin: 3px 0; font-size: 0.85rem; line-height: 1.4; color: #fff; }
     .chat-synth-label { color: #f0a35e; margin-right: 6px; }
     .chat-synth-label::after { content: " :"; }
+    /* Suivi de la recherche par plat (temporaire) */
+    .chat-trace { margin: 8px 0 4px; padding: 6px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); }
+    .chat-trace p { margin: 2px 0; font-size: 0.78rem; line-height: 1.35; color: #c9d1d9; }
+    .chat-trace .chat-trace-title { color: #9aa4af; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.7rem; }
+    .chat-trace .chat-trace-place { padding-left: 14px; font-size: 0.74rem; color: #8b949e; }
+    .chat-trace .chat-trace-place.kept { color: #7ee2a8; }
+    .chat-trace .chat-trace-place.dropped { color: #f0a35e; }
+    .reflection { margin: 4px 0 2px; }
+    .reflection-btn { padding: 2px 0; border: 0; background: none; color: #8ec0f5; font: inherit; font-size: 0.78rem; cursor: pointer; }
+    .reflection-box { margin-top: 4px; }
+    .reflection-box .chat-trace-title { margin-top: 8px; }
     .chat-sep { margin: 14px 0; border: 0; border-top: 1px solid #333; }
     .chat-empty { margin: 24px 0; color: #9aa6b5; text-align: center; font-style: italic; }
+    /* Partie d'une ligne pas encore écrite : à sa place, invisible */
+    .chat-unwritten { visibility: hidden; }
     #mute-btn.muted { border-color: #c0392b; background: #c0392b; }
     @keyframes voice-glow {
       0% { box-shadow: 0 0 0 0 rgba(228, 87, 46, 0.75), 0 0 14px 2px rgba(228, 87, 46, 0.6); }
@@ -219,6 +309,8 @@
     /* Note Google : sur la ligne des logos du bas, sans gras */
     .poi-rating { color: #fff; font-size: 0.85rem; font-weight: 400; white-space: nowrap; }
     .poi-card.place .poi-desc { margin: 8px 14px 0; min-height: 0; }
+    .poi-types { flex: none; margin: 6px 14px 0; font-size: 0.7rem; line-height: 1.4; text-align: center; color: #8b949e; }
+    .poi-type-main { color: #f0a35e; font-weight: 600; }
     /* Critère précis de la recherche (« dorade ») : confirmé par une source (vert) ou à vérifier (orange) */
     .poi-check { flex: none; margin: 6px 14px 0; font-size: 0.75rem; font-weight: 600; text-align: center; }
     .poi-check.ok { color: #7fd17f; }
@@ -247,6 +339,29 @@
     .discover-btn.busy::after { opacity: 0.85; animation: discover-spin 2s linear infinite reverse; }
     .discover-btn.pop { animation: discover-pop 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.3); }
     @keyframes discover-spin { to { transform: rotate(360deg); } }
+    /* Tête en ébullition (analyse web en cours) : même pastille, violette, bulles qui montent */
+    .brain-btn {
+      display: flex; align-items: center; justify-content: center;
+      width: 44px; height: 44px; margin: 16px 16px 0; padding: 0; border: 0; border-radius: 50%;
+      background: #7b4fd6; cursor: pointer; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+      animation: brain-pulse 1.6s ease-in-out infinite;
+    }
+    .brain-btn[hidden] { display: none; }
+    .brain-btn .brain-bubbles circle { animation: brain-bubble 1.4s ease-in infinite; transform-box: fill-box; }
+    .brain-btn .brain-bubbles .b2 { animation-delay: 0.45s; }
+    .brain-btn .brain-bubbles .b3 { animation-delay: 0.9s; }
+    @keyframes brain-bubble { 0% { transform: translateY(5px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(-4px); opacity: 0; } }
+    @keyframes brain-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(123, 79, 214, 0.6), 0 1px 5px rgba(0, 0, 0, 0.35); } 60% { box-shadow: 0 0 0 10px rgba(123, 79, 214, 0), 0 1px 5px rgba(0, 0, 0, 0.35); } }
+    /* Écran « Lieux écartés » */
+    .excluded-panel { max-height: 80vh; overflow-y: auto; }
+    .excluded-item { padding: 10px 0; border-top: 1px solid #2a2a2a; }
+    .excluded-item:first-of-type { border-top: 0; }
+    .excluded-name { margin: 0; font-weight: 600; color: #fff; }
+    .excluded-task { margin: 2px 0; font-size: 0.8rem; color: #9aa6b5; }
+    .excluded-reason { margin: 4px 0; font-size: 0.85rem; color: #e6edf6; }
+    .excluded-restore { margin-top: 4px; padding: 6px 12px; border: 1px solid #555; border-radius: 16px; background: none; color: #fff; font: inherit; font-size: 0.8rem; cursor: pointer; }
+    .excluded-restore:disabled { opacity: 0.5; cursor: default; }
+    @media (prefers-reduced-motion: reduce) { .brain-btn, .brain-btn .brain-bubbles circle { animation: none; } }
     @keyframes discover-pop { 0% { transform: scale(1); } 45% { transform: scale(1.25); } 75% { transform: scale(0.95); } 100% { transform: scale(1); } }
     @media (prefers-reduced-motion: reduce) {
       .discover-btn.busy::before, .discover-btn.busy::after { animation: none; }
@@ -254,8 +369,10 @@
 
     .poi-tools { position: relative; flex: none; display: flex; align-items: center; justify-content: center; gap: 22px; min-height: 22px; margin: 10px 14px 12px; }
     /* Poubelle : grise, tout à droite de la ligne d'icônes */
-    .poi-tools .poi-trash { position: absolute; right: 0; top: 50%; transform: translateY(-50%); color: #8a8a8a; }
-    .poi-tools .poi-trash:hover { color: #c8c8c8; }
+    /* Poubelle : seule sur sa ligne, sous les logos (et sous les volets horaires ou carte), à droite */
+    .poi-trash-row { flex: none; display: flex; justify-content: flex-end; margin: -6px 12px 8px; }
+    .poi-trash-row .poi-trash { display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; color: #8a8a8a; cursor: pointer; }
+    .poi-trash-row .poi-trash:hover { color: #c8c8c8; }
     .poi-tools a, .poi-tools button {
       display: flex; align-items: center; justify-content: center; padding: 0; border: 0;
       background: none; color: #fff; cursor: pointer;
@@ -273,6 +390,14 @@
     .poi-hours { flex: none; margin: -4px 14px 12px; padding-top: 8px; border-top: 1px solid #2a2a2a; }
     .poi-hours p { margin: 2px 0; color: #9aa6b5; font-size: 0.75rem; line-height: 1.4; text-align: center; }
     .poi-hours p.today { color: #fff; }
+    /* Carte du restaurant relevée sur le web : rubriques et plats, défile si elle est longue */
+    .poi-menu-panel { flex: none; max-height: 45vh; overflow-y: auto; margin: -4px 14px 12px; padding-top: 8px; border-top: 1px solid #2a2a2a; }
+    .poi-menu-panel p { margin: 2px 0; font-size: 0.78rem; line-height: 1.4; }
+    .poi-menu-panel .menu-meta { color: #8b949e; font-size: 0.72rem; text-align: center; margin-bottom: 6px; }
+    .poi-menu-panel .menu-group { margin-top: 8px; color: #f0a35e; font-weight: 600; }
+    .poi-menu-panel .menu-dishes { color: #e6edf6; }
+    .poi-menu-panel .menu-extra { margin-top: 8px; color: #9aa6b5; }
+    .poi-menu-panel .menu-source { color: #8ec0f5; text-decoration: underline; }
 
     /* Nom des lieux sur la carte (case « Labels » de la légende) : couleur du groupe, contour blanc */
     .poi-map-label {
@@ -947,7 +1072,7 @@
           <path d="M19.5 14h-11M12.5 9.5L8 14l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
-      <h1>Que fait-on ?</h1>
+      <h1>Que souhaites-tu manger ?</h1>
       <button id="menu-btn" aria-label="Menu" aria-haspopup="true">
         <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
           <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
@@ -963,11 +1088,16 @@
         <div id="chat-tabs" role="tablist"></div>
         <button id="chat-close" type="button" aria-label="Masquer la conversation">×</button>
       </div>
+      <div id="chat-sub" hidden></div>
       <div id="chat-body"></div>
+      <form id="chat-form" hidden autocomplete="off">
+        <textarea id="chat-text" rows="1" maxlength="500" placeholder="Écrivez au guide…" aria-label="Message au guide"></textarea>
+        <button id="chat-send" type="submit" aria-label="Envoyer"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 12l16-8-6 16-3-7z" fill="currentColor"/></svg></button>
+      </form>
     </section>
     <div id="list-handle">
       <div class="voice-row">
-      <button id="chat-btn" class="idle" type="button" aria-label="Afficher la conversation"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H10l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7.5 9.5h9M7.5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      <button id="chat-btn" type="button" aria-label="Mes sélections de restaurants"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H10l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7.5 9.5h9M7.5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
       <button id="mute-btn" type="button" aria-label="Couper le micro" aria-pressed="false" hidden></button>
       <button id="voice-btn" aria-label="Parler au guide" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1094,6 +1224,23 @@
     </div>
   </div>
 
+  <!-- Menus connus : les restaurants dont la carte est dans la base, à 30 min à pied au plus -->
+  <div id="known-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="known-title">
+    <div class="sheet-panel excluded-panel">
+      <h3 id="known-title">Menus connus</h3>
+      <p class="known-sub">Restaurants à 30 min à pied au plus, dont la carte a été relevée sur le web</p>
+      <div id="known-body"></div>
+    </div>
+  </div>
+
+  <!-- Restaurants retirés des sélections (par un filtre ou à la main) : on peut les y remettre -->
+  <div id="excluded-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="excluded-title">
+    <div class="sheet-panel excluded-panel">
+      <h3 id="excluded-title">Restaurants retirés</h3>
+      <div id="excluded-body"></div>
+    </div>
+  </div>
+
   <!-- Informations utiles (icône « i » de la carte) : quatre fiches en 2 × 2 -->
   <div id="useful-sheet" class="sheet-overlay" hidden role="dialog" aria-modal="true" aria-label="Informations utiles">
     <div class="sheet-panel useful-panel">
@@ -1138,6 +1285,8 @@
       <button type="button" id="menu-phrases" class="sheet-item">Guide de conversation</button>
       <button type="button" id="menu-facts" class="sheet-item">Fun facts</button>
       <button type="button" id="menu-news" class="sheet-item">Actualités</button>
+      <button type="button" id="menu-excluded" class="sheet-item">Restaurants retirés</button>
+      <button type="button" id="menu-known" class="sheet-item">Menus connus</button>
       <button type="button" id="menu-logout" class="sheet-item">Se déconnecter</button>
       <div class="sheet-actions"><button type="button" class="btn-secondary" data-close>Fermer</button></div>
     </div>
@@ -1344,14 +1493,15 @@
     // petite pastille portant le numéro de l'étape (blanc sur la même couleur). Étape cadenassée : la
     // pastille s'allonge et affiche un petit cadenas devant le numéro.
     // Lieu déjà visité : pastille gris foncé avec une coche blanche à la place du numéro.
-    // Analyse web de la recherche (check.status) : pending → deux arcs blancs tournent autour du rond ;
-    // confirmed → bague verte (répond au critère) ; maybe → bague orange (peut-être) ; rejected → lieu
-    // grisé (ne répond pas au critère)
-    const CHECK_RING = { confirmed: "#2ecc71", maybe: "#f39c12" };
+    // Analyse web de la recherche (check.status) : pending → icône normale (la tête en ébullition de
+    // la carte dit que l'analyse tourne) ; confirmed → bague verte (vérification stricte) ; maybe → lieu
+    // grisé (rien de sûr). Un lieu qui ne répond pas au critère est retiré de la carte (« Lieux écartés »).
+    const CHECK_RING = { confirmed: "#2ecc71" };
     const REJECTED_COLOR = "#8d8d8d";
+    const GREYED = new Set(["maybe", "rejected"]);
 
     function poiIcon(category, step, locked = false, visited = false, color = TASK_COLORS[0], check = null) {
-      if (check?.status === "rejected") color = REJECTED_COLOR;
+      if (GREYED.has(check?.status)) color = REJECTED_COLOR;
       const glyph = (CATEGORIES[category] || CATEGORIES.other).glyph.replaceAll("#e4572e", color);
       const number = (x) =>
         `<text x="${x}" y="16.5" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#fff">${step}</text>`;
@@ -1375,14 +1525,9 @@
       let around = "";
       if (CHECK_RING[check?.status]) {
         around = `<circle cx="22" cy="32" r="23.5" fill="none" stroke="${CHECK_RING[check.status]}" stroke-width="4"/>`;
-      } else if (check?.status === "pending") {
-        const spin = (dur, reverse) => `<animateTransform attributeName="transform" type="rotate" from="${reverse ? 360 : 0} 22 32" to="${reverse ? 0 : 360} 22 32" dur="${dur}s" repeatCount="indefinite"/>`;
-        around = `
-        <g>${spin(1.2)}<path d="M22 8.5a23.5 23.5 0 0 1 23.5 23.5" fill="none" stroke="#1f2937" stroke-width="6" stroke-linecap="round" opacity="0.55"/><path d="M22 8.5a23.5 23.5 0 0 1 23.5 23.5" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></g>
-        <g>${spin(1.8, true)}<path d="M22 55.5a23.5 23.5 0 0 1-23.5-23.5" fill="none" stroke="#1f2937" stroke-width="6" stroke-linecap="round" opacity="0.55"/><path d="M22 55.5a23.5 23.5 0 0 1-23.5-23.5" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/></g>`;
       }
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="74" height="66" viewBox="-6 -6 74 66">${around}
-        <g${check?.status === "rejected" ? ' opacity="0.6"' : ""}>
+        <g${GREYED.has(check?.status) ? ' opacity="0.6"' : ""}>
         <circle cx="22" cy="32" r="19" fill="${color}" stroke="#fff" stroke-width="3"/>
         <g transform="translate(10 20)" fill="#fff">${glyph}</g>${badge}</g></svg>`;
       return {
@@ -1545,6 +1690,8 @@
       close.addEventListener("click", onClose);
       head.append(title, close);
       card.append(head);
+      const typeLine = googleTypesLine(props);
+      if (typeLine) card.append(typeLine);
       if (props.description) card.append(el("p", "poi-desc", props.description));
       const checkLine = checkText(props.check);
       if (checkLine) card.append(el("p", `poi-check ${checkLine.kind}`, checkLine.text));
@@ -1561,6 +1708,7 @@
         props.hours.forEach((day, i) => panel.append(el("p", i === today ? "today" : null, day)));
         tools.after(panel);
         const toggle = () => {
+          card.querySelectorAll(".poi-menu-panel").forEach((p) => { p.hidden = true; });
           panel.hidden = !panel.hidden;
           // La fiche grandit vers le haut : la carte se décale pour qu'elle reste entièrement visible
           requestAnimationFrame(() => {
@@ -1598,6 +1746,20 @@
         });
         if (priceTag) tools.insertBefore(call, priceTag);
         else tools.append(call);
+        // Carte du restaurant relevée par l'analyse web : l'icône s'ajoute seulement s'il y en a une
+        const menuBtn = el("button", "poi-menu");
+        menuBtn.type = "button";
+        menuBtn.innerHTML = MENU_SVG;
+        menuBtn.setAttribute("aria-label", `Carte de ${props.name}`);
+        // La carte s'ouvre en plein écran (la bulle est trop petite pour une carte complète)
+        getMenu(props.placeId).then((menu) => {
+          if (!menu) return;
+          // Après le calendrier, avant téléphone, prix et photos
+          const next = tools.querySelector(".poi-phone, .poi-price, .poi-photos");
+          if (next) tools.insertBefore(menuBtn, next);
+          else tools.append(menuBtn);
+          menuBtn.addEventListener("click", () => openRestaurantMenu(props.name, props.placeId));
+        });
         const show = el("button", "poi-photos");
         show.type = "button";
         show.innerHTML = PHOTOS_WHITE_SVG;
@@ -1611,10 +1773,10 @@
             call.setAttribute("aria-label", `Appeler ${props.name} : ${phone}`);
           } else call.remove();
           if (!photos.length) show.remove();
-          if (!tools.childElementCount && !props.id) tools.remove();
+          if (!tools.childElementCount) tools.remove();
         });
       }
-      // Poubelle (grise, à droite) : le lieu quitte la carte et va dans la corbeille
+      // Poubelle (grise, en bas à droite, sur sa propre ligne) : le restaurant quitte sa sélection
       if (props.id) {
         const trash = el("button", "poi-trash");
         trash.type = "button";
@@ -1625,9 +1787,82 @@
           onClose();
           api("/api/pois/remove", { id: props.id });
         });
-        tools.append(trash);
+        const trashRow = el("div", "poi-trash-row");
+        trashRow.append(trash);
+        card.append(trashRow);
       }
       return card;
+    }
+
+    // Carte d'un restaurant relevée sur le web (base commune) ; null si rien de récent. Une absence
+    // n'est pas gardée : l'analyse web peut relever la carte entre-temps.
+    // Relue à chaque fois : une vérification web peut l'avoir complétée entre-temps
+    function getMenu(placeId) {
+      return fetch(`/api/menu?place=${encodeURIComponent(placeId)}`)
+        .then((r) => (r.ok ? r.json() : {}))
+        .then((data) => data.menu || null)
+        .catch(() => null);
+    }
+
+    // Carte d'un restaurant en plein écran (icône de la fiche) : même écran que « Menus connus »
+    async function openRestaurantMenu(name, placeId) {
+      knownTitle.textContent = name || "Carte du restaurant";
+      knownSub.hidden = true;
+      knownBody.replaceChildren(el("p", "chat-empty", "Chargement de la carte…"));
+      openSheet(knownSheet);
+      const menu = await getMenu(placeId);
+      if (!menu) {
+        knownBody.replaceChildren(el("p", "chat-empty", "Pas de carte relevée pour ce restaurant."));
+        return;
+      }
+      const panel = menuPanel(menu);
+      panel.hidden = false;
+      knownBody.replaceChildren(panel);
+    }
+
+    const MENU_SOURCES = { menu: "d'après la carte du restaurant", fiche: "d'après une fiche du restaurant", avis: "d'après des avis" };
+
+    // Volet de la carte : date et source du relevé, plats par rubrique, régimes et critères vérifiés
+    function menuPanel(menu) {
+      const panel = el("div", "poi-menu-panel");
+      panel.hidden = true;
+      const when = new Date(menu.updatedAt).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+      panel.append(el("p", "menu-meta", [`Relevé sur le web en ${when}`, MENU_SOURCES[menu.source]].filter(Boolean).join(", ")));
+      for (const group of menu.groups) {
+        const dishes = el("p", "menu-dishes");
+        group.dishes.forEach((name, i) => {
+          if (i) dishes.append(" · ");
+          const url = menu.links?.[name];
+          if (!url) return dishes.append(name);
+          // Plat cité ailleurs que sur la carte : lien vers la page qui le mentionne
+          const a = el("a", "menu-source", name);
+          a.href = url;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.title = `Cité par ${new URL(url).hostname}`;
+          dishes.append(a);
+        });
+        panel.append(el("p", "menu-group", group.name), dishes);
+      }
+      if (menu.diets.length) panel.append(el("p", "menu-extra", `Signalé : ${menu.diets.join(" · ")}`));
+      if (menu.verdicts.length) panel.append(el("p", "menu-extra", `Vérifié : ${menu.verdicts.map((v) => `${v.label.toLowerCase()} ${v.answer === "yes" ? "✓" : "✗"}`).join(" · ")}`));
+      return panel;
+    }
+
+    // Logo « carte du restaurant » : une carte pliée, couverts et lignes de plats
+    const MENU_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="4" y="2.5" width="16" height="19" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 6.5v4M7.3 6.5v2.2a1.2 1.2 0 0 0 2.4 0V6.5M8.5 10.5v3.5M14.5 6.5c1.3.6 1.3 3.4 0 4.2v3.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M7.5 17.5h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+
+    // Types Google du lieu, entre le nom et l'adresse : le principal, puis les secondaires (sans les
+    // types génériques « point_of_interest », « establishment », « food »)
+    const GENERIC_TYPES = new Set(["point_of_interest", "establishment", "food"]);
+    function googleTypesLine(props) {
+      const secondary = (props.types || []).filter((t) => t !== props.primaryType && !GENERIC_TYPES.has(t));
+      if (!props.primaryType && !secondary.length) return null;
+      const line = el("p", "poi-types");
+      if (props.primaryType) line.append(el("span", "poi-type-main", props.primaryType));
+      if (secondary.length) line.append(el("span", "poi-type-more", `${props.primaryType ? " · " : ""}${secondary.join(", ")}`));
+      line.title = "Types Google : principal, puis secondaires";
+      return line;
     }
 
     const TRASH_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1889,6 +2124,8 @@
         else if (message.type === "itinerary") onItinerary(message.current);
         else if (message.type === "voice") onVoiceServerState(message);
         else if (message.type === "agent") onAgentState(message.state);
+        else if (message.type === "text") onTextServerState(message);
+        else if (message.type === "discussion") onDiscussion(message.items);
       };
     }
 
@@ -1931,7 +2168,7 @@
     function checkText(check) {
       if (!check) return null;
       const label = check.label || "Critère";
-      if (check.status === "pending") return { kind: "pending", text: `Analyse en cours : ${label.toLowerCase()}…` };
+      if (check.status === "pending") return { kind: "pending", text: `Analyse web en cours : ${label.toLowerCase()}…` };
       if (check.status === "confirmed") return { kind: "ok", text: `✓ ${check.note || label}` };
       if (check.status === "maybe") return { kind: "todo", text: `⚠ ${check.note || `${label} non confirmé, à vérifier sur place`}` };
       if (check.status === "rejected") return { kind: "no", text: `✗ ${check.note || `Ne correspond pas : ${label.toLowerCase()}`}` };
@@ -1960,6 +2197,9 @@
         rating: p.place?.rating ?? null,
         priceLevel: p.place?.priceLevel || null,
         hours: p.place?.hours || null,
+        // Types Google (mémoire seulement) : principal et secondaires, affichés sous le nom
+        primaryType: p.place?.primaryType || null,
+        types: p.place?.types || [],
         id: p.id,
         placeId: p.place?.placeId,
         special: p.special || null,
@@ -1973,6 +2213,9 @@
 
     function syncPois(state) {
       onPractical(state.practical); // infos pratiques : mises à jour sans changer la version de la liste
+      onAnalysis(state.analysis || []); // analyses web en cours : sans changer la version non plus
+      onExcluded(state.excluded || []);
+      onSelections(state.selections || []);
       if (state.version <= lastStateVersion) return; // message plus ancien que l'état affiché
       lastStateVersion = state.version;
       // Renumérotation demandée (suppression, cadenas) : l'ordre affiché sera renvoyé au serveur
@@ -2070,6 +2313,8 @@
     // Titre d'un groupe : celui de sa tâche la plus récente (une tâche complétée garde la couleur)
     function groupTitle(key) {
       if (key === "autres") return "Autres lieux";
+      const sel = selections.find((s) => s.colorIndex === key);
+      if (sel) return sel.title;
       const same = agentTasks.filter((t) => t.colorIndex === key);
       const task = same.find((t) => !t.replacedBy) || same[0];
       return task?.groupName || placesName(task?.title) || "Lieux";
@@ -2136,13 +2381,8 @@
 
     // kind : type de la tâche lancée par le bouton ; group() : couleur du groupe affiché ;
     // shown() : des lieux du groupe sont sur la carte
-    const MAP_BUTTONS = {
-      discover: {
-        svg: DISCOVER_SVG, label: "Découverte de la ville", api: "/api/discover", practicalKey: "discovery",
-        group: () => taskGroup("discover"),
-        shown: (group) => pois.some((p) => p.colorIndex === group),
-      },
-    };
+    // Pour l'instant (restaurants seulement) : pas de bouton « Découverte de la ville »
+    const MAP_BUTTONS = {};
     for (const b of Object.values(MAP_BUTTONS)) Object.assign(b, { btn: null, state: null });
 
     function taskGroup(kind) {
@@ -2150,7 +2390,38 @@
       return task ? task.colorIndex : null;
     }
 
+    // Tête en ébullition : en haut à droite de la carte pendant une analyse web (la carte dépliée passe
+    // juste en dessous) ; un toucher dit où en est l'analyse
+    const BRAIN_SVG = `<svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true">
+      <path d="M9 27v-4.2c-2.6-1.6-4.2-4.4-4.2-7.6 0-5.4 4.4-9.2 9.8-9.2 5 0 9 3.4 9.6 8.1l2.1 3.6c.3.5 0 1.1-.6 1.2l-1.6.2v2.6c0 1.3-1 2.3-2.3 2.3h-2.4V27z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M11.5 14.2c0-1.6 1.3-2.8 2.8-2.8.5-1.2 1.6-1.9 2.9-1.9 1.8 0 3.2 1.4 3.2 3.2 1.2.3 2 1.3 2 2.6 0 1.5-1.2 2.7-2.7 2.7h-6c-1.2 0-2.2-1-2.2-2.2 0-.6.3-1.2.7-1.6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+      <g class="brain-bubbles" fill="#fff"><circle class="b1" cx="12" cy="6" r="1.4"/><circle class="b2" cx="16.5" cy="4.5" r="1.1"/><circle class="b3" cx="20.5" cy="6" r="1.3"/></g>
+    </svg>`;
+    let brainBtn = null;
+    let analyses = [];
+
+    function createBrainButton() {
+      brainBtn = el("button", "brain-btn");
+      brainBtn.type = "button";
+      brainBtn.innerHTML = BRAIN_SVG;
+      brainBtn.hidden = true;
+      brainBtn.setAttribute("aria-label", "Analyse web en cours");
+      brainBtn.addEventListener("click", () => {
+        const text = analyses.map((a) => `« ${a.title} » : ${a.done} lieu${a.done > 1 ? "x" : ""} vérifié${a.done > 1 ? "s" : ""} sur ${a.total} (${a.label.toLowerCase()})`).join(" · ");
+        showVoiceStatus(text ? `Analyse web — ${text}` : "Aucune analyse en cours");
+      });
+      map.controls[google.maps.ControlPosition.RIGHT_TOP].insertAt(0, brainBtn);
+    }
+
+    function onAnalysis(list) {
+      analyses = list;
+      if (!brainBtn) return;
+      brainBtn.hidden = !analyses.length;
+      brainBtn.title = analyses.length ? "Analyse web en cours : toucher pour l'avancement" : "";
+    }
+
     function createMapButtons() {
+      createBrainButton();
       for (const [kind, b] of Object.entries(MAP_BUTTONS)) {
         b.btn = el("button", "discover-btn");
         b.btn.type = "button";
@@ -4095,6 +4366,114 @@
       openPracticalSheet("news");
     });
 
+    // ---- Lieux écartés par l'analyse web (ne répondent pas au critère vérifié) ----
+    const excludedSheet = document.getElementById("excluded-sheet");
+    const excludedBody = document.getElementById("excluded-body");
+    let excludedList = [];
+
+    function onExcluded(list) {
+      excludedList = list;
+      if (!excludedSheet.hidden) renderExcluded();
+    }
+
+    // Par sélection, dans l'ordre des sélections : retirés par un filtre (avec le filtre responsable) ou
+    // à la main ; « Remettre dans la sélection » en fait un ajout manuel
+    function renderExcluded() {
+      const groups = selections.filter((s) => s.removed?.length);
+      if (!groups.length) {
+        excludedBody.replaceChildren(el("p", "chat-empty", "Aucun restaurant retiré pour le moment."));
+        return;
+      }
+      excludedBody.replaceChildren(...groups.flatMap((sel) => [restoredGroupTitle(sel), ...sel.removed.map((e) => {
+        const item = el("div", "excluded-item");
+        const when = new Date(e.at).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+        item.append(
+          el("p", "excluded-name", e.name || "Nom en cours de chargement…"),
+          el("p", "excluded-task", `${e.kind === "manual" ? "Retiré à la main" : `Filtre « ${e.filter} »`} · ${when}`),
+          el("p", "excluded-reason", e.reason),
+        );
+        const back = el("button", "excluded-restore", "Remettre dans la sélection");
+        back.type = "button";
+        back.addEventListener("click", async () => {
+          back.disabled = true;
+          const response = await api("/api/selections/restore", { id: sel.id, placeId: e.placeId });
+          if (!response?.ok) {
+            back.disabled = false;
+            const data = await response?.json().catch(() => null);
+            showVoiceStatus(data?.error || "Impossible de remettre ce lieu.", { error: true });
+          }
+        });
+        item.append(back);
+        return item;
+      })]));
+    }
+
+    function restoredGroupTitle(sel) {
+      const title = el("div", "excluded-group");
+      const dot = el("span", "sel-dot");
+      dot.style.background = taskColor(sel.colorIndex);
+      title.append(dot, el("span", null, sel.title));
+      return title;
+    }
+
+    // ---- Menus connus : consulter la base des menus autour de soi ----
+    const knownSheet = document.getElementById("known-sheet");
+    const knownBody = document.getElementById("known-body");
+    const knownTitle = document.getElementById("known-title");
+    const knownSub = knownSheet.querySelector(".known-sub");
+    const KNOWN_SOURCES = { menu: "carte du restaurant", fiche: "fiche", avis: "avis" };
+
+    async function openKnownMenus() {
+      knownTitle.textContent = "Menus connus";
+      knownSub.hidden = false;
+      knownBody.replaceChildren(el("p", "chat-empty", "Recherche des menus autour de toi…"));
+      openSheet(knownSheet);
+      const response = await fetch("/api/menus/nearby").catch(() => null);
+      const data = response?.ok ? await response.json() : null;
+      if (!data) {
+        knownBody.replaceChildren(el("p", "chat-empty", "La base des menus ne répond pas pour le moment."));
+        return;
+      }
+      if (!data.located) {
+        knownBody.replaceChildren(el("p", "chat-empty", "Ta position n'est pas encore connue : choisis d'abord ton point de départ."));
+        return;
+      }
+      if (!data.restaurants.length) {
+        knownBody.replaceChildren(el("p", "chat-empty", "Aucun menu connu à moins de 30 minutes à pied pour l'instant : ils s'ajoutent à chaque vérification web."));
+        return;
+      }
+      knownBody.replaceChildren(...data.restaurants.map((m) => {
+        const item = el("div", "known-item");
+        const row = el("button", "known-row");
+        row.type = "button";
+        const text = el("span", "known-text");
+        const when = new Date(m.updatedAt).toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+        text.append(
+          el("span", "known-name", m.name || "Restaurant sans nom"),
+          el("span", "known-meta", [`${m.minutes} min à pied`, `${m.dishes} plat${m.dishes > 1 ? "s" : ""}`, KNOWN_SOURCES[m.source], `relevé en ${when}`].filter(Boolean).join(" · ")),
+        );
+        row.append(text, el("span", "known-arrow", "›"));
+        const panel = menuPanel(m);
+        row.addEventListener("click", () => {
+          panel.hidden = !panel.hidden;
+          item.classList.toggle("open", !panel.hidden);
+        });
+        item.append(row, panel);
+        return item;
+      }));
+    }
+
+    document.getElementById("menu-known").addEventListener("click", () => {
+      closeSheet(menuSheet);
+      openKnownMenus();
+    });
+
+    document.getElementById("menu-excluded").addEventListener("click", () => {
+      closeSheet(menuSheet);
+      renderExcluded();
+      openSheet(excludedSheet);
+    });
+
     usefulSheet.querySelectorAll(".useful-tile").forEach((tile) => tile.addEventListener("click", () => {
       closeSheet(usefulSheet);
       openPracticalSheet(tile.dataset.sheet);
@@ -4367,176 +4746,313 @@
       if (e.key === "ArrowLeft") showPhoto(carouselIndex - 1, -1);
     });
 
-    // ---- Chat : la conversation avec le guide, par-dessus la carte ----
-    // Construit à partir des tâches (demande, questions du guide, réponses, synthèse, résultat) : un
-    // onglet par type de tâche, affiché dès qu'il en existe une. S'ouvre à chaque connexion vocale
-    // (volet qui descend) ; la croix le masque pour toute la conversation, le bouton chat sous la carte
-    // le rouvre. Tant qu'il est ouvert, la carte n'est pas accessible.
+    // ---- Chat : les sélections de restaurants, par-dessus la carte ----
+    // Vue « liste » : une ligne par sélection (couleur, titre, filtres, nombre de restaurants) et le
+    // bouton « Nouvelle sélection ». Vue « sélection » : ses filtres en cases à cocher (la distance se
+    // modifie par un message, elle ne se décoche pas), des onglets qui trient le fil (Tout, Recherche,
+    // Ajouts, Suppressions, Questions) et le champ de saisie. Le modèle classe lui-même chaque message
+    // (selections.mjs) ; le chat ne fait qu'afficher. Tant qu'il est ouvert, la carte n'est pas accessible.
     const chatEl = document.getElementById("chat");
-    const chatTabsEl = document.getElementById("chat-tabs");
+    const chatHeadEl = document.getElementById("chat-tabs");
+    const chatSubEl = document.getElementById("chat-sub");
     const chatBodyEl = document.getElementById("chat-body");
     const chatBtn = document.getElementById("chat-btn");
-    const CHAT_TABS = [
-      { id: "search", label: "Requêtes" },
-      { id: "info", label: "Questions" },
-      { id: "locate", label: "Lieux placés" },
-      { id: "self", label: "Ma position" },
-      { id: "quick", label: "Organisation" },
-    ];
-    let chatTab = "search";
-    let chatHiddenByUser = false;
-    const chatSeen = new Map();   // tâche → empreinte déjà affichée (pour les pastilles « nouveau »)
-    const chatUnread = new Set(); // onglets avec du nouveau
+    const chatForm = document.getElementById("chat-form");
+    const chatText = document.getElementById("chat-text");
+    // Types de demandes : couleur du fil et onglets de vue
+    const MESSAGE_TYPES = {
+      search: "Recherche", add: "Ajout", remove: "Suppression", question: "Question", offscope: "Hors sujet", chat: "Échange",
+    };
+    const VIEWS = [["all", "Tout"], ["search", "Recherche"], ["add", "Ajouts"], ["remove", "Suppressions"], ["question", "Questions"]];
+    let selections = [];
+    let openSelection = null;     // sélection ouverte (vue « sélection »), sinon la liste
+    let chatView = "all";
+    let chatPending = null;       // { id, text } : message envoyé, pas encore traité
 
+    // Clavier du téléphone ouvert : le chat se cale au-dessus, champ de saisie toujours visible
     function placeChat() {
       const r = document.getElementById("map").getBoundingClientRect();
-      Object.assign(chatEl.style, { top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${r.height}px` });
+      const vv = window.visualViewport;
+      const height = vv ? Math.min(r.height, vv.offsetTop + vv.height - r.top - 8) : r.height;
+      Object.assign(chatEl.style, { top: `${r.top}px`, left: `${r.left}px`, width: `${r.width}px`, height: `${Math.max(160, height)}px` });
     }
+    window.visualViewport?.addEventListener("resize", () => {
+      if (chatEl.hidden) return;
+      placeChat();
+      chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
+    });
     window.addEventListener("resize", () => { if (!chatEl.hidden) placeChat(); });
 
     function openChat() {
       placeChat();
+      chatInstant = true;
       chatEl.hidden = false;
       requestAnimationFrame(() => chatEl.classList.add("open"));
-      chatUnread.delete(chatTab);
       renderChat();
     }
 
     function closeChat() {
       chatEl.classList.remove("open");
+      chatText.blur();
       setTimeout(() => { if (!chatEl.classList.contains("open")) chatEl.hidden = true; }, 380);
     }
 
-    document.getElementById("chat-close").addEventListener("click", () => {
-      chatHiddenByUser = true;
-      closeChat();
-    });
+    document.getElementById("chat-close").addEventListener("click", closeChat);
     chatBtn.addEventListener("click", () => {
-      chatHiddenByUser = false;
+      if (startMode === "awaiting") {
+        showVoiceStatus("Choisis d'abord ton point de départ : touche la carte, ou « Ma position ».", { error: true });
+        return;
+      }
       openChat();
     });
 
-    // Connexion vocale établie : le chat s'ouvre, sauf s'il a été masqué pendant cette conversation
-    function chatOnConnect() {
-      chatHiddenByUser = false;
-      openChat();
+    // Ancienne conversation orale ou écrite (masquée pour l'instant) : rien à afficher
+    function chatOnConnect() { openChat(); }
+    function onTextServerState() {}
+    function onDiscussion() {}
+
+    // État du serveur : sélections, filtres, fils de demandes, restaurants retirés
+    function onSelections(list) {
+      selections = list || [];
+      refreshReflections();
+      if (openSelection && !selections.some((s) => s.id === openSelection)) openSelection = null;
+      renderChat();
+      chatPrimed = true; // l'historique s'affiche d'un coup, la suite s'écrira
+      if (!excludedSheet.hidden) renderExcluded();
     }
 
-    const chatTasks = () => agentTasks.filter((t) => CHAT_TABS.some((tab) => tab.id === t.kind));
-    const poiLabel = (id) => {
-      const poi = pois.find((p) => p.id === id);
-      return poi ? `${poi.number ? `n° ${poi.number} ` : ""}${poi.props.name}` : null;
-    };
-    const line = (cls, text) => el("p", `chat-line ${cls}`, text);
-
-    // Une recherche et ses précisions (tâches qui la remplacent ou la complètent) forment un bloc
-    function searchChains(tasks) {
-      const byId = new Map(tasks.map((t) => [t.id, t]));
-      const rootOf = (t) => (t.replaces && byId.get(t.replaces) ? rootOf(byId.get(t.replaces)) : t);
-      const chains = new Map();
-      for (const t of [...tasks].sort((a, b) => a.createdAt - b.createdAt)) {
-        const root = rootOf(t);
-        if (!chains.has(root.id)) chains.set(root.id, []);
-        chains.get(root.id).push(t);
+    async function newSelection() {
+      const response = await api("/api/selections", {});
+      const data = await response?.json().catch(() => null);
+      if (!data?.id) {
+        showVoiceStatus("Impossible de créer la sélection pour le moment.", { error: true });
+        return;
       }
-      return [...chains.values()];
+      openSelection = data.id;
+      chatView = "all";
+      renderChat();
+      chatText.focus();
     }
 
-    function searchBlock(chain) {
-      const root = chain[0], last = chain[chain.length - 1];
-      const block = el("div", "chat-block search");
-      block.dataset.key = root.id;
-      // Définition : la demande, les questions du guide et les réponses
-      block.append(line("user", root.utterance || root.request));
-      for (const d of root.dimensions || []) {
-        if (!["asked", "answered", "skipped", "unanswered"].includes(d.status)) continue;
-        block.append(line("guide", d.question));
-        if (d.status === "answered") block.append(line("user", d.value));
-        if (d.status === "skipped") block.append(line("user", "Peu importe"));
+    // ---- Réflexion : la logique suivie pour une demande de recherche ----
+    // Dépliée à la demande ; relue tant qu'elle est ouverte (vérifications en cours). En mémoire du
+    // serveur seulement : après un redémarrage, « non disponible ».
+    const openReflections = new Set();
+    const reflections = new Map(); // demande → réflexion reçue (null : non disponible)
+    let reflectionTimer = null;
+
+    const hasReflection = (m) => m.type === "search" && (m.user || /^Filtre/.test(m.note || ""));
+
+    async function loadReflection(selId, msgId) {
+      const response = await fetch(`/api/selections/reflection?id=${encodeURIComponent(selId)}&message=${encodeURIComponent(msgId)}`).catch(() => null);
+      const data = response?.ok ? await response.json().catch(() => null) : null;
+      reflections.set(msgId, data?.reflection || null);
+      renderChat();
+    }
+
+    // Sélection mise à jour : les réflexions ouvertes sont relues (au plus une fois par seconde)
+    function refreshReflections() {
+      if (!openReflections.size || reflectionTimer) return;
+      reflectionTimer = setTimeout(() => {
+        reflectionTimer = null;
+        for (const key of openReflections) {
+          const [selId, msgId] = key.split("|");
+          loadReflection(selId, msgId);
+        }
+      }, 1000);
+    }
+
+    function reflectionToggle(sel, m) {
+      const key = `${sel.id}|${m.id}`;
+      const open = openReflections.has(key);
+      const wrap = el("div", "reflection");
+      const button = el("button", "reflection-btn", open ? "Réflexion ▾" : "Réflexion ▸");
+      button.type = "button";
+      button.addEventListener("click", () => {
+        if (openReflections.has(key)) openReflections.delete(key);
+        else {
+          openReflections.add(key);
+          loadReflection(sel.id, m.id);
+        }
+        renderChat();
+      });
+      wrap.append(button);
+      if (open) wrap.append(reflectionBox(reflections.get(m.id), reflections.has(m.id)));
+      return wrap;
+    }
+
+    const pct = (x) => `${Math.round(x * 100)} %`;
+    const band = (x) => (x >= 0.7 ? "très probable" : x >= 0.4 ? "probable" : x >= 0.2 ? "possible" : "sous le seuil (20 %)");
+    const meters = (m) => (m == null ? "" : m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1).replace(".", ",")} km`);
+    const STATUS = { confirmed: "confirmé", maybe: "à vérifier", rejected: "non → retiré", pending: "en cours" };
+
+    function reflectionBox(data, loaded) {
+      const box = el("div", "chat-trace reflection-box");
+      const p = (text, cls = null) => box.append(el("p", cls, text));
+      const title = (text) => p(text, "chat-trace-title");
+      if (!loaded) {
+        p("Chargement…");
+        return box;
       }
-      for (const t of chain.slice(1)) if (t.utterance) block.append(line("user", t.utterance));
-      if (last.status === "clarifying") return block;
-      // Synthèse : ce qui part chez Google (recherche globale) et ce qui se vérifie ailleurs (affinée)
-      const g = last.google;
-      const minutes = (last.criteria || []).find((c) => c.type === "distance" && c.maxWalkMinutes)?.maxWalkMinutes;
-      const global = [
-        last.groupName || g?.words?.[0] || last.title,
-        `${minutes || 15} min à pied`,
-        g?.openNow ? "ouvert maintenant" : null,
-        g?.minRating ? "bien noté" : null,
-        g?.cheap ? "pas cher" : null,
-      ].filter(Boolean).join(" · ");
-      const synth = el("div", "chat-synth");
-      const row = (label, value) => {
-        const p = el("p", "chat-synth-row");
-        p.append(el("span", "chat-synth-label", label), el("span", null, value));
-        return p;
-      };
-      synth.append(row("Recherche globale", global));
-      if (g?.check) synth.append(row("Recherche affinée", g.check.kind === "reputation" ? "lieux recommandés" : g.check.question));
-      // Résultat : lieux trouvés, puis l'analyse web
-      let result;
-      if (["pending", "running"].includes(last.status)) result = "Recherche en cours…";
-      else if (last.status === "failed" || last.status === "cancelled") result = last.status === "failed" ? "La recherche n'a pas abouti." : "Recherche annulée.";
-      else {
-        const found = pois.filter((p) => !p.special && Number.isInteger(last.colorIndex) && p.colorIndex === last.colorIndex);
-        result = `${found.length} lieu${found.length > 1 ? "x" : ""} trouvé${found.length > 1 ? "s" : ""}`;
-        const checks = found.map((p) => p.check?.status).filter(Boolean);
-        if (checks.includes("pending")) result += " · analyse en cours…";
-        else if (checks.length) {
-          const n = (s) => checks.filter((x) => x === s).length;
-          const label = (g?.check?.label || "critère").toLowerCase();
-          result += [` · ${n("confirmed")} ✓ ${label}`, n("maybe") ? `${n("maybe")} à vérifier` : null, n("rejected") ? `${n("rejected")} écarté${n("rejected") > 1 ? "s" : ""}` : null].filter(Boolean).join(" · ");
+      if (!data) {
+        p("Réflexion non disponible : elle n'est gardée que tant que le serveur tourne, pour les demandes faites depuis.");
+        return box;
+      }
+      title("1. Ce que le modèle a compris");
+      data.understood.forEach((l) => p(`· ${l}`));
+      title("2. Recherche Google");
+      const s = data.search;
+      if (!s) p("Pas de recherche : la distance est demandée d'abord.");
+      else if (s.mode === "reused") p(`Pas de nouvelle recherche Google : les filtres sont appliqués aux ${s.count} lieux déjà trouvés.`);
+      else if (s.mode === "dish" && s.trace) dishTrace(s.trace, p);
+      else if (s.mode === "types" && s.trace) {
+        if (s.dishTrace?.error) p(`Recherche par plat impossible (${s.dishTrace.error}).`);
+        p(`Recherche par type : famille ${s.trace.family.join(", ") || "tous les restaurants"} ; formulations ${s.trace.words.map((w) => `« ${w} »`).join(", ")}`);
+        p(`${s.trace.places.length} lieux renvoyés par Google :`);
+        s.trace.places.forEach((x) => p(`#${x.id.slice(-6)} ${x.name} · ${x.primaryType || "?"} · ${meters(x.distance)} · ${x.rank} → ${x.status}`, `chat-trace-place ${x.status === "retenu" ? "kept" : "dropped"}`));
+      } else p("Recherche en cours…");
+      if (s?.kept) p(`(${s.kept})`);
+      (data.widenings || []).forEach((w, i) => {
+        title(`Rattrapage ${i + 1} : ${w.reason}`);
+        dishTrace(w.trace, p, true);
+        p(`→ ${w.added} nouveau${w.added > 1 ? "x" : ""} lieu${w.added > 1 ? "x" : ""} ajouté${w.added > 1 ? "s" : ""} à la sélection`);
+      });
+      title("3. Vérification dans les menus et sur le web");
+      if (!data.checks.length) p(data.busy ? "En cours…" : "Aucune vérification pour cette demande.");
+      data.checks.forEach((c) => p(`${c.name} — ${c.label} : ${STATUS[c.status] || c.status} (${c.source})${c.note ? ` — ${c.note}` : ""}`, `chat-trace-place ${c.status === "confirmed" ? "kept" : c.status === "rejected" ? "dropped" : "seen"}`));
+      if (data.busy && data.checks.length) p("Vérifications en cours…");
+      return box;
+    }
+
+    // Recherche par plat : distribution, puis chaque bloc de types et ses lieux
+    function dishTrace(t, p, onlyBlocks = false) {
+      if (!onlyBlocks) {
+        p(`Plat « ${t.dish} » · distribution pour : ${t.country || "pays inconnu"}`);
+        if (t.error && !t.top) { p(t.error); return; }
+        if (t.top) {
+          p("Distribution (10 types les plus probables) :");
+          t.top.forEach(([type, x]) => p(`  ${type} : ${pct(x)} · ${band(x)}`, "chat-trace-place seen"));
         }
       }
-      synth.append(row("Résultat", result));
-      block.append(synth);
-      return block;
+      const blocks = new Map();
+      for (const step of t.steps || []) {
+        if (!blocks.has(step.block)) blocks.set(step.block, []);
+        blocks.get(step.block).push(step);
+      }
+      for (const [n, steps] of blocks) {
+        p(`Bloc ${n} : ${steps.map((st) => `${st.type} (${pct(st.p)})`).join(", ")}`);
+        for (const st of steps) {
+          p(`${st.type} : ${st.inArea} dans le périmètre${st.duplicates ? `, dont ${st.duplicates} déjà trouvés` : ""}${st.onMap ? `, dont ${st.onMap} déjà dans la sélection` : ""} → ${st.added} retenu${st.added > 1 ? "s" : ""}`);
+          (st.places || []).forEach((x) => p(`#${x.id.slice(-6)} ${x.name || ""} · ${x.primaryType || "?"} · ${meters(x.distance)} · ${pct(x.p || 0)} → ${x.status}`, `chat-trace-place ${x.status === "retenu" ? "kept" : x.status.startsWith("écarté") ? "dropped" : "seen"}`));
+        }
+      }
+      if (t.byName) {
+        p(`Recherche du mot « ${t.dish} » : ${t.byName.inArea} dans le périmètre → ${t.byName.added} retenu${t.byName.added > 1 ? "s" : ""}`);
+        (t.byName.places || []).forEach((x) => p(`#${x.id.slice(-6)} ${x.name || ""} · ${x.primaryType || "?"} · ${meters(x.distance)} → ${x.status}`, `chat-trace-place ${x.status === "retenu" ? "kept" : x.status.startsWith("écarté") ? "dropped" : "seen"}`));
+      }
+      if (!onlyBlocks && Number.isInteger(t.total)) p(`Total : ${t.total} lieux trouvés ; la sélection en garde 30 au plus (palier de probabilité, puis distance)`);
+      if (t.error && t.top) p(`→ ${t.error}`);
     }
 
-    function questionBlock(t) {
-      const block = el("div", "chat-block question");
-      block.dataset.key = t.id;
-      block.append(line("user", t.utterance || t.title));
-      const places = (t.relatedIds || []).map(poiLabel).filter(Boolean);
-      if (places.length) block.append(line("place", places.join(", ")));
-      block.append(line("answer", t.status === "done" || t.status === "failed" ? t.result : "…"));
-      return block;
+    function newSelectionButton(cls) {
+      const add = el("button", cls, "+ Nouvelle sélection");
+      add.type = "button";
+      add.addEventListener("click", newSelection);
+      return add;
     }
 
-    function actionBlock(t) {
-      const block = el("div", "chat-block action");
-      block.dataset.key = t.id;
-      if (t.utterance) block.append(line("user", t.utterance));
-      let text = "…";
-      if (t.status === "done") {
-        const placed = t.kind === "locate" ? (t.addedIds || []).map(poiLabel).filter(Boolean) : [];
-        text = placed.length ? `${placed.join(", ")} → placé${placed.length > 1 ? "s" : ""} sur la carte` : t.result;
-      } else if (t.status === "failed") text = t.result;
-      block.append(line("answer", text));
-      return block;
+    function showSelection(id) {
+      openSelection = id;
+      chatInstant = true;
+      chatView = "all";
+      renderChat();
+      chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
     }
 
-    // Écriture caractère par caractère des nouvelles lignes du chat, l'une après l'autre dans l'ordre du
-    // fil (environ 30 caractères par seconde). Ce qui est déjà écrit ne se réécrit pas quand le chat se
-    // met à jour ; une ligne qui change (« Recherche en cours… » → « 5 lieux trouvés ») s'écrit à
-    // nouveau. L'historique présent au chargement, ou arrivé chat masqué, s'affiche d'un coup.
+    async function sendText() {
+      const text = chatText.value.replace(/\s+/g, " ").trim();
+      if (!text || chatPending || !openSelection) return;
+      chatText.value = "";
+      fitChatText();
+      chatPending = { id: openSelection, text };
+      renderChat();
+      chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
+      const response = await api("/api/selections/message", { id: openSelection, text }).catch(() => null);
+      chatPending = null;
+      if (!response?.ok) {
+        chatText.value = text;
+        fitChatText();
+        showVoiceStatus("Message non envoyé : vérifiez la connexion.", { error: true });
+      }
+      renderChat();
+    }
+
+    // Case d'un filtre : cochée ou décochée ; la distance se change par un message
+    function onFilterTap(sel, f) {
+      if (f.kind === "distance") {
+        chatText.value = "Plutôt à ";
+        fitChatText();
+        chatText.focus();
+        showVoiceStatus("Écris la nouvelle distance, par exemple « plutôt à 15 minutes ».");
+        return;
+      }
+      api("/api/selections/filter", { id: sel.id, filterId: f.id, enabled: !f.enabled });
+    }
+
+    // Le champ s'agrandit avec le texte (5 lignes au plus)
+    function fitChatText() {
+      chatText.style.height = "auto";
+      chatText.style.height = `${Math.min(chatText.scrollHeight, 120)}px`;
+      chatText.style.overflowY = chatText.scrollHeight > 120 ? "auto" : "hidden";
+    }
+
+    chatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      sendText();
+    });
+    chatText.addEventListener("input", fitChatText);
+    // Entrée envoie ; Maj + Entrée passe à la ligne
+    chatText.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        sendText();
+      }
+    });
+
+    const line = (cls, text) => el("p", `chat-line ${cls}`, text);
+    const selectionCount = (sel) => pois.filter((p) => p.colorIndex === sel.colorIndex && !p.special).length;
+
+    // Écriture caractère par caractère des nouvelles réponses, l'une après l'autre dans l'ordre du fil
+    // (environ 30 caractères par seconde). Ce qui est déjà écrit ne se réécrit pas ; ce que
+    // l'utilisateur a tapé s'affiche d'un coup. L'historique présent au chargement s'affiche d'un coup.
     const CHAT_TYPE_MS = 33;
     const chatTyped = new Map(); // ligne → nombre de caractères déjà écrits
     let chatTargets = [];
     let chatPrimed = false;
     let chatTimer = null;
-    const chatFresh = new Set(); // blocs dont la tâche vient de changer : seules leurs nouvelles lignes s'écrivent
+    let chatInstant = false; // prochain affichage : tout d'un coup (sélection ouverte, onglet changé)
+
+    // La ligne occupe d'emblée sa place définitive (retours à la ligne compris) : la partie pas encore
+    // écrite est là mais invisible, et les caractères se révèlent à leur place, sans que le texte bouge
+    function revealText(node, text, shown) {
+      if (shown >= text.length) {
+        node.textContent = text;
+        return;
+      }
+      const rest = el("span", "chat-unwritten", text.slice(shown));
+      node.replaceChildren(document.createTextNode(text.slice(0, shown)), rest);
+    }
 
     function applyTyping(items) {
       const targets = [];
       for (const block of items) {
         if (!block.dataset?.key) continue;
-        block.querySelectorAll(".chat-line, .chat-synth-row > span:last-child").forEach((node, i) => {
+        block.querySelectorAll(".chat-line").forEach((node, i) => {
           const text = node.textContent;
           const key = `${block.dataset.key}:${i}:${text}`;
-          if (!chatTyped.has(key)) chatTyped.set(key, chatPrimed && !chatEl.hidden && chatFresh.has(block.dataset.key) ? 0 : text.length);
-          node.textContent = text.slice(0, chatTyped.get(key));
+          const instant = !node.classList.contains("guide") || text === "…";
+          if (!chatTyped.has(key)) chatTyped.set(key, chatPrimed && !chatEl.hidden && !instant && !chatInstant ? 0 : text.length);
+          revealText(node, text, chatTyped.get(key));
           targets.push({ node, text, key });
         });
       }
@@ -4554,57 +5070,106 @@
       const follow = chatBodyEl.scrollHeight - chatBodyEl.scrollTop - chatBodyEl.clientHeight < 40;
       const n = chatTyped.get(next.key) + 1;
       chatTyped.set(next.key, n);
-      next.node.textContent = next.text.slice(0, n);
+      revealText(next.node, next.text, n);
       if (follow) chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
     }
 
-    // Empreinte d'une tâche : ce qui change à l'écran (pour la pastille « nouveau » et l'onglet suivi)
-    const chatPrint = (t) => JSON.stringify([t.status, (t.dimensions || []).map((d) => [d.status, d.value]), t.result]);
-
     function renderChat() {
       if (!chatEl) return;
-      const tasks = chatTasks();
-      // Activité : l'onglet de la tâche la plus récente qui a changé passe devant ; les autres
-      // onglets qui ont du nouveau reçoivent une pastille
-      let latest = null;
-      for (const t of tasks) {
-        const print = chatPrint(t);
-        if (chatSeen.get(t.id) === print) continue;
-        chatSeen.set(t.id, print);
-        // Le bloc de cette tâche (pour une précision : celui de la recherche d'origine) peut s'écrire
-        if (chatPrimed) for (let x = t; x; x = x.replaces ? tasks.find((y) => y.id === x.replaces) : null) chatFresh.add(x.id);
-        if (!latest || t.createdAt >= latest.createdAt) latest = t;
-        chatUnread.add(t.kind);
-      }
-      if (latest && !chatEl.hidden) chatTab = latest.kind;
-      const present = CHAT_TABS.filter((tab) => tasks.some((t) => t.kind === tab.id));
-      if (present.length && !present.some((tab) => tab.id === chatTab)) chatTab = present[0].id;
-      if (!chatEl.hidden) chatUnread.delete(chatTab);
-      chatTabsEl.replaceChildren(...present.map((tab) => {
-        const b = el("button", `chat-tab${tab.id === chatTab ? " active" : ""}`, tab.label);
-        b.type = "button";
-        if (chatUnread.has(tab.id) && tab.id !== chatTab) b.append(el("span", "chat-dot"));
-        b.addEventListener("click", () => {
-          chatTab = tab.id;
-          chatUnread.delete(tab.id);
-          renderChat();
-        });
-        return b;
-      }));
-      const mine = tasks.filter((t) => t.kind === chatTab).sort((a, b) => a.createdAt - b.createdAt);
-      const blocks = chatTab === "search" ? searchChains(mine).map(searchBlock)
-        : chatTab === "info" ? mine.map(questionBlock)
-        : mine.map(actionBlock);
-      const items = [];
-      blocks.forEach((b, i) => {
-        if (i) items.push(el("hr", "chat-sep"));
-        items.push(b);
+      const sel = selections.find((s) => s.id === openSelection);
+      if (sel) renderSelection(sel);
+      else renderSelectionList();
+    }
+
+    // Vue « liste » : les sélections, la plus récente en haut
+    function renderSelectionList() {
+      chatHeadEl.replaceChildren(el("span", "chat-head-title", "Mes sélections"));
+      chatSubEl.hidden = true;
+      chatForm.hidden = true;
+      const rows = [...selections].reverse().map((sel) => {
+        const row = el("button", "sel-row");
+        row.type = "button";
+        const dot = el("span", "sel-dot");
+        dot.style.background = taskColor(sel.colorIndex);
+        const text = el("span", "sel-text");
+        const on = sel.filters.filter((f) => f.enabled).map((f) => f.label);
+        text.append(el("span", "sel-title", sel.title), el("span", "sel-sum", on.length ? on.join(" · ") : "Aucun filtre"));
+        const n = selectionCount(sel);
+        row.append(dot, text, el("span", "sel-count", sel.busy ? "…" : `${n} resto${n > 1 ? "s" : ""}`));
+        row.addEventListener("click", () => showSelection(sel.id));
+        return row;
       });
-      if (!items.length) items.push(el("p", "chat-empty", "Parle au guide : ta demande s'affichera ici."));
+      // Gros bouton au milieu, au-dessus des sélections existantes
+      const add = newSelectionButton("chat-new big");
+      chatBodyEl.replaceChildren(add, ...(rows.length ? rows : [el("p", "chat-empty", "Crée une sélection pour chercher des restaurants.")]));
+    }
+
+    // Vue « sélection » : filtres, onglets de vue, fil des demandes, champ de saisie
+    function renderSelection(sel) {
+      const back = el("button", "chat-back", "‹");
+      back.type = "button";
+      back.setAttribute("aria-label", "Retour à mes sélections");
+      back.addEventListener("click", () => { openSelection = null; chatText.blur(); renderChat(); });
+      const dot = el("span", "sel-dot");
+      dot.style.background = taskColor(sel.colorIndex);
+      const n = selectionCount(sel);
+      // Nom de la sélection, et juste dessous « Nouvelle sélection » (toujours accessible)
+      const name = el("div", "chat-head-col");
+      name.append(el("span", "chat-head-title", sel.title), newSelectionButton("chat-new small"));
+      chatHeadEl.replaceChildren(back, dot, name, el("span", "sel-count", sel.busy ? "recherche…" : `${n} resto${n > 1 ? "s" : ""}`));
+      // Filtres : la distance d'abord
+      const chips = el("div", "filter-chips");
+      for (const f of sel.filters) {
+        const chip = el("button", `filter-chip${f.enabled ? " on" : ""}${f.kind === "distance" || f.kind === "dishmode" ? " fixed" : ""}`);
+        chip.type = "button";
+        const box = f.kind === "distance" ? "⟷" : f.kind === "dishmode" ? "⇄" : f.enabled ? "✓" : "";
+        chip.append(el("span", "filter-box", box), el("span", null, f.label));
+        chip.title = f.kind === "distance" ? "Distance : écris-en une autre pour la changer"
+          : f.kind === "dishmode" ? "Deux plats : toucher pour passer de « les deux » à « l'un ou l'autre »"
+          : f.enabled ? "Décocher ce filtre" : "Cocher ce filtre";
+        chip.disabled = sel.busy;
+        chip.addEventListener("click", () => onFilterTap(sel, f));
+        chips.append(chip);
+      }
+      const tabs = el("div", "view-tabs");
+      for (const [id, label] of VIEWS) {
+        const tab = el("button", `view-tab${chatView === id ? " active" : ""}`, label);
+        tab.type = "button";
+        tab.addEventListener("click", () => { chatView = id; chatInstant = true; renderChat(); });
+        tabs.append(tab);
+      }
+      chatSubEl.replaceChildren(...(sel.filters.length ? [chips] : []), tabs);
+      chatSubEl.hidden = false;
+      chatForm.hidden = false;
+      // Fil : chaque demande avec la couleur de son type
+      const shown = sel.messages.filter((m) => chatView === "all" || m.type === chatView || (chatView === "search" && m.pending && !m.type));
+      const blocks = shown.map((m) => {
+        const block = el("div", `chat-block t-${m.type || "pending"}`);
+        block.dataset.key = m.id;
+        const tag = el("span", "msg-type", MESSAGE_TYPES[m.type] || "…");
+        block.append(tag);
+        if (m.user) block.append(line("user", m.user));
+        else if (m.note) block.append(line("note", m.note));
+        block.append(line("guide", m.reply || "…"));
+        if (hasReflection(m)) block.append(reflectionToggle(sel, m));
+        return block;
+      });
+      if (chatPending && chatPending.id === sel.id && !sel.messages.some((m) => m.pending && m.user === chatPending.text)) {
+        const block = el("div", "chat-block t-pending");
+        block.append(el("span", "msg-type", "…"), line("user", chatPending.text), line("guide", "…"));
+        blocks.push(block);
+      }
+      if (!blocks.length) {
+        blocks.push(el("p", "chat-empty", chatView === "all"
+          ? "Décris ce que tu cherches : « un fast-food à moins de 10 minutes », « un restaurant qui sert du couscous »…"
+          : "Rien de ce type dans cette sélection."));
+      }
       const atBottom = chatBodyEl.scrollHeight - chatBodyEl.scrollTop - chatBodyEl.clientHeight < 40;
-      chatBodyEl.replaceChildren(...items);
-      applyTyping(items);
-      if (atBottom || latest) chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
+      chatBodyEl.replaceChildren(...blocks);
+      applyTyping(blocks);
+      chatInstant = false;
+      if (atBottom) chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
+      chatText.placeholder = sel.pendingQuestion === "distance" ? "Combien de minutes à pied ?" : "Écris dans cette sélection…";
     }
 
     // ---- Conversation vocale avec le guide (GPT-Live via WebRTC) ----
@@ -4658,7 +5223,6 @@
       muteBtn.hidden = state !== "active";
       if (state !== "active" || !muteBtn.innerHTML) setMuted(Boolean(voice?.muted) && state === "active");
       voiceBtn.classList.toggle("connecting", state === "connecting");
-      chatBtn.classList.toggle("idle", state !== "active"); // grisé hors conversation
       voiceBtn.classList.toggle("active", state === "active");
       if (state !== "active") voiceBtn.classList.remove("working");
       voiceBtn.setAttribute("aria-pressed", String(state === "active"));
