@@ -28,9 +28,8 @@ const CHEAP_LEVELS = ["PRICE_LEVEL_FREE", "PRICE_LEVEL_INEXPENSIVE", "PRICE_LEVE
 const DISH_MODE_QUESTION = "Les deux dans le même restaurant, ou l'un ou l'autre ?";
 const MAX_DISHES = 2;
 const DISTANCE_QUESTION = "Jusqu'à combien de minutes à pied ? Par exemple 5, 10 ou 15 minutes.";
-// Recherche par plat : rattrapage tant qu'il y a moins de 10 restaurants confirmés et moins de 60
-// restaurants affichés (confirmés ou sans information)
-const DISH_CONFIRMED_TARGET = 10;
+// Recherche par plat : un bloc de types à la fois ; l'utilisateur demande le suivant (« Continuer la
+// recherche ») tant qu'il en reste et que la sélection compte moins de 60 restaurants
 const MAX_SHOWN = 60;
 const CHECK_LOG_KEEP = 500;      // vérifications gardées pour la « Réflexion »
 // Plat « évident » pour le type principal du lieu (une pizza dans une pizzeria) : confirmé sans
@@ -330,8 +329,8 @@ export function createSelections({ apiKey, store, tools, resolvePoi, verifier, m
       }
       await loadDishProbabilities(sel);
       const summary = apply(sel);
-      // Rien à vérifier sur le web (tout est connu) : le rattrapage du plat se décide tout de suite
-      if (!sel._verifying) widen(sel);
+      // Rien à vérifier sur le web (tout est déjà tranché) : le bilan du bloc tout de suite
+      if (!sel._verifying) blockReport(sel);
       return summary;
     } finally {
       sel._busy = false;
@@ -362,23 +361,35 @@ export function createSelections({ apiKey, store, tools, resolvePoi, verifier, m
     };
     const refl = currentReflection(sel);
     if (refl) refl.search = { mode: g.dish ? "dish" : "types", trace: null };
-    sel._dishNext = null;
+    sel.dishNext = null;
+    sel.canContinue = false;
+    sel._block = null;
     sel._dishMsg = g.dish ? sel._reflecting : null;
+    let blockTypes = [];
     const task = {
       id: sel.id, title: sel.title, maxDistanceM: limitM,
       log: (text) => console.log(`[sélection ${sel.id}] ${text}`),
       // Réflexion : la recherche par plat (distribution, blocs), ou par type (famille, rangs)
-      setDishTrace: (trace) => { if (refl) refl.search = { mode: "dish", trace }; },
+      setDishTrace: (trace) => {
+        if (refl) refl.search = { mode: "dish", trace };
+        blockTypes = (trace.steps || []).map((s) => s.type);
+      },
       setTypeTrace: (trace) => { if (refl) refl.search = { mode: "types", trace, dishTrace: refl.search?.mode === "dish" ? refl.search.trace : null }; },
-      setDishProgress: ({ nextType, typeCount }) => { sel._dishNext = nextType; sel._dishTotal = typeCount; },
+      setDishProgress: ({ nextType, typeCount }) => { sel.dishNext = nextType; sel.dishTotal = typeCount; },
       ensureColor: () => sel.colorIndex,
     };
     const area = {
       anchors: [{ name: "l'utilisateur", location: position }], radius: Math.min(Math.max(limitM, 300), 10000), position, limitM,
       goal: MAX_RESULTS, keep: (c) => !removed.has(c.place.placeId), onMap: new Set(),
     };
-    const found = (g.dish && await tools.searchDish(task, g, area)) || await tools.searchTypes(task, g, area);
+    // Plat : le premier bloc seul, pour montrer des résultats tout de suite
+    const byDish = g.dish ? await tools.searchDish(task, g, area, { blocks: 1 }) : null;
+    const found = byDish || await tools.searchTypes(task, g, area);
     sel._candidates = new Map(found.filter((c) => !removed.has(c.place.placeId)).slice(0, MAX_RESULTS).map((c) => [c.place.placeId, c]));
+    if (byDish) {
+      sel.dishBlock = 1;
+      sel._block = { types: blockTypes, places: new Set(sel._candidates.keys()) };
+    }
     sel._perimeter = perimeterKey(sel);
     sel._partial = false;
   }
@@ -569,12 +580,12 @@ export function createSelections({ apiKey, store, tools, resolvePoi, verifier, m
       }
       if (!gone(sel)) store.setAnalysis(sel.id, null);
       sel._verifying = false;
-      // Fin : un résumé dans le fil
+      // Fin : le bilan du bloc de la recherche par plat, sinon un résumé
       const summary = apply(sel);
-      sel.messages.push({ id: `m${sel.nextMessage++}`, type: "search", user: null, reply: `Vérification terminée : ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`, at: Date.now(), pending: false, note: null });
-      store.touchSelections();
-      // Puis le rattrapage du plat s'il manque des restaurants confirmés
-      await widen(sel);
+      if (!blockReport(sel)) {
+        sel.messages.push({ id: `m${sel.nextMessage++}`, type: "search", user: null, reply: `Vérification terminée : ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`, at: Date.now(), pending: false, note: null });
+        store.touchSelections();
+      }
     })().catch((err) => {
       console.warn(`[sélection ${sel.id}] vérification :`, err.message);
       if (!gone(sel)) store.setAnalysis(sel.id, null);
@@ -582,27 +593,53 @@ export function createSelections({ apiKey, store, tools, resolvePoi, verifier, m
     });
   }
 
-  // ---- Rattrapage de la recherche par plat ----
-  // Moins de 10 restaurants confirmés pour le plat, moins de 60 affichés, et des types de restaurant
-  // pas encore interrogés (à 20 % au moins) : on interroge le bloc suivant ; ses lieux sont vérifiés
-  // à leur tour, puis on recommence si besoin. Seulement quand le plat guide la recherche (pas de type
-  // coché).
-  async function widen(sel) {
-    if (gone(sel)) return false;
-    const list = dishesOf(sel);
-    if (!list.length || enabledFilter(sel, "cuisine") || sel._widening || sel._dishNext == null || sel._dishNext >= sel._dishTotal) return false;
-    const shown = poisOf(sel);
-    // Restaurant qui propose « le plat » : les deux plats (« et »), au moins un (« ou »)
-    const serves = (p) => {
-      const ok = list.map((f) => sel.verdicts[p.place?.placeId]?.[plain(f.label)]?.status === "confirmed");
-      return dishModeOf(sel) === "or" ? ok.some(Boolean) : ok.every(Boolean);
-    };
-    const confirmed = shown.filter(serves).length;
-    if (confirmed >= DISH_CONFIRMED_TARGET || shown.length >= MAX_SHOWN) return false;
+  // ---- Recherche par plat, bloc par bloc ----
+  // Les restaurants du bloc qui servent le plat : les deux plats (« et »), au moins un (« ou »)
+  function serves(sel, pid) {
+    const ok = dishesOf(sel).map((f) => sel.verdicts[pid]?.[plain(f.label)]?.status === "confirmed");
+    return dishModeOf(sel) === "or" ? ok.some(Boolean) : ok.every(Boolean);
+  }
+
+  // Bilan du bloc qui vient d'être vérifié, dans le fil ; allume « Continuer la recherche » s'il reste
+  // des types à interroger et de la place. false si aucun bloc n'attendait son bilan.
+  function blockReport(sel) {
+    const block = sel._block;
+    if (!block || block.reported || sel._verifying || gone(sel)) return false;
+    block.reported = true;
+    const shown = new Set(poisOf(sel).map((p) => p.place?.placeId));
+    const ids = [...block.places];
+    const ok = ids.filter((pid) => shown.has(pid) && serves(sel, pid)).length;
+    const doubt = ids.filter((pid) => shown.has(pid) && !serves(sel, pid)).length;
+    const retired = ids.filter((pid) => !shown.has(pid)).length;
+    const left = Math.max(0, Math.ceil(((sel.dishTotal || 0) - (sel.dishNext || 0)) / 3));
+    sel.canContinue = left > 0 && shown.size < MAX_SHOWN;
+    const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
+    const parts = [
+      `${plural(ids.length, "restaurant")} trouvé${ids.length > 1 ? "s" : ""} et vérifié${ids.length > 1 ? "s" : ""}`,
+      `${ok} propose${ok > 1 ? "nt" : ""} le plat`,
+      `${doubt} à vérifier`,
+      `${plural(retired, "retiré")}`,
+    ];
+    const next = !left ? "Plus de types de restaurant à explorer."
+      : shown.size >= MAX_SHOWN ? `La sélection compte déjà ${MAX_SHOWN} restaurants.`
+      : `${plural(left, "bloc")} restant${left > 1 ? "s" : ""}.`;
+    sel.messages.push({
+      id: `m${sel.nextMessage++}`, type: "search", user: null, at: Date.now(), pending: false, note: null,
+      reply: `Bloc ${sel.dishBlock} (${block.types.join(", ") || "recherche du plat"}) : ${parts.join(" · ")}. ${next}`,
+    });
+    store.touchSelections();
+    return true;
+  }
+
+  // « Continuer la recherche » : le bloc de types suivant, puis sa vérification et son bilan
+  async function continueSearch(id) {
+    const sel = byId(id);
+    if (!sel || !sel.canContinue || !dishesOf(sel).length || enabledFilter(sel, "cuisine")) return { error: "Rien à continuer." };
     const position = store.context.position;
-    if (!position) return false;
-    sel._widening = true;
-    let again = false;
+    if (!position) return { error: "Position inconnue." };
+    sel.canContinue = false;
+    sel._busy = true;
+    store.touchSelections();
     try {
       const limitM = sel.filters.find((f) => f.kind === "distance").minutes * WALK_M_PER_MIN;
       const removed = new Set(sel.manualRemoved.map((x) => x.placeId));
@@ -610,9 +647,9 @@ export function createSelections({ apiKey, store, tools, resolvePoi, verifier, m
       const trace = { steps: [] };
       const task = {
         id: sel.id, title: sel.title, maxDistanceM: limitM,
-        log: (text) => console.log(`[sélection ${sel.id}] rattrapage : ${text}`),
+        log: (text) => console.log(`[sélection ${sel.id}] bloc suivant : ${text}`),
         setDishTrace: (t) => Object.assign(trace, t),
-        setDishProgress: ({ nextType, typeCount }) => { sel._dishNext = nextType; sel._dishTotal = typeCount; },
+        setDishProgress: ({ nextType, typeCount }) => { sel.dishNext = nextType; sel.dishTotal = typeCount; },
         ensureColor: () => sel.colorIndex,
       };
       const area = {
@@ -620,28 +657,29 @@ export function createSelections({ apiKey, store, tools, resolvePoi, verifier, m
         goal: Infinity, keep: (c) => !removed.has(c.place.placeId) && !existing.has(c.place.placeId), onMap: existing,
       };
       const g = await dishSearchParams(sel);
-      const found = await tools.searchDish(task, g, area, { fromType: sel._dishNext, blocks: 1, withName: false }) || [];
-      const added = found.slice(0, Math.max(0, MAX_SHOWN - shown.length));
+      const found = await tools.searchDish(task, g, area, { fromType: sel.dishNext || 0, blocks: 1, withName: false }) || [];
+      const added = found.slice(0, Math.max(0, MAX_SHOWN - poisOf(sel).length));
+      sel._candidates ||= new Map();
       for (const c of added) sel._candidates.set(c.place.placeId, c);
-      const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
-      const reason = `${plural(confirmed, "restaurant")} confirmé${confirmed > 1 ? "s" : ""} (moins de ${DISH_CONFIRMED_TARGET}), ${plural(shown.length, "affiché")}`;
-      sel._reflections?.get(sel._dishMsg)?.widenings.push({ reason, trace, added: added.length });
-      const types = trace.steps.map((s) => s.type);
+      sel.dishBlock = (sel.dishBlock || 1) + 1;
+      sel._block = { types: trace.steps.map((s) => s.type), places: new Set(added.map((c) => c.place.placeId)) };
+      sel._reflections?.get(sel._dishMsg)?.widenings.push({ reason: `bloc ${sel.dishBlock}, à ta demande`, trace, added: added.length });
       sel.messages.push({
-        id: `m${sel.nextMessage++}`, type: "search", user: null, at: Date.now(), pending: false, note: "Rattrapage",
-        reply: `Seulement ${plural(confirmed, "restaurant")} confirmé${confirmed > 1 ? "s" : ""} : j'élargis à ${types.join(", ") || "d'autres types"} (${added.length} nouveau${added.length > 1 ? "x" : ""} lieu${added.length > 1 ? "x" : ""}).`,
+        id: `m${sel.nextMessage++}`, type: "search", user: null, at: Date.now(), pending: false, note: "Continuer la recherche",
+        reply: `Bloc ${sel.dishBlock} : ${sel._block.types.join(", ")} → ${added.length} nouveau${added.length > 1 ? "x" : ""} restaurant${added.length > 1 ? "s" : ""}${added.length ? ", vérification en cours" : ""}.`,
       });
-      store.touchSelections();
+      await loadDishProbabilities(sel);
       apply(sel);
-      // Rien de nouveau à vérifier : le bloc suivant tout de suite
-      again = !added.length || !sel._verifying;
+      if (!sel._verifying) blockReport(sel); // rien à vérifier sur le web : bilan tout de suite
+      return { ok: true };
     } catch (err) {
-      console.warn(`[sélection ${sel.id}] rattrapage :`, err.message);
-      return false;
+      console.warn(`[sélection ${sel.id}] bloc suivant :`, err.message);
+      sel.canContinue = true;
+      return { error: "La recherche n'a pas pu continuer." };
     } finally {
-      sel._widening = false;
+      sel._busy = false;
+      store.touchSelections();
     }
-    return again ? widen(sel) : true;
   }
 
   // ---- Ajout d'un restaurant nommé ----
@@ -788,5 +826,5 @@ export function createSelections({ apiKey, store, tools, resolvePoi, verifier, m
 
   const outputText = (data) => (data.output || []).filter((o) => o.type === "message").flatMap((o) => o.content || []).map((c) => c.text || "").join("");
 
-  return { create, message, setFilter, removeByUser, restore, resume, byId, reflection };
+  return { create, message, setFilter, removeByUser, restore, resume, byId, reflection, continueSearch };
 }

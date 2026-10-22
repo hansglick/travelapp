@@ -84,6 +84,11 @@
     .voice-row #voice-btn, .voice-row #mute-btn { display: none; }
     .voice-row #chat-btn { grid-column: 2; justify-self: center; width: 60px; height: 60px; }
     .voice-row #chat-btn svg { width: 28px; height: 28px; }
+    /* « Continuer la recherche » (recherche par plat, bloc suivant) : jaune, à droite du bouton chat */
+    #continue-btn { grid-column: 3; grid-row: 1; justify-self: start; max-width: 100%; padding: 7px 12px; border: 0; border-radius: 16px; background: #f5c518; color: #1a1a1a; font: inherit; font-size: 0.78rem; font-weight: 700; line-height: 1.15; text-align: left; cursor: pointer; box-shadow: 0 0 12px rgba(245, 197, 24, 0.45); }
+    #continue-btn[hidden] { display: none; }
+    .continue-search { display: block; margin: 4px auto 14px; padding: 10px 22px; border: 0; border-radius: 22px; background: #f5c518; color: #1a1a1a; font: inherit; font-size: 0.9rem; font-weight: 700; cursor: pointer; box-shadow: 0 0 12px rgba(245, 197, 24, 0.4); }
+    .continue-search:disabled { opacity: 0.5; cursor: default; }
 
     /* Chat par-dessus la carte : fond noir légèrement transparent, volet qui descend à l'ouverture */
     #chat {
@@ -92,6 +97,20 @@
       clip-path: inset(0 0 100% 0); transition: clip-path 0.38s ease;
     }
     #chat.open { clip-path: inset(0 0 0 0); }
+    /* Bas du chat : liseré jaune (un toucher le replie) ; chat replié, il reste en haut de la carte (le
+       chat vit encore) */
+    #chat-fold {
+      flex: none; display: flex; align-items: center; justify-content: center; height: 14px; padding: 0; border: 0;
+      background: #f5c518; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    #chat-fold span { width: 36px; height: 4px; border-radius: 2px; background: rgba(0, 0, 0, 0.35); }
+    #chat-peek {
+      position: fixed; z-index: 29; height: 14px; padding: 0; border: 0; border-radius: 0 0 10px 10px;
+      background: #f5c518; box-shadow: 0 2px 10px rgba(245, 197, 24, 0.55); cursor: pointer;
+      display: flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent;
+    }
+    #chat-peek[hidden] { display: none; }
+    #chat-peek span { width: 36px; height: 4px; border-radius: 2px; background: rgba(0, 0, 0, 0.35); }
     #chat[hidden] { display: none; }
     #chat-head { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 0 12px; border-bottom: 1px solid #2a2a2a; }
     #chat-tabs { flex: 1; display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; }
@@ -402,6 +421,7 @@
     /* Nom des lieux sur la carte (case « Labels » de la légende) : couleur du groupe, contour blanc */
     .poi-map-label {
       font-weight: 800 !important;
+      white-space: pre; text-align: center; line-height: 1.15; /* nom, puis temps de marche à la ligne */
       text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 3px #fff;
     }
 
@@ -1094,11 +1114,16 @@
         <textarea id="chat-text" rows="1" maxlength="500" placeholder="Écrivez au guide…" aria-label="Message au guide"></textarea>
         <button id="chat-send" type="submit" aria-label="Envoyer"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 12l16-8-6 16-3-7z" fill="currentColor"/></svg></button>
       </form>
+      <!-- Liseré jaune du bas : un toucher replie le chat -->
+      <button id="chat-fold" type="button" aria-label="Replier la conversation"><span></span></button>
     </section>
+    <!-- Chat replié : liseré jaune en haut de la carte ; un toucher le redéplie -->
+    <button id="chat-peek" type="button" hidden aria-label="Déplier la conversation"><span></span></button>
     <div id="list-handle">
       <div class="voice-row">
       <button id="chat-btn" type="button" aria-label="Mes sélections de restaurants"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H10l-5 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7.5 9.5h9M7.5 13h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
       <button id="mute-btn" type="button" aria-label="Couper le micro" aria-pressed="false" hidden></button>
+      <button id="continue-btn" type="button" hidden>Continuer</button>
       <button id="voice-btn" aria-label="Parler au guide" aria-pressed="false">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M3 9v6h4l5 5V4L7 9z" fill="currentColor"/>
@@ -2280,6 +2305,7 @@
           poi.check = p.check || null;
           poi.walk = p.walk || null;
           poi.props = poiProps(p);
+          updateMarkerVisibility(poi); // temps de marche arrivé : il s'ajoute au label
         }
         // Étape figée ou libérée (par le guide, ou depuis cet écran)
         if (JSON.stringify(poi.pin || null) !== JSON.stringify(p.pin || null)) {
@@ -2355,9 +2381,12 @@
     function updateMarkerVisibility(poi) {
       const show = poi.included && (poi.special === "back" || !hiddenGroups.has(groupKeyOf(poi)));
       if (Boolean(poi.marker.getMap()) !== show) poi.marker.setMap(show ? map : null);
-      // Nom du lieu sous son icône, de la couleur de son groupe (15 caractères au plus)
+      // Nom du lieu sous son icône, de la couleur de son groupe (15 caractères au plus), et à la ligne le
+      // temps de marche (« 6 min à pied »)
       const name = poi.props.name || "";
-      const text = showLabels ? (name.length > LABEL_MAX ? `${name.slice(0, LABEL_MAX).trimEnd()}…` : name) : "";
+      const short = name.length > LABEL_MAX ? `${name.slice(0, LABEL_MAX).trimEnd()}…` : name;
+      const walk = walkLabel(poi.props.walk);
+      const text = showLabels ? (walk ? `${short}\n${walk}` : short) : "";
       const key = `${text}|${poi.color}`;
       if (poi.labelKey === key) return;
       poi.labelKey = key;
@@ -3754,7 +3783,7 @@
     }
 
     // Sous la carte : glisser vers le haut (hors pastille du guide) ouvre la liste
-    onVerticalSwipe(document.getElementById("list-handle"), { up: openPoiList }, "#voice-btn, #mute-btn, #chat-btn");
+    onVerticalSwipe(document.getElementById("list-handle"), { up: openPoiList }, "#voice-btn, #mute-btn, #chat-btn, #continue-btn");
 
     // ---- Effacer tous les lieux (avec confirmation) ----
     const eraseBtn = document.getElementById("erase-btn");
@@ -4785,6 +4814,7 @@
 
     function openChat() {
       placeChat();
+      chatPeek.hidden = true;
       chatInstant = true;
       chatEl.hidden = false;
       requestAnimationFrame(() => chatEl.classList.add("open"));
@@ -4794,7 +4824,11 @@
     function closeChat() {
       chatEl.classList.remove("open");
       chatText.blur();
-      setTimeout(() => { if (!chatEl.classList.contains("open")) chatEl.hidden = true; }, 380);
+      setTimeout(() => {
+        if (chatEl.classList.contains("open")) return;
+        chatEl.hidden = true;
+        updatePeek();
+      }, 380);
     }
 
     document.getElementById("chat-close").addEventListener("click", closeChat);
@@ -4814,6 +4848,9 @@
     // État du serveur : sélections, filtres, fils de demandes, restaurants retirés
     function onSelections(list) {
       selections = list || [];
+      updateContinueButton();
+      watchBlockReports();
+      updatePeek();
       refreshReflections();
       if (openSelection && !selections.some((s) => s.id === openSelection)) openSelection = null;
       renderChat();
@@ -4913,7 +4950,7 @@
       } else p("Recherche en cours…");
       if (s?.kept) p(`(${s.kept})`);
       (data.widenings || []).forEach((w, i) => {
-        title(`Rattrapage ${i + 1} : ${w.reason}`);
+        title(`Suite de la recherche : ${w.reason}`);
         dishTrace(w.trace, p, true);
         p(`→ ${w.added} nouveau${w.added > 1 ? "x" : ""} lieu${w.added > 1 ? "x" : ""} ajouté${w.added > 1 ? "s" : ""} à la sélection`);
       });
@@ -4954,6 +4991,92 @@
       if (t.error && t.top) p(`→ ${t.error}`);
     }
 
+    // « Continuer la recherche » : le bloc de types suivant de la sélection
+    function continueButton(sel, cls, label) {
+      const button = el("button", cls, label);
+      button.type = "button";
+      button.addEventListener("click", () => continueSearch(sel, button));
+      return button;
+    }
+
+    async function continueSearch(sel, button) {
+      if (button) button.disabled = true;
+      showVoiceStatus(`« ${sel.title} » : recherche du bloc suivant…`);
+      const response = await api("/api/selections/continue", { id: sel.id });
+      if (!response?.ok) {
+        if (button) button.disabled = false;
+        showVoiceStatus("La recherche n'a pas pu continuer.", { error: true });
+      }
+    }
+
+    const continueLabel = (sel) => `Continuer la recherche ? (encore ${sel.blocksLeft} bloc${sel.blocksLeft > 1 ? "s" : ""})`;
+
+    // Sous la carte : le bouton jaune de la sélection ouverte (sans sélection ouverte : la plus récente
+    // qui peut continuer)
+    const continueBtn = document.getElementById("continue-btn");
+    function updateContinueButton() {
+      const sel = openSelection ? selections.find((s) => s.id === openSelection && s.canContinue) : [...selections].reverse().find((s) => s.canContinue);
+      continueBtn.hidden = !sel;
+      if (!sel) return;
+      continueBtn.textContent = continueLabel(sel);
+      continueBtn.title = `« ${sel.title} » : bloc ${(sel.dishBlock || 1) + 1}`;
+      continueBtn.onclick = () => continueSearch(sel, null);
+    }
+
+    // ---- Fin d'une recherche (ou d'un bloc de la recherche par plat) : place à la carte ----
+    // Le chat se relève (liseré jaune en haut de la carte), la carte ne montre que la sélection, avec le
+    // nom des restaurants, cadrée sur eux ; le bouton jaune propose le bloc suivant.
+    const chatPeek = document.getElementById("chat-peek");
+    const seenReports = new Set();
+    let reportsPrimed = false;
+
+    function placePeek() {
+      const r = document.getElementById("map").getBoundingClientRect();
+      Object.assign(chatPeek.style, { top: `${r.top}px`, left: `${r.left + 12}px`, width: `${Math.max(0, r.width - 24)}px` });
+    }
+
+    function updatePeek() {
+      chatPeek.hidden = !chatEl.hidden || !selections.length;
+      if (!chatPeek.hidden) placePeek();
+    }
+    chatPeek.addEventListener("click", openChat);
+    document.getElementById("chat-fold").addEventListener("click", closeChat);
+    window.addEventListener("resize", updatePeek);
+
+    // Recherche aboutie : le résumé d'une recherche sans vérification, la fin des vérifications, ou le
+    // bilan d'un bloc (pas une question, pas une recherche encore en vérification, pas une sélection vide)
+    const finished = (m) => m.type === "search" && !m.pending && (
+      /^Bloc \d+ \(/.test(m.reply || "") || /^Vérification terminée/.test(m.reply || "")
+      || (/restaurants? dans la sélection/.test(m.reply || "") && !/vérification en cours/.test(m.reply || "")));
+
+    function watchBlockReports() {
+      for (const sel of selections) {
+        for (const m of sel.messages) {
+          if (!finished(m) || seenReports.has(`${sel.id}|${m.id}`)) continue;
+          seenReports.add(`${sel.id}|${m.id}`);
+          if (reportsPrimed && (sel.id === openSelection || chatEl.hidden)) showSelectionOnMap(sel);
+        }
+      }
+      reportsPrimed = true;
+    }
+
+    function showSelectionOnMap(sel) {
+      const mine = pois.filter((p) => p.colorIndex === sel.colorIndex && p.included && p.special !== "back");
+      setGroupsHidden(() => {
+        showLabels = true;
+        hiddenGroups.clear();
+        groupsOf(pois.filter((p) => p.included && p.special !== "back")).forEach((key) => { if (key !== sel.colorIndex) hiddenGroups.add(key); });
+      });
+      if (mine.length) {
+        const bounds = new google.maps.LatLngBounds();
+        mine.forEach((p) => bounds.extend(p.position));
+        if (userMarker) bounds.extend(userMarker.getPosition());
+        // Plus de marge en bas : les labels (nom, puis temps de marche) sont sous les icônes
+        map.fitBounds(bounds, { top: MAP_PADDING, left: MAP_PADDING, right: MAP_PADDING, bottom: MAP_PADDING + 40 });
+      }
+      closeChat();
+    }
+
     function newSelectionButton(cls) {
       const add = el("button", cls, "+ Nouvelle sélection");
       add.type = "button";
@@ -4964,6 +5087,7 @@
     function showSelection(id) {
       openSelection = id;
       chatInstant = true;
+      updateContinueButton();
       chatView = "all";
       renderChat();
       chatBodyEl.scrollTop = chatBodyEl.scrollHeight;
@@ -5154,6 +5278,8 @@
         if (hasReflection(m)) block.append(reflectionToggle(sel, m));
         return block;
       });
+      // Recherche par plat : le bloc suivant, à la demande
+      if (sel.canContinue) blocks.push(continueButton(sel, "continue-search", continueLabel(sel)));
       if (chatPending && chatPending.id === sel.id && !sel.messages.some((m) => m.pending && m.user === chatPending.text)) {
         const block = el("div", "chat-block t-pending");
         block.append(el("span", "msg-type", "…"), line("user", chatPending.text), line("guide", "…"));

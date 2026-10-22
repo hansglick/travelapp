@@ -279,6 +279,14 @@ const routes = {
     json(res, result.error ? 404 : 200, result);
   },
 
+  // « Continuer la recherche » : le bloc de types suivant d'une recherche par plat
+  "POST /api/selections/continue": async (req, res, ws) => {
+    const { id } = await readJson(req);
+    if (typeof id !== "string") return json(res, 400, { error: "Sélection manquante." });
+    const result = await ws.selections.continueSearch(id);
+    json(res, result.error ? 409 : 200, result);
+  },
+
   // « Réflexion » d'une demande de recherche : la logique suivie (en mémoire seulement)
   "GET /api/selections/reflection": (req, res, ws) => {
     const params = new URL(req.url, "http://localhost").searchParams;

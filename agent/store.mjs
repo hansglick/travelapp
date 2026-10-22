@@ -248,6 +248,8 @@ export class PoiStore extends EventEmitter {
         id: s.id, title: s.title, colorIndex: s.colorIndex, createdAt: s.createdAt, filters: s.filters,
         messages: s.messages, pendingQuestion: s.pendingQuestion || null, busy: Boolean(s._busy),
         manualIds: (s.manualAdds || []).map((m) => m.placeId), removed: s._removed || [],
+        canContinue: Boolean(s.canContinue && !s._busy && !s._verifying), dishBlock: s.dishBlock || null,
+        blocksLeft: s.dishTotal != null && s.dishNext != null ? Math.max(0, Math.ceil((s.dishTotal - s.dishNext) / 3)) : 0,
       })),
       // La page doit renvoyer son ordre pour renuméroter (demande en cours ou numéro manquant)
       renumber_pending: this.renumberPending ||

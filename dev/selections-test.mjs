@@ -39,7 +39,12 @@ function show(s, id) {
 
 const { id } = await post("/api/selections", {});
 for (const text of JSON.parse(process.argv[2] || "[]")) {
-  if (text.startsWith("!")) {
+  if (text === "+") {
+    // « + » : bouton « Continuer la recherche » (attend qu'il soit allumé, 5 min au plus)
+    for (let i = 0; i < 60 && !(await state()).selections.find((x) => x.id === id).canContinue; i++) await new Promise((r) => setTimeout(r, 5000));
+    console.log("\n>>> Continuer la recherche");
+    console.log(await post("/api/selections/continue", { id }));
+  } else if (text.startsWith("!")) {
     // « !Gyros » : décoche (ou recoche) le filtre de ce nom
     const sel = (await state()).selections.find((x) => x.id === id);
     const f = sel.filters.find((x) => x.label === text.slice(1));
